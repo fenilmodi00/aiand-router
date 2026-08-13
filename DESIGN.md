@@ -18,10 +18,10 @@ The product is the router. A thin flashlight agent is a demo client, not the del
 | Who spends | One person. Every paid call uses the request cache |
 | Models | All 9 in the registry. Policy is not “highest AA” |
 | Index | Artificial Analysis Intelligence Index as prior. Label `source: artificial_analysis`, `measured_on: not_aiand`. Overwrite only where the 3×5 cache has data |
-| Policy | Phase sets a quality bar. Cheapest eligible model whose index ≥ bar. K3 only if bar is high or `x-routing-effort: max` |
+| Policy | Hard constraints (including `latency_limit_ms` / `x-latency-limit`). Then predicted success ≥ phase bar. Medium/high: pick max Pioneer score. Low: cheapest. Max: strongest AA. Max-regret still drops models far behind the best when the bar is ≥ 50. K3 only if bar is high or `x-routing-effort: max` |
 | Client model | `router/auto`. Optional `x-allowed-models`, `x-routing-effort`, `x-agent-phase` |
 | Auth | Gateway holds `AIAND_API_KEY`. Clients send `ROUTER_API_KEY` |
-| Phases | `discover`, `plan`, `edit`, `tool`, `debug`, `summarize` |
+| Phases | Draft set is first-class: `intent`, `repository_discovery`, `repository_summary`, `planning`, `code_generation`, `code_edit`, `tool_call`, `test_execution`, `test_failure_analysis`, `debugging`, `refactoring`, `security_review`, `final_summary`. Flashlight short names (`discover`, `plan`, `edit`, `tool`, `debug`, `summarize`) stay valid. Missing phase is normal. |
 | Third-party | Missing phase is normal. Heuristics from tools / messages |
 | Escalate | Empty, timeout, rate limit, invalid tool JSON. Flashlight may POST structured test outcome |
 | Dashboard | One HTML page over JSONL (later) |

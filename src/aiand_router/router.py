@@ -9,23 +9,46 @@ from typing import Any
 
 import yaml
 
-PHASES = ("discover", "plan", "edit", "tool", "debug", "summarize")
+SHORT_PHASES = ("discover", "plan", "edit", "tool", "debug", "summarize")
+DRAFT_PHASES = (
+    "intent",
+    "repository_discovery",
+    "repository_summary",
+    "planning",
+    "code_generation",
+    "code_edit",
+    "tool_call",
+    "test_execution",
+    "test_failure_analysis",
+    "debugging",
+    "refactoring",
+    "security_review",
+    "final_summary",
+)
+PHASES = SHORT_PHASES + DRAFT_PHASES
 VIRTUAL_MODELS = {"router/auto", "aiand-router", "auto"}
-PHASE_ALIASES = {
-    "intent": "plan",
-    "planning": "plan",
+PHASE_FAMILY = {
+    "discover": "discover",
     "repository_discovery": "discover",
     "repository_summary": "discover",
+    "plan": "plan",
+    "intent": "plan",
+    "planning": "plan",
+    "edit": "edit",
     "code_generation": "edit",
     "code_edit": "edit",
     "refactoring": "edit",
-    "security_review": "edit",
+    "tool": "tool",
     "tool_call": "tool",
     "test_execution": "tool",
-    "test_failure_analysis": "debug",
+    "debug": "debug",
     "debugging": "debug",
+    "test_failure_analysis": "debug",
+    "summarize": "summarize",
     "final_summary": "summarize",
+    "security_review": "plan",
 }
+DEBUG_PHASES = {"debug", "debugging", "test_failure_analysis"}
 
 _TOOL_PHASE = {
     "read": "discover",
@@ -63,6 +86,9 @@ class Model:
     aa_source: str
     measured_on: str
     measured_success: float | None
+    latency_ms: float
+    health: float
+    priors: dict[str, float] | None
 
     @property
     def quality(self) -> float:
@@ -111,6 +137,9 @@ def load_models(cfg: dict[str, Any]) -> list[Model]:
                 aa_source=row.get("aa_source", "unknown"),
                 measured_on=row.get("measured_on", "unknown"),
                 measured_success=row.get("measured_success"),
+                latency_ms=float(row.get("latency_ms") or 800),
+                health=float(row.get("health") or 1.0),
+                priors=row.get("priors"),
             )
         )
     return out
@@ -126,15 +155,17 @@ def detect_phase(
     last_outcome: dict[str, Any] | None = None,
 ) -> str:
     raw = (headers.get("x-agent-phase") or "").strip().lower()
-    mapped = PHASE_ALIASES.get(raw, raw)
-    if mapped in PHASES:
-        if mapped == "tool" and last_outcome and last_outcome.get("tests_passed") is False:
-            return "debug"
-        if mapped == "tool":
+    if raw in PHASES:
+        if last_outcome and last_outcome.get("tests_passed") is False:
+            if raw in {"tool", "debug"}:
+                return "debug"
+            if raw in {"tool_call", "test_execution", "debugging", "test_failure_analysis"}:
+                return "test_failure_analysis"
+        if raw in {"tool", "tool_call", "test_execution"}:
             blob = _text((body.get("messages") or [{}])[-1].get("content")).lower()
             if re.search(r"\b(failed|error|traceback|assertionerror|pytest|not ok)\b", blob):
-                return "debug"
-        return mapped
+                return "debug" if raw == "tool" else "test_failure_analysis"
+        return raw
 
     tools = body.get("tools") or []
     names = []
@@ -201,9 +232,9 @@ def eligible_models(
     needs_json: bool = False,
     streaming: bool = False,
     max_tokens: int | None = None,
+    latency_limit_ms: float | None = None,
 ) -> tuple[float, list[Model]]:
-    thresholds = cfg.get("phase_threshold") or {}
-    threshold = float(thresholds.get(phase, 40))
+    threshold = _phase_bar(cfg, phase)
     if effort == "low":
         threshold = 0
     elif effort == "high":
@@ -228,6 +259,8 @@ def eligible_models(
         if tokens > m.context_window:
             continue
         if max_tokens is not None and m.max_output_tokens and max_tokens > int(m.max_output_tokens):
+            continue
+        if latency_limit_ms and m.latency_ms > latency_limit_ms:
             continue
         if m.aa_index is None:
             continue
@@ -271,6 +304,7 @@ def select_model(
     needs_json: bool = False,
     streaming: bool = False,
     max_tokens: int | None = None,
+    latency_limit_ms: float | None = None,
 ) -> Decision:
     threshold, eligible = eligible_models(
         cfg,
@@ -285,21 +319,80 @@ def select_model(
         needs_json=needs_json,
         streaming=streaming,
         max_tokens=max_tokens,
+        latency_limit_ms=latency_limit_ms,
     )
     if not eligible:
         return fallback_decision(cfg, models, phase, threshold)
-    eligible.sort(key=lambda m: (m.unit_cost, -m.quality))
+    max_regret = 0.0 if effort == "low" else float(cfg.get("max_regret") or 0)
+    best = max(eligible, key=lambda m: m.quality)
+    if max_regret > 0 and threshold >= 50:
+        floor = best.quality - max_regret
+        close = [m for m in eligible if m.quality >= floor]
+        if close:
+            eligible = close
+            best = max(eligible, key=lambda m: m.quality)
+    scores = {m.id: pioneer_score(m, phase, eligible) for m in eligible}
+    if effort == "low":
+        eligible.sort(key=lambda m: (m.unit_cost, -m.quality))
+    elif effort == "max":
+        eligible.sort(key=lambda m: (-m.quality, -scores[m.id], m.unit_cost))
+    else:
+        eligible.sort(key=lambda m: (-scores[m.id], -m.quality, m.unit_cost))
     chosen = eligible[0]
+    score = scores[chosen.id]
+    regret = best.quality - chosen.quality
     return Decision(
         model=chosen,
         phase=phase,
         threshold=threshold,
         reason=(
-            f"phase={phase} bar={threshold} picked {chosen.id} "
-            f"(aa={chosen.quality:g}, ${chosen.unit_cost:.2f}/1M blend) "
+            f"phase={phase} bar={threshold} score={score:.2f} regret={regret:g} "
+            f"picked {chosen.id} (aa={chosen.quality:g}, ${chosen.unit_cost:.2f}/1M blend) "
             f"source={chosen.aa_source}/{chosen.measured_on}"
         ),
         candidates=[m.id for m in eligible],
+    )
+
+
+def _phase_bar(cfg: dict[str, Any], phase: str) -> float:
+    thresholds = cfg.get("phase_threshold") or {}
+    if phase in thresholds:
+        return float(thresholds[phase])
+    family = PHASE_FAMILY.get(phase)
+    if family and family in thresholds:
+        return float(thresholds[family])
+    return 40.0
+
+
+def predicted_success(model: Model) -> float:
+    return model.quality / 100.0
+
+
+def capability_match(model: Model, phase: str) -> float:
+    priors = model.priors or {}
+    if phase in priors:
+        return float(priors[phase])
+    family = PHASE_FAMILY.get(phase)
+    if family and family in priors:
+        return float(priors[family])
+    return predicted_success(model)
+
+
+def pioneer_score(model: Model, phase: str, eligible: list[Model]) -> float:
+    ps = predicted_success(model)
+    cap = capability_match(model, phase)
+    tool_rel = 1.0 if model.supports_tools else 0.5
+    lat = 1.0 / (1.0 + model.latency_ms / 1000.0)
+    costs = [m.unit_cost for m in eligible] or [1.0]
+    max_c = max(costs) or 1.0
+    norm_c = 0.0 if max_c == 0 else model.unit_cost / max_c
+    return (
+        0.40 * ps
+        + 0.20 * cap
+        + 0.15 * tool_rel
+        + 0.10 * lat
+        + 0.10 * model.health
+        - 0.05 * norm_c
     )
 
 

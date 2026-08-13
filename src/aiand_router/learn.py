@@ -37,6 +37,7 @@ def learned_select(
     needs_json: bool = False,
     streaming: bool = False,
     max_tokens: int | None = None,
+    latency_limit_ms: float | None = None,
 ) -> Decision:
     # ponytail: untrained stub — highest AA among eligible; no embeddings.
     threshold, eligible = eligible_models(
@@ -52,6 +53,7 @@ def learned_select(
         needs_json=needs_json,
         streaming=streaming,
         max_tokens=max_tokens,
+        latency_limit_ms=latency_limit_ms,
     )
     if not eligible:
         return fallback_decision(cfg, models, phase, threshold, learned=True)

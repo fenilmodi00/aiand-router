@@ -91,10 +91,10 @@ Judges see a recorded run plus a tiny live playground, and a single HTML replay 
 
 - The product is a FastAPI OpenAI-compatible gateway. The flashlight agent is a client of that gateway, not the other way around.
 - Virtual model ids treated as “auto” are `router/auto`, `aiand-router`, and `auto`. Any other id that exists in the registry is a pin (used by eval baselines).
-- Six phases only: `discover`, `plan`, `edit`, `tool`, `debug`, `summarize`. Fourteen-phase taxonomies are rejected.
-- Phase detection order: `x-agent-phase` if it is one of the six; else heuristics on recent tool names, tool output, and last user text; else `edit` if tools are present, else `plan`. Unknown phase headers are ignored, not errors.
-- Quality is `measured_success * 100` when set, otherwise the AA index. Models with a null AA index are ineligible for auto-select.
-- Policy: compute a numeric bar from phase + effort; drop models that fail hard constraints; drop models at or above the premium AA floor unless effort is `max` or the bar itself is at that floor; pick the lowest blended unit cost, breaking ties by higher quality.
+- Phases: Draft names are first-class (`intent`, `repository_discovery`, `repository_summary`, `planning`, `code_generation`, `code_edit`, `tool_call`, `test_execution`, `test_failure_analysis`, `debugging`, `refactoring`, `security_review`, `final_summary`). Flashlight short names (`discover`, `plan`, `edit`, `tool`, `debug`, `summarize`) stay valid. Unknown headers are ignored, not errors.
+- Phase detection order: `x-agent-phase` if it is a known phase; else heuristics on recent tool names, tool output, and last user text; else `edit` if tools are present, else `plan`.
+- Quality is `measured_success * 100` when set, otherwise the AA index (predicted success prior). Models with a null AA index are ineligible for auto-select.
+- Policy: hard constraints (tools/JSON/streaming/context/max output/budget/AA/premium floor/`latency_limit_ms` or `x-latency-limit`), then predicted success ≥ phase bar. Medium/high pick max Pioneer score; low is cheapest; max is strongest AA. Max-regret still drops far-behind models when the bar is ≥ 50. Pioneer score is in the routing reason.
 - Effort mapping: `low` sets bar to 0; `medium` uses the phase bar; `high` raises the bar to at least 50; `max` raises the bar to the premium floor (default 58).
 - Default phase bars (from the prototype registry): discover 35, plan 50, edit 40, tool 38, debug 50, summarize 24. These are configuration, not code constants.
 - Blended unit cost from the prototype: `0.4 * input_per_1m + 0.6 * output_per_1m`.
@@ -121,7 +121,7 @@ Decision:
   model, phase, threshold, reason, candidates[]
 
 select_model(...) -> Decision
-  eligible.sort(key=lambda m: (m.unit_cost, -m.quality))
+  # medium/high: pioneer score; low: unit_cost; max: quality
   chosen = eligible[0]
 ```
 

@@ -13,9 +13,9 @@ FastAPI  /v1/chat/completions  /v1/models  /health  /replay
 aiand  Authorization: AIAND_API_KEY
 ```
 
-Per-step routing uses six phases: `discover`, `plan`, `edit`, `tool`, `debug`, `summarize`. Draft names (`planning`, `code_generation`, …) alias onto those six. Missing `x-agent-phase` is normal; heuristics fill in.
+Per-step routing uses the Draft phase set (`planning`, `code_generation`, `security_review`, …) plus flashlight short names (`discover`, `plan`, `edit`, `tool`, `debug`, `summarize`). Missing `x-agent-phase` is normal; heuristics fill in.
 
-Rules selection: filter enabled / allow-list / tools / JSON / streaming / context / max output / budget / AA present / premium floor, then cheapest blended `$/1M`. Learned selection shares that eligible set and stays dark unless a cache comparison says it won.
+Rules selection: hard constraints (including latency limit), then predicted-success ≥ phase bar, then max Pioneer score (medium/high). `effort=low` is cheap-first; `max` is strongest AA. Learned selection shares that eligible set and stays dark unless a cache comparison says it won.
 
 Tests drive the ASGI app with a fake aiand upstream. CI never calls the provider. Opt-in smoke (`AIAND_SMOKE=1`) is the only live path.
 

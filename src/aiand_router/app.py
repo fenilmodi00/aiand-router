@@ -16,6 +16,7 @@ from .cache import RequestCache, request_cache_key
 from .learn import learned_enabled, learned_select
 from .provider import HttpAiandProvider
 from .router import (
+    DEBUG_PHASES,
     VIRTUAL_MODELS,
     Decision,
     SpendLog,
@@ -186,10 +187,12 @@ def create_app(
             )
         else:
             select_cfg = cfg
-            if phase == "debug" and last_outcome.get("tests_passed") is False:
+            if phase in DEBUG_PHASES and last_outcome.get("tests_passed") is False:
                 select_cfg = dict(cfg)
                 thresholds = dict(cfg.get("phase_threshold") or {})
-                thresholds["debug"] = float(cfg.get("debug_fail_threshold") or 53)
+                bump = float(cfg.get("debug_fail_threshold") or 53)
+                for name in DEBUG_PHASES:
+                    thresholds[name] = bump
                 select_cfg["phase_threshold"] = thresholds
             picker = learned_select if learned_enabled(flag_path) else select_model
             decision = picker(
@@ -205,6 +208,7 @@ def create_app(
                 needs_json=needs_json,
                 streaming=bool(body.get("stream")),
                 max_tokens=req_max_i,
+                latency_limit_ms=_latency_limit(cfg, headers),
             )
 
         meta = {
@@ -349,6 +353,17 @@ async def _call_provider(upstream: Any, body: dict[str, Any]) -> dict[str, Any]:
         return await upstream.complete(body)
     except httpx.TimeoutException:
         return {"status": 408, "json": {"error": {"message": "upstream timeout"}}}
+
+
+def _latency_limit(cfg: dict[str, Any], headers: dict[str, str]) -> float | None:
+    raw = headers.get("x-latency-limit") or cfg.get("latency_limit_ms") or os.getenv("LATENCY_LIMIT_MS")
+    if raw in (None, "", 0, "0"):
+        return None
+    try:
+        limit = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return limit if limit > 0 else None
 
 
 def _redact(row: dict[str, Any], keys: list[str] | None = None) -> dict[str, Any]:

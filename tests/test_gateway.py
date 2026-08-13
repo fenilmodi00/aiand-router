@@ -85,7 +85,7 @@ def test_budget_exhausted_returns_429_without_calling_provider(tmp_path):
     assert provider.calls == []
 
 
-def test_summarize_phase_forwards_qwen(tmp_path):
+def test_summarize_phase_forwards_flash_on_pioneer_score(tmp_path):
     client, provider = _client(tmp_path)
     response = client.post(
         "/v1/chat/completions",
@@ -93,9 +93,10 @@ def test_summarize_phase_forwards_qwen(tmp_path):
         headers={**AUTH, "x-agent-phase": "summarize"},
     )
     assert response.status_code == 200
-    assert provider.calls[0]["model"] == "qwen/qwen3.6-27b"
-    assert response.headers["x-router-model"] == "qwen/qwen3.6-27b"
+    assert provider.calls[0]["model"] == "deepseek-ai/deepseek-v4-flash"
+    assert response.headers["x-router-model"] == "deepseek-ai/deepseek-v4-flash"
     assert response.headers["x-router-phase"] == "summarize"
+    assert "score=" in response.headers["x-router-reason"]
 
 
 def test_plan_phase_does_not_forward_k3(tmp_path):
@@ -203,10 +204,10 @@ def test_invalid_tool_json_escalates_once_to_higher_quality_model(tmp_path):
     )
     assert response.status_code == 200
     assert len(provider.calls) == 2
-    assert provider.calls[0]["model"] == "qwen/qwen3.6-27b"
-    assert provider.calls[1]["model"] == "moonshotai/kimi-k2.7-code"
-    assert response.headers["x-router-escalated-from"] == "qwen/qwen3.6-27b"
-    assert response.headers["x-router-model"] == "moonshotai/kimi-k2.7-code"
+    assert provider.calls[0]["model"] == "deepseek-ai/deepseek-v4-flash"
+    assert provider.calls[1]["model"] == "deepseek-ai/deepseek-v4-pro"
+    assert response.headers["x-router-escalated-from"] == "deepseek-ai/deepseek-v4-flash"
+    assert response.headers["x-router-model"] == "deepseek-ai/deepseek-v4-pro"
 
 
 async def _sse():
@@ -243,10 +244,10 @@ def test_jsonl_records_phase_selected_reason_and_cost(tmp_path):
     assert len(rows) == 1
     row = json.loads(rows[0])
     assert row["phase"] == "summarize"
-    assert row["selected"] == "qwen/qwen3.6-27b"
-    assert "qwen/qwen3.6-27b" in row["reason"]
+    assert row["selected"] == "deepseek-ai/deepseek-v4-flash"
+    assert "deepseek-ai/deepseek-v4-flash" in row["reason"]
     assert "cost_usd" in row
-    assert row["cost_usd"] == 0.0
+    assert row["cost_usd"] == 0.000003
 
 
 def test_models_list_includes_router_auto(tmp_path):
@@ -360,7 +361,7 @@ def test_replay_page_shows_phase_winner_reason_cost_and_hides_secrets(tmp_path):
     assert "AIAND_API_KEY" not in html
     body = events.json()
     assert body[0]["phase"] == "summarize"
-    assert body[0]["selected"] == "qwen/qwen3.6-27b"
+    assert body[0]["selected"] == "deepseek-ai/deepseek-v4-flash"
     assert "reason" in body[0]
     assert "cost_usd" in body[0]
     assert body[1]["tests_passed"] is False
@@ -409,7 +410,7 @@ def test_flashlight_walks_phases_and_uses_stronger_model_after_test_fail(tmp_pat
     by_phase = {r["phase"]: r for r in rows if r.get("selected")}
     assert by_phase["edit"]["selected"] == "deepseek-ai/deepseek-v4-flash"
     assert by_phase["debug"]["selected"] == "deepseek-ai/deepseek-v4-pro"
-    assert by_phase["summarize"]["selected"] == "qwen/qwen3.6-27b"
+    assert by_phase["summarize"]["selected"] == "deepseek-ai/deepseek-v4-flash"
     assert any(r.get("tests_passed") is False for r in rows)
     assert any(r.get("tests_passed") is True for r in rows)
 
@@ -435,7 +436,7 @@ def test_eval_runs_three_baselines_on_five_tasks_and_rereads_log(tmp_path):
         assert "resolved" in row
     assert report["baselines"]["premium"]["models"] == ["deepseek-ai/deepseek-v4-pro"]
     assert report["baselines"]["kimi"]["models"] == ["moonshotai/kimi-k2.7-code"]
-    assert "qwen/qwen3.6-27b" in report["baselines"]["adaptive"]["models"]
+    assert "deepseek-ai/deepseek-v4-flash" in report["baselines"]["adaptive"]["models"]
     assert "savings_pct" not in report
     assert first["stubbed"] == ["qwen-only", "flash-only", "glm-only", "random", "oracle"]
     assert second["cache_hits"] == calls_after_first
@@ -498,7 +499,7 @@ def test_learned_router_stays_dark_after_comparison(tmp_path):
         json=CHAT,
         headers={**AUTH, "x-agent-phase": "summarize"},
     )
-    assert response.headers["x-router-model"] == "qwen/qwen3.6-27b"
+    assert response.headers["x-router-model"] == "deepseek-ai/deepseek-v4-flash"
     assert "learned" not in response.headers["x-router-reason"].lower()
 
 
@@ -638,9 +639,9 @@ def test_invalid_json_content_escalates_once(tmp_path):
     )
     assert response.status_code == 200
     assert len(provider.calls) == 2
-    assert provider.calls[0]["model"] == "qwen/qwen3.6-27b"
-    assert provider.calls[1]["model"] == "moonshotai/kimi-k2.7-code"
-    assert response.headers["x-router-escalated-from"] == "qwen/qwen3.6-27b"
+    assert provider.calls[0]["model"] == "deepseek-ai/deepseek-v4-flash"
+    assert provider.calls[1]["model"] == "deepseek-ai/deepseek-v4-pro"
+    assert response.headers["x-router-escalated-from"] == "deepseek-ai/deepseek-v4-flash"
     rows = [
         json.loads(line)
         for line in (tmp_path / "requests.jsonl").read_text(encoding="utf-8").splitlines()
@@ -905,7 +906,207 @@ models:
     assert row["cost_usd"] == 0.0
 
 
-def test_draft_phase_alias_planning_routes_as_plan(tmp_path):
+def test_security_review_phase_is_first_class(tmp_path):
+    client, _ = _client(tmp_path)
+    response = client.post(
+        "/v1/chat/completions",
+        json=CHAT,
+        headers={**AUTH, "x-agent-phase": "security_review"},
+    )
+    assert response.status_code == 200
+    assert response.headers["x-router-phase"] == "security_review"
+    assert "score=" in response.headers["x-router-reason"]
+
+
+def test_max_regret_picks_stronger_when_cheap_is_far_behind(tmp_path):
+    yaml_path = tmp_path / "models.yaml"
+    yaml_path.write_text(
+        """
+fallback_model: cheap/weak
+max_regret: 5
+premium_aa_floor: 99
+phase_threshold: {plan: 50, planning: 50, summarize: 0, edit: 0, tool: 0, debug: 0, discover: 0}
+models:
+  - id: cheap/weak
+    enabled: true
+    input_per_1m: 0
+    output_per_1m: 0
+    context_window: 100000
+    supports_tools: true
+    supports_json: true
+    aa_index: 51
+    aa_source: test
+    measured_on: test
+  - id: dear/strong
+    enabled: true
+    input_per_1m: 1
+    output_per_1m: 1
+    context_window: 100000
+    supports_tools: true
+    supports_json: true
+    aa_index: 60
+    aa_source: test
+    measured_on: test
+""",
+        encoding="utf-8",
+    )
+    provider = FakeProvider()
+    app = create_app(
+        provider=provider,
+        spend=SpendLog(tmp_path / "spend.txt", 15),
+        log_path=tmp_path / "requests.jsonl",
+        router_key="secret",
+        budget=15,
+        config_path=yaml_path,
+        cache_dir=tmp_path / "cache",
+    )
+    client = TestClient(app)
+    bumped = client.post(
+        "/v1/chat/completions",
+        json=CHAT,
+        headers={**AUTH, "x-agent-phase": "plan"},
+    )
+    cheap = client.post(
+        "/v1/chat/completions",
+        json=CHAT,
+        headers={**AUTH, "x-agent-phase": "plan", "x-routing-effort": "low"},
+    )
+    assert bumped.status_code == 200
+    assert provider.calls[0]["model"] == "dear/strong"
+    assert "score=" in bumped.headers["x-router-reason"]
+    assert cheap.status_code == 200
+    assert provider.calls[1]["model"] == "cheap/weak"
+
+
+def test_pioneer_score_beats_a_cheaper_weaker_model(tmp_path):
+    yaml_path = tmp_path / "models.yaml"
+    yaml_path.write_text(
+        """
+fallback_model: cheap/weak
+max_regret: 0
+premium_aa_floor: 99
+phase_threshold: {summarize: 0, plan: 0, edit: 0, tool: 0, debug: 0, discover: 0}
+models:
+  - id: cheap/weak
+    enabled: true
+    input_per_1m: 0
+    output_per_1m: 0
+    latency_ms: 4000
+    context_window: 100000
+    supports_tools: true
+    supports_json: true
+    aa_index: 40
+    aa_source: test
+    measured_on: test
+  - id: dear/strong
+    enabled: true
+    input_per_1m: 1
+    output_per_1m: 1
+    latency_ms: 200
+    context_window: 100000
+    supports_tools: true
+    supports_json: true
+    aa_index: 55
+    aa_source: test
+    measured_on: test
+""",
+        encoding="utf-8",
+    )
+    provider = FakeProvider()
+    app = create_app(
+        provider=provider,
+        spend=SpendLog(tmp_path / "spend.txt", 15),
+        log_path=tmp_path / "requests.jsonl",
+        router_key="secret",
+        budget=15,
+        config_path=yaml_path,
+        cache_dir=tmp_path / "cache",
+    )
+    client = TestClient(app)
+    response = client.post(
+        "/v1/chat/completions",
+        json=CHAT,
+        headers={**AUTH, "x-agent-phase": "summarize"},
+    )
+    assert response.status_code == 200
+    assert provider.calls[0]["model"] == "dear/strong"
+    assert "score=" in response.headers["x-router-reason"]
+
+
+def test_latency_limit_drops_slow_model(tmp_path):
+    yaml_path = tmp_path / "models.yaml"
+    yaml_path.write_text(
+        """
+fallback_model: fast/ok
+latency_limit_ms: 1000
+premium_aa_floor: 99
+phase_threshold: {summarize: 0, plan: 0, edit: 0, tool: 0, debug: 0, discover: 0}
+models:
+  - id: slow/smart
+    enabled: true
+    input_per_1m: 0
+    output_per_1m: 0
+    latency_ms: 5000
+    context_window: 100000
+    supports_tools: true
+    supports_json: true
+    aa_index: 90
+    aa_source: test
+    measured_on: test
+  - id: fast/ok
+    enabled: true
+    input_per_1m: 1
+    output_per_1m: 1
+    latency_ms: 200
+    context_window: 100000
+    supports_tools: true
+    supports_json: true
+    aa_index: 40
+    aa_source: test
+    measured_on: test
+""",
+        encoding="utf-8",
+    )
+    provider = FakeProvider()
+    app = create_app(
+        provider=provider,
+        spend=SpendLog(tmp_path / "spend.txt", 15),
+        log_path=tmp_path / "requests.jsonl",
+        router_key="secret",
+        budget=15,
+        config_path=yaml_path,
+        cache_dir=tmp_path / "cache",
+    )
+    client = TestClient(app)
+    response = client.post(
+        "/v1/chat/completions",
+        json=CHAT,
+        headers={**AUTH, "x-agent-phase": "summarize"},
+    )
+    assert response.status_code == 200
+    assert provider.calls[0]["model"] == "fast/ok"
+    headered = client.post(
+        "/v1/chat/completions",
+        json={**CHAT, "messages": [{"role": "user", "content": "pong"}]},
+        headers={**AUTH, "x-agent-phase": "summarize", "x-latency-limit": "8000"},
+    )
+    assert headered.status_code == 200
+    assert provider.calls[1]["model"] == "slow/smart"
+
+
+def test_summarize_picks_highest_pioneer_score(tmp_path):
+    client, provider = _client(tmp_path)
+    response = client.post(
+        "/v1/chat/completions",
+        json=CHAT,
+        headers={**AUTH, "x-agent-phase": "summarize"},
+    )
+    assert response.status_code == 200
+    assert provider.calls[0]["model"] == "deepseek-ai/deepseek-v4-flash"
+    assert "score=" in response.headers["x-router-reason"]
+
+
+def test_draft_phase_planning_is_first_class(tmp_path):
     client, provider = _client(tmp_path)
     response = client.post(
         "/v1/chat/completions",
@@ -913,8 +1114,9 @@ def test_draft_phase_alias_planning_routes_as_plan(tmp_path):
         headers={**AUTH, "x-agent-phase": "planning"},
     )
     assert response.status_code == 200
-    assert response.headers["x-router-phase"] == "plan"
+    assert response.headers["x-router-phase"] == "planning"
     assert provider.calls[0]["model"] != "moonshotai/kimi-k3"
+    assert "score=" in response.headers["x-router-reason"]
 
 
 def test_unknown_phase_header_is_ignored_not_error(tmp_path):
@@ -925,7 +1127,17 @@ def test_unknown_phase_header_is_ignored_not_error(tmp_path):
         headers={**AUTH, "x-agent-phase": "spaceship"},
     )
     assert response.status_code == 200
-    assert response.headers["x-router-phase"] in {"plan", "edit", "discover", "tool", "debug", "summarize"}
+    assert response.headers["x-router-phase"] in {
+        "plan",
+        "edit",
+        "discover",
+        "tool",
+        "debug",
+        "summarize",
+        "planning",
+        "code_edit",
+        "repository_discovery",
+    }
 
 
 def test_auto_response_body_keeps_virtual_model_id(tmp_path):
@@ -937,7 +1149,7 @@ def test_auto_response_body_keeps_virtual_model_id(tmp_path):
     )
     assert response.status_code == 200
     assert response.json()["model"] == "router/auto"
-    assert response.headers["x-router-model"] == "qwen/qwen3.6-27b"
+    assert response.headers["x-router-model"] == "deepseek-ai/deepseek-v4-flash"
 
 
 def test_pinned_response_body_keeps_pinned_id(tmp_path):
@@ -976,8 +1188,8 @@ def test_timeout_escalates_once_to_a_stronger_model(tmp_path):
     )
     assert response.status_code == 200
     assert len(provider.calls) == 2
-    assert provider.calls[0]["model"] == "qwen/qwen3.6-27b"
-    assert provider.calls[1]["model"] == "moonshotai/kimi-k2.7-code"
-    assert response.headers["x-router-escalated-from"] == "qwen/qwen3.6-27b"
+    assert provider.calls[0]["model"] == "deepseek-ai/deepseek-v4-flash"
+    assert provider.calls[1]["model"] == "deepseek-ai/deepseek-v4-pro"
+    assert response.headers["x-router-escalated-from"] == "deepseek-ai/deepseek-v4-flash"
 
 

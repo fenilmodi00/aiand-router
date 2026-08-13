@@ -12,13 +12,28 @@ redact_keys:
   - token
   - secret
 
+max_regret: 8
+latency_limit_ms: 0
 phase_threshold:
   discover: 35
+  repository_discovery: 35
+  repository_summary: 30
+  intent: 40
   plan: 50
+  planning: 50
   edit: 40
+  code_generation: 40
+  code_edit: 40
+  refactoring: 40
+  security_review: 50
   tool: 38
+  tool_call: 38
+  test_execution: 0
   debug: 50
+  debugging: 50
+  test_failure_analysis: 53
   summarize: 24
+  final_summary: 24
 
 # K3 only when the bar is at least this, or routing_effort=max
 premium_aa_floor: 58

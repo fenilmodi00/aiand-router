@@ -4,6 +4,24 @@ OpenAI-compatible proxy that picks an [aiand](https://docs.aiand.com/) model per
 
 See `DESIGN.md` for what we will and will not build. Also: `ARCHITECTURE.md`, `RESEARCH.md`, `SECURITY.md`, `CREDITS.md`.
 
+## How routing works
+
+Hard constraints first (tools / JSON / streaming / context / max output / budget / AA present / Motif-3 off / optional latency cap). Then predicted success (AA index or measured) must clear the phase bar. K3 stays behind the premium floor unless `x-routing-effort: max`.
+
+After that:
+
+| Effort | Pick |
+| --- | --- |
+| `low` | cheapest eligible |
+| `medium` / `high` (default medium) | highest Pioneer score |
+| `max` | strongest AA |
+
+Pioneer score = `0.40·success + 0.20·capability + 0.15·tools + 0.10·latency + 0.10·health − 0.05·cost`. It is in `X-Router-Reason` as `score=`. Max-regret still drops models far behind the best when the phase bar is ≥ 50.
+
+Default medium therefore prefers **Flash** on summarize/discover, not free Qwen. Use `x-routing-effort: low` for cheap-first.
+
+Phases: Draft names are first-class (`planning`, `code_generation`, `security_review`, `final_summary`, …). Flashlight short names (`discover`, `plan`, `edit`, `tool`, `debug`, `summarize`) still work. Missing `x-agent-phase` is normal.
+
 ## Run
 
 ```bash
@@ -15,7 +33,7 @@ copy .env.example .env
 
 Put your aiand key in `.env` as `AIAND_API_KEY`. Keep `ROUTER_API_KEY` as the key clients send here — never put the aiand key in OpenCode.
 
-Soft budget (`BUDGET_LIMIT_USD`) defaults to **$15**. See `CREDITS.md` for the rehearsal / matrix / reserve split (plan, not a measured live total). Qwen is $0; do not press max-effort until you have confirmed K3 on your org catalog ($3 / $12.50 per 1M). Keys: `SECURITY.md`.
+Soft budget (`BUDGET_LIMIT_USD`) defaults to **$15**. See `CREDITS.md` for the rehearsal / matrix / reserve split (plan, not a measured live total). Qwen is $0 on the catalog but is not the default adaptive pick. Do not press max-effort until you have confirmed K3 on your org catalog ($3 / $12.50 per 1M). Keys: `SECURITY.md`. Optional `LATENCY_LIMIT_MS=0` means no latency hard filter.
 
 ```bash
 uvicorn aiand_router.app:app --app-dir src --host 127.0.0.1 --port 8000
@@ -28,7 +46,12 @@ curl http://127.0.0.1:8000/v1/chat/completions ^
   -d "{\"model\":\"router/auto\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
 ```
 
-Optional headers: `x-agent-phase: plan|edit|debug|...`, `x-routing-effort: low|medium|high|max`, `x-allowed-models: qwen/qwen3.6-27b,moonshotai/kimi-k2.7-code`.
+Optional headers:
+
+- `x-agent-phase: plan|planning|edit|security_review|debug|summarize|...`
+- `x-routing-effort: low|medium|high|max`
+- `x-allowed-models: qwen/qwen3.6-27b,moonshotai/kimi-k2.7-code`
+- `x-latency-limit: 800` (ms; overrides `LATENCY_LIMIT_MS`)
 
 ## OpenCode
 
@@ -51,7 +74,7 @@ Optional headers: `x-agent-phase: plan|edit|debug|...`, `x-routing-effort: low|m
 }
 ```
 
-Routing reasons show up on response headers (`X-Router-Model`, `X-Router-Phase`, `X-Router-Reason`) and in `data/requests.jsonl`.
+The response body keeps `model: router/auto`. The real aiand id is on `X-Router-Model` (plus phase, Pioneer `score=`, threshold, candidates) and in `data/requests.jsonl`.
 
 ## Flashlight demo
 
