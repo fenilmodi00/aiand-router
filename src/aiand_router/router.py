@@ -11,6 +11,21 @@ import yaml
 
 PHASES = ("discover", "plan", "edit", "tool", "debug", "summarize")
 VIRTUAL_MODELS = {"router/auto", "aiand-router", "auto"}
+PHASE_ALIASES = {
+    "intent": "plan",
+    "planning": "plan",
+    "repository_discovery": "discover",
+    "repository_summary": "discover",
+    "code_generation": "edit",
+    "code_edit": "edit",
+    "refactoring": "edit",
+    "security_review": "edit",
+    "tool_call": "tool",
+    "test_execution": "tool",
+    "test_failure_analysis": "debug",
+    "debugging": "debug",
+    "final_summary": "summarize",
+}
 
 _TOOL_PHASE = {
     "read": "discover",
@@ -41,6 +56,9 @@ class Model:
     context_window: int
     supports_tools: bool
     supports_json: bool
+    supports_streaming: bool
+    max_output_tokens: int | None
+    cached_input_per_1m: float | None
     aa_index: float | None
     aa_source: str
     measured_on: str
@@ -54,7 +72,8 @@ class Model:
 
     @property
     def unit_cost(self) -> float:
-        return self.input_per_1m * 0.4 + self.output_per_1m * 0.6
+        inp = self.cached_input_per_1m if self.cached_input_per_1m is not None else self.input_per_1m
+        return inp * 0.4 + self.output_per_1m * 0.6
 
 
 @dataclass
@@ -83,6 +102,11 @@ def load_models(cfg: dict[str, Any]) -> list[Model]:
                 context_window=int(row.get("context_window") or 0),
                 supports_tools=bool(row.get("supports_tools", True)),
                 supports_json=bool(row.get("supports_json", True)),
+                supports_streaming=bool(row.get("supports_streaming", True)),
+                max_output_tokens=row.get("max_output_tokens"),
+                cached_input_per_1m=(
+                    float(row["cached_input_per_1m"]) if row.get("cached_input_per_1m") is not None else None
+                ),
                 aa_index=row.get("aa_index"),
                 aa_source=row.get("aa_source", "unknown"),
                 measured_on=row.get("measured_on", "unknown"),
@@ -96,10 +120,21 @@ def estimate_tokens(messages: list[dict[str, Any]]) -> int:
     return max(1, len(json.dumps(messages, default=str)) // 4)
 
 
-def detect_phase(headers: dict[str, str], body: dict[str, Any]) -> str:
+def detect_phase(
+    headers: dict[str, str],
+    body: dict[str, Any],
+    last_outcome: dict[str, Any] | None = None,
+) -> str:
     raw = (headers.get("x-agent-phase") or "").strip().lower()
-    if raw in PHASES:
-        return raw
+    mapped = PHASE_ALIASES.get(raw, raw)
+    if mapped in PHASES:
+        if mapped == "tool" and last_outcome and last_outcome.get("tests_passed") is False:
+            return "debug"
+        if mapped == "tool":
+            blob = _text((body.get("messages") or [{}])[-1].get("content")).lower()
+            if re.search(r"\b(failed|error|traceback|assertionerror|pytest|not ok)\b", blob):
+                return "debug"
+        return mapped
 
     tools = body.get("tools") or []
     names = []
@@ -152,7 +187,7 @@ def _text(content: Any) -> str:
     return ""
 
 
-def select_model(
+def eligible_models(
     cfg: dict[str, Any],
     models: list[Model],
     *,
@@ -163,7 +198,10 @@ def select_model(
     allowed: set[str] | None,
     spend_usd: float,
     budget_usd: float,
-) -> Decision:
+    needs_json: bool = False,
+    streaming: bool = False,
+    max_tokens: int | None = None,
+) -> tuple[float, list[Model]]:
     thresholds = cfg.get("phase_threshold") or {}
     threshold = float(thresholds.get(phase, 40))
     if effort == "low":
@@ -183,7 +221,13 @@ def select_model(
             continue
         if needs_tools and not m.supports_tools:
             continue
+        if needs_json and not m.supports_json:
+            continue
+        if streaming and not m.supports_streaming:
+            continue
         if tokens > m.context_window:
+            continue
+        if max_tokens is not None and m.max_output_tokens and max_tokens > int(m.max_output_tokens):
             continue
         if m.aa_index is None:
             continue
@@ -195,18 +239,55 @@ def select_model(
         if est > remaining and m.unit_cost > 0:
             continue
         eligible.append(m)
+    return threshold, eligible
 
+
+def fallback_decision(
+    cfg: dict[str, Any], models: list[Model], phase: str, threshold: float, *, learned: bool = False
+) -> Decision:
+    fallback_id = cfg.get("fallback_model")
+    fallback = next((m for m in models if m.id == fallback_id), models[0])
+    prefix = "learned fallback" if learned else f"no eligible model for phase={phase} threshold={threshold}; fallback"
+    return Decision(
+        model=fallback,
+        phase=phase,
+        threshold=threshold,
+        reason=f"{prefix} {fallback.id}",
+        candidates=[],
+    )
+
+
+def select_model(
+    cfg: dict[str, Any],
+    models: list[Model],
+    *,
+    phase: str,
+    needs_tools: bool,
+    tokens: int,
+    effort: str,
+    allowed: set[str] | None,
+    spend_usd: float,
+    budget_usd: float,
+    needs_json: bool = False,
+    streaming: bool = False,
+    max_tokens: int | None = None,
+) -> Decision:
+    threshold, eligible = eligible_models(
+        cfg,
+        models,
+        phase=phase,
+        needs_tools=needs_tools,
+        tokens=tokens,
+        effort=effort,
+        allowed=allowed,
+        spend_usd=spend_usd,
+        budget_usd=budget_usd,
+        needs_json=needs_json,
+        streaming=streaming,
+        max_tokens=max_tokens,
+    )
     if not eligible:
-        fallback_id = cfg.get("fallback_model")
-        fallback = next((m for m in models if m.id == fallback_id), models[0])
-        return Decision(
-            model=fallback,
-            phase=phase,
-            threshold=threshold,
-            reason=f"no eligible model for phase={phase} threshold={threshold}; fallback {fallback.id}",
-            candidates=[],
-        )
-
+        return fallback_decision(cfg, models, phase, threshold)
     eligible.sort(key=lambda m: (m.unit_cost, -m.quality))
     chosen = eligible[0]
     return Decision(
@@ -256,9 +337,26 @@ def append_jsonl(path: Path, row: dict[str, Any]) -> None:
 
 
 def estimate_cost(model: Model, prompt_tokens: int, completion_tokens: int) -> float:
-    return (prompt_tokens / 1_000_000) * model.input_per_1m + (
-        completion_tokens / 1_000_000
-    ) * model.output_per_1m
+    inp = model.cached_input_per_1m if model.cached_input_per_1m is not None else model.input_per_1m
+    return (prompt_tokens / 1_000_000) * inp + (completion_tokens / 1_000_000) * model.output_per_1m
+
+
+def wants_json(body: dict[str, Any]) -> bool:
+    fmt = body.get("response_format") or {}
+    return isinstance(fmt, dict) and fmt.get("type") in {"json_object", "json_schema"}
+
+
+def json_content_valid(message: dict[str, Any] | None) -> bool:
+    if not message:
+        return False
+    content = message.get("content")
+    if not isinstance(content, str) or not content.strip():
+        return False
+    try:
+        json.loads(content)
+    except json.JSONDecodeError:
+        return False
+    return True
 
 
 def tool_calls_valid(message: dict[str, Any] | None) -> bool:

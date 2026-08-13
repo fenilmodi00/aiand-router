@@ -7,9 +7,10 @@ import httpx
 
 
 class HttpAiandProvider:
-    def __init__(self, base_url: str, api_key: str) -> None:
+    def __init__(self, base_url: str, api_key: str, timeout_s: float = 120.0) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
+        self.timeout_s = timeout_s
 
     async def complete(self, body: dict[str, Any]) -> dict[str, Any]:
         headers = {
@@ -18,7 +19,7 @@ class HttpAiandProvider:
             "X-Aiand-Metrics": "true",
         }
         url = f"{self.base_url}/chat/completions"
-        timeout = httpx.Timeout(120.0, connect=15.0)
+        timeout = httpx.Timeout(self.timeout_s, connect=min(15.0, self.timeout_s))
         if body.get("stream"):
             client = httpx.AsyncClient(timeout=timeout)
             req = client.build_request("POST", url, json=body, headers=headers)

@@ -2,7 +2,7 @@
 
 OpenAI-compatible proxy that picks an [aiand](https://docs.aiand.com/) model per coding-agent step. Point OpenCode (or anything that speaks `/v1/chat/completions`) at this process and send `model: router/auto`.
 
-See `DESIGN.md` for what we will and will not build.
+See `DESIGN.md` for what we will and will not build. Also: `ARCHITECTURE.md`, `RESEARCH.md`, `SECURITY.md`, `CREDITS.md`.
 
 ## Run
 
@@ -15,7 +15,7 @@ copy .env.example .env
 
 Put your aiand key in `.env` as `AIAND_API_KEY`. Keep `ROUTER_API_KEY` as the key clients send here — never put the aiand key in OpenCode.
 
-Soft budget (`BUDGET_LIMIT_USD`) defaults to **$15**. Plan on about **$5** for rehearsal, **$10** for the 3×5 eval matrix, and the rest as reserve. Qwen is $0; do not press max-effort until you have confirmed K3 on your org catalog ($3 / $12.50 per 1M).
+Soft budget (`BUDGET_LIMIT_USD`) defaults to **$15**. See `CREDITS.md` for the rehearsal / matrix / reserve split (plan, not a measured live total). Qwen is $0; do not press max-effort until you have confirmed K3 on your org catalog ($3 / $12.50 per 1M). Keys: `SECURITY.md`.
 
 ```bash
 uvicorn aiand_router.app:app --app-dir src --host 127.0.0.1 --port 8000

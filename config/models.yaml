@@ -4,6 +4,13 @@
 
 virtual_model: router/auto
 fallback_model: qwen/qwen3.6-27b
+max_tokens_limit: 32768
+upstream_timeout_s: 120
+redact_keys:
+  - key
+  - authorization
+  - token
+  - secret
 
 phase_threshold:
   discover: 35
@@ -27,6 +34,8 @@ models:
     context_window: 262144
     supports_tools: true
     supports_json: true
+    supports_streaming: true
+    max_output_tokens: 16384
     aa_index: 38
     aa_source: artificial_analysis
     measured_on: not_aiand
@@ -40,6 +49,8 @@ models:
     context_window: 1048576
     supports_tools: true
     supports_json: true
+    supports_streaming: true
+    max_output_tokens: 16384
     aa_index: 52
     aa_source: artificial_analysis
     measured_on: not_aiand
@@ -53,6 +64,8 @@ models:
     context_window: 262144
     supports_tools: true
     supports_json: true
+    supports_streaming: true
+    max_output_tokens: 16384
     aa_index: 30
     aa_source: artificial_analysis
     measured_on: not_aiand
@@ -66,6 +79,8 @@ models:
     context_window: 131072
     supports_tools: true
     supports_json: true
+    supports_streaming: true
+    max_output_tokens: 16384
     aa_index: 24
     aa_source: artificial_analysis
     measured_on: not_aiand
@@ -79,6 +94,8 @@ models:
     context_window: 262144
     supports_tools: true
     supports_json: true
+    supports_streaming: true
+    max_output_tokens: 16384
     aa_index: 42
     aa_source: artificial_analysis
     measured_on: not_aiand
@@ -92,6 +109,8 @@ models:
     context_window: 1048576
     supports_tools: true
     supports_json: true
+    supports_streaming: true
+    max_output_tokens: 16384
     aa_index: 53
     aa_source: artificial_analysis
     measured_on: not_aiand
@@ -105,6 +124,8 @@ models:
     context_window: 1048576
     supports_tools: true
     supports_json: true
+    supports_streaming: true
+    max_output_tokens: 16384
     aa_index: 53
     aa_source: artificial_analysis
     measured_on: not_aiand
@@ -118,6 +139,8 @@ models:
     context_window: 1048576
     supports_tools: true
     supports_json: true
+    supports_streaming: true
+    max_output_tokens: 16384
     aa_index: 60
     aa_source: artificial_analysis
     measured_on: not_aiand
@@ -131,6 +154,8 @@ models:
     context_window: 131072
     supports_tools: true
     supports_json: true
+    supports_streaming: true
+    max_output_tokens: 16384
     aa_index: null
     aa_source: unknown
     measured_on: not_in_public_catalog

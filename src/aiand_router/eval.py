@@ -59,7 +59,7 @@ def report_from_log(log_path: Path) -> dict[str, Any]:
         models = list(dict.fromkeys(r["selected"] for r in rows if r.get("selected")))
         baselines[name] = {
             "tasks": len(rows),
-            "resolved": sum(1 for r in rows if int(r.get("status") or 0) == 200),
+            "resolved": sum(1 for r in rows if _resolved(r)),
             "cost_usd": round(sum(float(r.get("cost_usd") or 0) for r in rows), 6),
             "latency_ms": sum(int(r.get("latency_ms") or 0) for r in rows),
             "models": models,
@@ -68,6 +68,19 @@ def report_from_log(log_path: Path) -> dict[str, Any]:
         "baselines": baselines,
         "quality_note": "AA Intelligence Index scores are public priors (measured_on: not_aiand). Costs and models here are from the request log.",
     }
+
+
+def _resolved(row: dict[str, Any]) -> bool:
+    if int(row.get("status") or 0) != 200:
+        return False
+    reason = str(row.get("reason") or "").lower()
+    if row.get("escalated_from") or "escalated" in reason:
+        return False
+    if row.get("tests_passed") is False:
+        return False
+    if not row.get("cache_hit") and int(row.get("tokens_out") or 0) == 0:
+        return False
+    return True
 
 
 def _hit_count(log_path: Path | None) -> int:

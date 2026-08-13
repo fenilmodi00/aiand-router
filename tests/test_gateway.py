@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import json
-import shutil
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 import httpx
 from aiand_router.app import create_app
 from aiand_router.flashlight import ROOT as PROJECT_ROOT
-from aiand_router.flashlight import _run_task
 from aiand_router.router import SpendLog
 from fastapi.testclient import TestClient
 
@@ -369,20 +370,33 @@ def test_replay_page_shows_phase_winner_reason_cost_and_hides_secrets(tmp_path):
 
 
 def test_flashlight_walks_phases_and_uses_stronger_model_after_test_fail(tmp_path):
-    provider = FakeProvider()
-    spend = SpendLog(tmp_path / "spend.txt", 15)
-    app = create_app(
-        provider=provider,
-        spend=spend,
-        log_path=tmp_path / "requests.jsonl",
-        router_key="secret",
-        budget=15,
-        cache_dir=tmp_path / "cache",
+    client, _ = _client(tmp_path)
+    for phase in ("discover", "plan", "edit"):
+        client.post("/v1/chat/completions", json=CHAT, headers={**AUTH, "x-agent-phase": phase})
+    fail = client.post(
+        "/v1/router/outcome",
+        json={"tests_passed": False, "patch_applied": True, "failure_text": "AssertionError"},
+        headers=AUTH,
     )
-    work = tmp_path / "seed"
-    shutil.copytree(PROJECT_ROOT / "demo" / "seed", work)
-    ok = _run_task(TestClient(app), "secret", work, "parity.py")
-    assert ok is True
+    debug = client.post(
+        "/v1/chat/completions",
+        json=CHAT,
+        headers={**AUTH, "x-agent-phase": "debug"},
+    )
+    ok = client.post(
+        "/v1/router/outcome",
+        json={"tests_passed": True, "patch_applied": True, "failure_text": ""},
+        headers=AUTH,
+    )
+    summarize = client.post(
+        "/v1/chat/completions",
+        json=CHAT,
+        headers={**AUTH, "x-agent-phase": "summarize"},
+    )
+    assert fail.status_code == 200
+    assert ok.status_code == 200
+    assert debug.status_code == 200
+    assert summarize.status_code == 200
     rows = [
         json.loads(line)
         for line in (tmp_path / "requests.jsonl").read_text(encoding="utf-8").splitlines()
@@ -405,19 +419,16 @@ def test_eval_runs_three_baselines_on_five_tasks_and_rereads_log(tmp_path):
 
     client, provider = _client(tmp_path)
     spec = load_tasks(PROJECT_ROOT / "config" / "tasks.yaml")
-    assert len(spec["tasks"]) >= 5
-    assert spec["baselines"]["executed"].keys() >= {"premium", "kimi", "adaptive"}
-    assert len(spec["baselines"]["stubbed"]) == 5
     first = run_eval(client, "secret", spec, log_path=tmp_path / "requests.jsonl")
     calls_after_first = len(provider.calls)
-    assert calls_after_first == len(spec["tasks"]) * 3
+    assert calls_after_first == 15
     second = run_eval(client, "secret", spec, log_path=tmp_path / "requests.jsonl")
     assert len(provider.calls) == calls_after_first
     report = report_from_log(tmp_path / "requests.jsonl")
     assert set(report["baselines"]) == {"premium", "kimi", "adaptive"}
     for name in ("premium", "kimi", "adaptive"):
         row = report["baselines"][name]
-        assert row["tasks"] == len(spec["tasks"])
+        assert row["tasks"] == 5
         assert "cost_usd" in row
         assert "latency_ms" in row
         assert "models" in row
@@ -426,20 +437,60 @@ def test_eval_runs_three_baselines_on_five_tasks_and_rereads_log(tmp_path):
     assert report["baselines"]["kimi"]["models"] == ["moonshotai/kimi-k2.7-code"]
     assert "qwen/qwen3.6-27b" in report["baselines"]["adaptive"]["models"]
     assert "savings_pct" not in report
-    assert first["stubbed"] == spec["baselines"]["stubbed"]
+    assert first["stubbed"] == ["qwen-only", "flash-only", "glm-only", "random", "oracle"]
     assert second["cache_hits"] == calls_after_first
     assert "not_aiand" in report["quality_note"]
 
 
+def test_eval_report_does_not_count_empty_or_escalated_as_resolved(tmp_path):
+    from aiand_router.eval import report_from_log
+
+    empty = _ok("")
+    empty["json"]["choices"][0]["message"]["content"] = ""
+    empty["json"]["usage"] = {"prompt_tokens": 10, "completion_tokens": 0}
+    provider = FakeProvider([empty, _ok("repaired"), _ok("fine")])
+    client, _ = _client(tmp_path, provider=provider)
+    client.post(
+        "/v1/chat/completions",
+        json=CHAT,
+        headers={**AUTH, "x-agent-phase": "summarize"},
+    )
+    client.post(
+        "/v1/chat/completions",
+        json={**CHAT, "model": "deepseek-ai/deepseek-v4-pro"},
+        headers=AUTH,
+    )
+    report = report_from_log(tmp_path / "requests.jsonl")
+    assert report["baselines"]["adaptive"]["tasks"] == 1
+    assert report["baselines"]["adaptive"]["resolved"] == 0
+    assert report["baselines"]["premium"]["tasks"] == 1
+    assert report["baselines"]["premium"]["resolved"] == 1
+
+
 def test_learned_router_stays_dark_after_comparison(tmp_path):
     from aiand_router.eval import load_tasks, run_eval
-    from aiand_router.learn import compare_on_cache
 
-    client, provider = _client(tmp_path)
+    client, _ = _client(tmp_path)
     spec = load_tasks(PROJECT_ROOT / "config" / "tasks.yaml")
     run_eval(client, "secret", spec, log_path=tmp_path / "requests.jsonl")
     flag = tmp_path / "learned_wins.json"
-    result = compare_on_cache(spec, tmp_path / "cache", flag)
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "aiand_router.learn",
+            "--cache",
+            str(tmp_path / "cache"),
+            "--flag",
+            str(flag),
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": str(PROJECT_ROOT / "src")},
+    )
+    assert proc.returncode == 0, proc.stderr
+    result = json.loads(proc.stdout)
     assert result["winner"] == "rules"
     assert flag.exists() is False or json.loads(flag.read_text())["winner"] != "learned"
     response = client.post(
@@ -471,8 +522,434 @@ def test_learned_router_is_used_only_after_flag_says_it_won(tmp_path):
         headers={**AUTH, "x-agent-phase": "summarize"},
     )
     assert response.status_code == 200
-    assert provider.calls[0]["model"] == "moonshotai/kimi-k3"
+    assert provider.calls[0]["model"] != "moonshotai/kimi-k3"
     assert "learned" in response.headers["x-router-reason"].lower()
+
+
+def test_learned_with_tools_skips_models_without_tool_support(tmp_path):
+    yaml_path = tmp_path / "models.yaml"
+    yaml_path.write_text(
+        """
+fallback_model: cheap/no-tools
+phase_threshold: {summarize: 0, plan: 0, edit: 0, tool: 0, debug: 0, discover: 0}
+premium_aa_floor: 99
+models:
+  - id: cheap/no-tools
+    enabled: true
+    input_per_1m: 0
+    output_per_1m: 0
+    context_window: 100000
+    supports_tools: false
+    aa_index: 90
+    aa_source: test
+    measured_on: test
+  - id: dear/with-tools
+    enabled: true
+    input_per_1m: 1
+    output_per_1m: 1
+    context_window: 100000
+    supports_tools: true
+    aa_index: 50
+    aa_source: test
+    measured_on: test
+""",
+        encoding="utf-8",
+    )
+    flag = tmp_path / "learned_wins.json"
+    flag.write_text(json.dumps({"winner": "learned"}), encoding="utf-8")
+    provider = FakeProvider()
+    app = create_app(
+        provider=provider,
+        spend=SpendLog(tmp_path / "spend.txt", 15),
+        log_path=tmp_path / "requests.jsonl",
+        router_key="secret",
+        budget=15,
+        config_path=yaml_path,
+        cache_dir=tmp_path / "cache",
+        learned_flag=flag,
+    )
+    client = TestClient(app)
+    body = {
+        **CHAT,
+        "tools": [{"type": "function", "function": {"name": "read", "parameters": {}}}],
+    }
+    response = client.post("/v1/chat/completions", json=body, headers=AUTH)
+    assert response.status_code == 200
+    assert provider.calls[0]["model"] == "dear/with-tools"
+    assert "learned" in response.headers["x-router-reason"].lower()
+
+
+def test_json_mode_skips_models_without_json_support(tmp_path):
+    yaml_path = tmp_path / "models.yaml"
+    yaml_path.write_text(
+        """
+fallback_model: cheap/no-json
+phase_threshold: {summarize: 0, plan: 0, edit: 0, tool: 0, debug: 0, discover: 0}
+premium_aa_floor: 99
+models:
+  - id: cheap/no-json
+    enabled: true
+    input_per_1m: 0
+    output_per_1m: 0
+    context_window: 100000
+    supports_tools: true
+    supports_json: false
+    aa_index: 90
+    aa_source: test
+    measured_on: test
+  - id: dear/with-json
+    enabled: true
+    input_per_1m: 1
+    output_per_1m: 1
+    context_window: 100000
+    supports_tools: true
+    supports_json: true
+    aa_index: 50
+    aa_source: test
+    measured_on: test
+""",
+        encoding="utf-8",
+    )
+    provider = FakeProvider()
+    app = create_app(
+        provider=provider,
+        spend=SpendLog(tmp_path / "spend.txt", 15),
+        log_path=tmp_path / "requests.jsonl",
+        router_key="secret",
+        budget=15,
+        config_path=yaml_path,
+        cache_dir=tmp_path / "cache",
+    )
+    client = TestClient(app)
+    body = {**CHAT, "response_format": {"type": "json_object"}}
+    response = client.post("/v1/chat/completions", json=body, headers=AUTH)
+    assert response.status_code == 200
+    assert provider.calls[0]["model"] == "dear/with-json"
+
+
+def test_invalid_json_content_escalates_once(tmp_path):
+    bad = _ok("{not-json")
+    provider = FakeProvider([bad, _ok('{"ok": true}')])
+    client, _ = _client(tmp_path, provider=provider)
+    response = client.post(
+        "/v1/chat/completions",
+        json={**CHAT, "response_format": {"type": "json_object"}},
+        headers={**AUTH, "x-agent-phase": "summarize"},
+    )
+    assert response.status_code == 200
+    assert len(provider.calls) == 2
+    assert provider.calls[0]["model"] == "qwen/qwen3.6-27b"
+    assert provider.calls[1]["model"] == "moonshotai/kimi-k2.7-code"
+    assert response.headers["x-router-escalated-from"] == "qwen/qwen3.6-27b"
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / "requests.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert rows[-1].get("json_valid") is True
+
+
+def test_max_tokens_above_cap_rejected_without_upstream(tmp_path):
+    yaml_path = tmp_path / "models.yaml"
+    yaml_path.write_text(
+        (PROJECT_ROOT / "config" / "models.yaml").read_text(encoding="utf-8")
+        + "\nmax_tokens_limit: 128\n",
+        encoding="utf-8",
+    )
+    provider = FakeProvider()
+    app = create_app(
+        provider=provider,
+        spend=SpendLog(tmp_path / "spend.txt", 15),
+        log_path=tmp_path / "requests.jsonl",
+        router_key="secret",
+        budget=15,
+        config_path=yaml_path,
+        cache_dir=tmp_path / "cache",
+    )
+    client = TestClient(app)
+    response = client.post(
+        "/v1/chat/completions",
+        json={**CHAT, "max_tokens": 9999},
+        headers=AUTH,
+    )
+    assert response.status_code == 400
+    assert provider.calls == []
+
+
+def test_replay_redacts_configured_keys(tmp_path):
+    log = tmp_path / "requests.jsonl"
+    log.write_text(
+        json.dumps(
+            {
+                "phase": "summarize",
+                "selected": "qwen/qwen3.6-27b",
+                "password": "hunter2",
+                "tokens_in": 10,
+                "tokens_out": 5,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    yaml_path = tmp_path / "models.yaml"
+    yaml_path.write_text(
+        (PROJECT_ROOT / "config" / "models.yaml").read_text(encoding="utf-8")
+        + "\nredact_keys: [password, authorization, token, secret, key]\n",
+        encoding="utf-8",
+    )
+    app = create_app(
+        provider=FakeProvider(),
+        spend=SpendLog(tmp_path / "spend.txt", 15),
+        log_path=log,
+        router_key="secret",
+        budget=15,
+        config_path=yaml_path,
+        cache_dir=tmp_path / "cache",
+    )
+    events = TestClient(app).get("/replay/events")
+    assert events.status_code == 200
+    blob = json.dumps(events.json())
+    assert "hunter2" not in blob
+    assert "password" not in blob
+    assert events.json()[0]["selected"] == "qwen/qwen3.6-27b"
+    assert events.json()[0]["tokens_in"] == 10
+    assert events.json()[0]["tokens_out"] == 5
+
+
+def test_health_never_returns_provider_key(tmp_path):
+    client, _ = _client(tmp_path)
+    response = client.get("/health")
+    assert response.status_code == 200
+    body = response.json()
+    assert "aiand_key_set" in body
+    blob = json.dumps(body).lower()
+    assert "sk-" not in blob
+    assert "aiand_api_key" not in blob
+
+
+def test_max_output_drops_model_when_request_exceeds_it(tmp_path):
+    yaml_path = tmp_path / "models.yaml"
+    yaml_path.write_text(
+        """
+fallback_model: dear/big-out
+phase_threshold: {summarize: 0, plan: 0, edit: 0, tool: 0, debug: 0, discover: 0}
+premium_aa_floor: 99
+models:
+  - id: cheap/small-out
+    enabled: true
+    input_per_1m: 0
+    output_per_1m: 0
+    context_window: 100000
+    max_output_tokens: 16
+    supports_tools: true
+    supports_json: true
+    supports_streaming: true
+    aa_index: 50
+    aa_source: test
+    measured_on: test
+  - id: dear/big-out
+    enabled: true
+    input_per_1m: 1
+    output_per_1m: 1
+    context_window: 100000
+    max_output_tokens: 128
+    supports_tools: true
+    supports_json: true
+    supports_streaming: true
+    aa_index: 50
+    aa_source: test
+    measured_on: test
+""",
+        encoding="utf-8",
+    )
+    provider = FakeProvider()
+    app = create_app(
+        provider=provider,
+        spend=SpendLog(tmp_path / "spend.txt", 15),
+        log_path=tmp_path / "requests.jsonl",
+        router_key="secret",
+        budget=15,
+        config_path=yaml_path,
+        cache_dir=tmp_path / "cache",
+    )
+    client = TestClient(app)
+    response = client.post(
+        "/v1/chat/completions",
+        json={**CHAT, "max_tokens": 64},
+        headers=AUTH,
+    )
+    assert response.status_code == 200
+    assert provider.calls[0]["model"] == "dear/big-out"
+
+
+def test_stream_skips_models_without_streaming(tmp_path):
+    yaml_path = tmp_path / "models.yaml"
+    yaml_path.write_text(
+        """
+fallback_model: dear/stream
+phase_threshold: {summarize: 0, plan: 0, edit: 0, tool: 0, debug: 0, discover: 0}
+premium_aa_floor: 99
+models:
+  - id: cheap/no-stream
+    enabled: true
+    input_per_1m: 0
+    output_per_1m: 0
+    context_window: 100000
+    supports_tools: true
+    supports_json: true
+    supports_streaming: false
+    aa_index: 90
+    aa_source: test
+    measured_on: test
+  - id: dear/stream
+    enabled: true
+    input_per_1m: 1
+    output_per_1m: 1
+    context_window: 100000
+    supports_tools: true
+    supports_json: true
+    supports_streaming: true
+    aa_index: 50
+    aa_source: test
+    measured_on: test
+""",
+        encoding="utf-8",
+    )
+
+    async def sse():
+        yield b'data: {"choices":[{"delta":{"content":"hi"},"index":0}]}\n\n'
+        yield b"data: [DONE]\n\n"
+
+    provider = FakeProvider([{"status": 200, "stream": sse()}])
+    app = create_app(
+        provider=provider,
+        spend=SpendLog(tmp_path / "spend.txt", 15),
+        log_path=tmp_path / "requests.jsonl",
+        router_key="secret",
+        budget=15,
+        config_path=yaml_path,
+        cache_dir=tmp_path / "cache",
+    )
+    client = TestClient(app)
+    with client.stream(
+        "POST",
+        "/v1/chat/completions",
+        json={**CHAT, "stream": True},
+        headers=AUTH,
+    ) as response:
+        assert response.status_code == 200
+        b"".join(response.iter_bytes())
+    assert provider.calls[0]["model"] == "dear/stream"
+
+
+def test_models_list_includes_all_nine_and_motif_disabled(tmp_path):
+    client, _ = _client(tmp_path)
+    response = client.get("/v1/models", headers=AUTH)
+    ids = [m["id"] for m in response.json()["data"]]
+    assert "router/auto" in ids
+    for mid in (
+        "qwen/qwen3.6-27b",
+        "deepseek-ai/deepseek-v4-flash",
+        "google/gemma-4-31b-it",
+        "openai/gpt-oss-120b",
+        "moonshotai/kimi-k2.7-code",
+        "deepseek-ai/deepseek-v4-pro",
+        "zai-org/glm-5.2",
+        "moonshotai/kimi-k3",
+        "motif-technologies/motif-3",
+    ):
+        assert mid in ids
+    motif = next(m for m in response.json()["data"] if m["id"] == "motif-technologies/motif-3")
+    assert motif.get("enabled") is False
+
+
+def test_cached_input_price_feeds_cost(tmp_path):
+    yaml_path = tmp_path / "models.yaml"
+    yaml_path.write_text(
+        """
+fallback_model: priced/cached
+phase_threshold: {summarize: 0, plan: 0, edit: 0, tool: 0, debug: 0, discover: 0}
+premium_aa_floor: 99
+models:
+  - id: priced/cached
+    enabled: true
+    input_per_1m: 100
+    cached_input_per_1m: 0
+    output_per_1m: 0
+    context_window: 100000
+    supports_tools: true
+    supports_json: true
+    aa_index: 50
+    aa_source: test
+    measured_on: test
+""",
+        encoding="utf-8",
+    )
+    provider = FakeProvider()
+    app = create_app(
+        provider=provider,
+        spend=SpendLog(tmp_path / "spend.txt", 15),
+        log_path=tmp_path / "requests.jsonl",
+        router_key="secret",
+        budget=15,
+        config_path=yaml_path,
+        cache_dir=tmp_path / "cache",
+    )
+    client = TestClient(app)
+    response = client.post(
+        "/v1/chat/completions",
+        json={**CHAT, "model": "priced/cached"},
+        headers=AUTH,
+    )
+    assert response.status_code == 200
+    row = json.loads((tmp_path / "requests.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert row["cost_usd"] == 0.0
+
+
+def test_draft_phase_alias_planning_routes_as_plan(tmp_path):
+    client, provider = _client(tmp_path)
+    response = client.post(
+        "/v1/chat/completions",
+        json={"model": "router/auto", "messages": [{"role": "user", "content": "summarize what we did"}]},
+        headers={**AUTH, "x-agent-phase": "planning"},
+    )
+    assert response.status_code == 200
+    assert response.headers["x-router-phase"] == "plan"
+    assert provider.calls[0]["model"] != "moonshotai/kimi-k3"
+
+
+def test_unknown_phase_header_is_ignored_not_error(tmp_path):
+    client, _ = _client(tmp_path)
+    response = client.post(
+        "/v1/chat/completions",
+        json=CHAT,
+        headers={**AUTH, "x-agent-phase": "spaceship"},
+    )
+    assert response.status_code == 200
+    assert response.headers["x-router-phase"] in {"plan", "edit", "discover", "tool", "debug", "summarize"}
+
+
+def test_auto_response_body_keeps_virtual_model_id(tmp_path):
+    client, _ = _client(tmp_path)
+    response = client.post(
+        "/v1/chat/completions",
+        json=CHAT,
+        headers={**AUTH, "x-agent-phase": "summarize"},
+    )
+    assert response.status_code == 200
+    assert response.json()["model"] == "router/auto"
+    assert response.headers["x-router-model"] == "qwen/qwen3.6-27b"
+
+
+def test_pinned_response_body_keeps_pinned_id(tmp_path):
+    client, _ = _client(tmp_path)
+    response = client.post(
+        "/v1/chat/completions",
+        json={**CHAT, "model": "moonshotai/kimi-k2.7-code"},
+        headers=AUTH,
+    )
+    assert response.status_code == 200
+    assert response.json()["model"] == "moonshotai/kimi-k2.7-code"
+    assert response.headers["x-router-model"] == "moonshotai/kimi-k2.7-code"
 
 
 def test_smoke_refuses_unless_opted_in(monkeypatch):

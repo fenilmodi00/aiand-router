@@ -9,7 +9,16 @@ from typing import Any
 
 from .cache import RequestCache, request_cache_key
 from .eval import load_tasks
-from .router import Decision, Model, estimate_cost, load_config, load_models, select_model
+from .router import (
+    Decision,
+    Model,
+    eligible_models,
+    estimate_cost,
+    fallback_decision,
+    load_config,
+    load_models,
+    select_model,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -25,35 +34,34 @@ def learned_select(
     allowed: set[str] | None,
     spend_usd: float,
     budget_usd: float,
+    needs_json: bool = False,
+    streaming: bool = False,
+    max_tokens: int | None = None,
 ) -> Decision:
-    # ponytail: untrained stub — highest AA among enabled; no embeddings.
-    eligible = []
-    for m in models:
-        if not m.enabled or m.aa_index is None:
-            continue
-        if allowed and m.id not in allowed:
-            continue
-        if needs_tools and not m.supports_tools:
-            continue
-        if tokens > m.context_window:
-            continue
-        eligible.append(m)
+    # ponytail: untrained stub — highest AA among eligible; no embeddings.
+    threshold, eligible = eligible_models(
+        cfg,
+        models,
+        phase=phase,
+        needs_tools=needs_tools,
+        tokens=tokens,
+        effort=effort,
+        allowed=allowed,
+        spend_usd=spend_usd,
+        budget_usd=budget_usd,
+        needs_json=needs_json,
+        streaming=streaming,
+        max_tokens=max_tokens,
+    )
     if not eligible:
-        fallback = next((m for m in models if m.id == cfg.get("fallback_model")), models[0])
-        return Decision(
-            model=fallback,
-            phase=phase,
-            threshold=0,
-            reason=f"learned fallback {fallback.id}",
-            candidates=[],
-        )
+        return fallback_decision(cfg, models, phase, threshold, learned=True)
     eligible.sort(key=lambda m: (-m.quality, m.unit_cost))
     chosen = eligible[0]
     return Decision(
         model=chosen,
         phase=phase,
-        threshold=0,
-        reason=f"learned (untrained) picked {chosen.id} aa={chosen.quality:g}",
+        threshold=threshold,
+        reason=f"learned (untrained) picked {chosen.id} aa={chosen.quality:g} bar={threshold}",
         candidates=[m.id for m in eligible],
     )
 

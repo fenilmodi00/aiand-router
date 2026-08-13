@@ -23,11 +23,13 @@ from .router import (
     detect_phase,
     estimate_cost,
     estimate_tokens,
+    json_content_valid,
     load_config,
     load_models,
     select_model,
     stronger_than,
     tool_calls_valid,
+    wants_json,
 )
 
 load_dotenv()
@@ -58,7 +60,16 @@ def create_app(
     spend_log = spend or SpendLog(ROOT / "data" / "spend.txt", limit)
     log = log_path or ROOT / "data" / "requests.jsonl"
     cache = RequestCache(cache_dir or ROOT / "data" / "cache")
-    upstream = provider or HttpAiandProvider(base, key)
+    timeout_s = float(cfg.get("upstream_timeout_s") or os.getenv("UPSTREAM_TIMEOUT_S") or 120)
+    token_cap = int(cfg.get("max_tokens_limit") or os.getenv("MAX_TOKENS_LIMIT") or 0)
+    redact_keys = [
+        str(k).lower()
+        for k in (
+            cfg.get("redact_keys")
+            or ["key", "authorization", "token", "secret"]
+        )
+    ]
+    upstream = provider or HttpAiandProvider(base, key, timeout_s=timeout_s)
     last_outcome: dict[str, Any] = {}
     replay_html = (Path(__file__).with_name("replay.html")).read_text(encoding="utf-8")
     flag_path = learned_flag or ROOT / "data" / "learned_wins.json"
@@ -139,7 +150,7 @@ def create_app(
         for line in log.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
-            rows.append(_redact(json.loads(line)))
+            rows.append(_redact(json.loads(line), redact_keys))
         return rows
 
     @app.post("/v1/chat/completions")
@@ -155,9 +166,14 @@ def create_app(
         allowed = {x.strip() for x in allowed_raw.split(",") if x.strip()} or None
 
         requested = body.get("model") or "router/auto"
-        phase = detect_phase(headers, body)
+        phase = detect_phase(headers, body, last_outcome)
         tokens = estimate_tokens(body.get("messages") or [])
         needs_tools = bool(body.get("tools"))
+        needs_json = wants_json(body)
+        req_max = body.get("max_tokens") or body.get("max_completion_tokens")
+        req_max_i = int(req_max) if req_max is not None else None
+        if token_cap and req_max_i is not None and req_max_i > token_cap:
+            raise HTTPException(400, f"max_tokens {req_max_i} exceeds limit {token_cap}")
 
         if requested not in VIRTUAL_MODELS and requested in by_id:
             decision_model = by_id[requested]
@@ -186,6 +202,9 @@ def create_app(
                 allowed=allowed,
                 spend_usd=spend_log.total(),
                 budget_usd=limit,
+                needs_json=needs_json,
+                streaming=bool(body.get("stream")),
+                max_tokens=req_max_i,
             )
 
         meta = {
@@ -234,7 +253,7 @@ def create_app(
 
         t0 = time.perf_counter()
         result = await _call_provider(upstream, upstream_body)
-        if _should_escalate(result) and effort != "low":
+        if _should_escalate(result, needs_json=needs_json) and effort != "low":
             nxt = stronger_than(models, decision.model)
             if nxt:
                 meta["X-Router-Escalated-From"] = decision.model.id
@@ -253,23 +272,27 @@ def create_app(
             usage.get("completion_tokens", 0),
         )
         spend_log.add(cost)
-        append_jsonl(
-            log,
-            {
-                "phase": decision.phase,
-                "requested": requested,
-                "selected": decision.model.id,
-                "reason": decision.reason,
-                "candidates": decision.candidates,
-                "stream": streaming,
-                "tokens_in": usage.get("prompt_tokens", tokens),
-                "tokens_out": usage.get("completion_tokens", 0),
-                "cost_usd": round(cost, 6),
-                "latency_ms": latency_ms,
-                "status": result.get("status"),
-                "cache_hit": False,
-            },
-        )
+        message = (((result.get("json") or {}).get("choices") or [{}])[0].get("message") or {})
+        row = {
+            "phase": decision.phase,
+            "requested": requested,
+            "selected": decision.model.id,
+            "reason": decision.reason,
+            "candidates": decision.candidates,
+            "stream": streaming,
+            "tokens_in": usage.get("prompt_tokens", tokens),
+            "tokens_out": usage.get("completion_tokens", 0),
+            "cost_usd": round(cost, 6),
+            "latency_ms": latency_ms,
+            "status": result.get("status"),
+            "cache_hit": False,
+            "tool_valid": tool_calls_valid(message),
+            "json_valid": json_content_valid(message) if needs_json else None,
+        }
+        if last_outcome:
+            row["tests_passed"] = last_outcome.get("tests_passed")
+            row["patch_applied"] = last_outcome.get("patch_applied")
+        append_jsonl(log, row)
 
         if result.get("stream"):
             return StreamingResponse(
@@ -279,15 +302,15 @@ def create_app(
             )
         if result.get("status", 200) >= 400:
             return JSONResponse(result["json"], status_code=result["status"], headers=meta)
-        payload = result["json"]
-        payload["model"] = decision.model.id
+        payload = dict(result["json"])
+        payload["model"] = requested
         cache.put(ck, payload)
         return JSONResponse(payload, headers=meta)
 
     return app
 
 
-def _should_escalate(result: dict[str, Any]) -> bool:
+def _should_escalate(result: dict[str, Any], *, needs_json: bool = False) -> bool:
     if result.get("stream"):
         return False
     status = result.get("status", 200)
@@ -302,7 +325,11 @@ def _should_escalate(result: dict[str, Any]) -> bool:
     message = (choices[0] or {}).get("message") or {}
     if not message.get("content") and not message.get("tool_calls"):
         return True
-    return not tool_calls_valid(message)
+    if not tool_calls_valid(message):
+        return True
+    if needs_json and not json_content_valid(message):
+        return True
+    return False
 
 
 def _usage(result: dict[str, Any]) -> dict[str, int]:
@@ -324,11 +351,15 @@ async def _call_provider(upstream: Any, body: dict[str, Any]) -> dict[str, Any]:
         return {"status": 408, "json": {"error": {"message": "upstream timeout"}}}
 
 
-def _redact(row: dict[str, Any]) -> dict[str, Any]:
+def _redact(row: dict[str, Any], keys: list[str] | None = None) -> dict[str, Any]:
+    keys = [k.lower() for k in (keys or ["key", "authorization", "token", "secret"])]
+    substr = {"key", "secret", "authorization", "password"} & set(keys)
     out = {}
     for k, v in row.items():
         lk = k.lower()
-        if "key" in lk or lk in {"authorization", "token", "secret"}:
+        if lk in keys:
+            continue
+        if any(s in lk for s in substr):
             continue
         out[k] = v
     return out
