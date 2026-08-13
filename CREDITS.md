@@ -8,7 +8,7 @@ Plan (not yet measured on a live 3×5 run):
 | 3×5 eval matrix (Qwen, Kimi K2.7 Code, DeepSeek V4 Pro) | ~$10 |
 | Reserve / max-effort / K3 | remainder of $15 soft cap |
 
-Qwen list price is $0. Do not run `x-routing-effort: max` until K3 is confirmed on the org catalog.
+No model is free. Cheapest list blend is Flash ($0.15 / $0.25). Qwen output is $3.20/1M. Do not run `x-routing-effort: max` until K3 is confirmed on the org catalog ($3 / $12.50).
 
 Eval and playground share the same spend file. Duplicate immutable requests hit the request cache and are not billed twice.
 

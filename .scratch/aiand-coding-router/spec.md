@@ -43,8 +43,8 @@ Judges see a recorded run plus a tiny live playground, and a single HTML replay 
 19. As a credit owner, I want every paid call cached by request identity, so that the same immutable prompt/model/tools/temperature is not billed twice.
 20. As a credit owner, I want Motif-3 disabled until it appears on my org catalog, so that the gateway does not 404 on a briefed-but-absent model.
 21. As a credit owner, I want K3 excluded from normal effort, so that “highest AA” cannot spend $12.50/1M on a summary.
-22. As a credit owner, I want Qwen used when the bar is low, so that discovery and summaries can be free.
-23. As the router, I want phase `discover` to use a low quality bar, so that a cheap/free model can list and read a repo.
+22. As a credit owner, I want a cheap eligible model when the bar is low, so that discovery and summaries do not spend premium rates. No model is free on the catalog.
+23. As the router, I want phase `discover` to use a low quality bar, so that a cheaper model can list and read a repo.
 24. As the router, I want phase `plan` to use a high quality bar, so that architecture is not left to the cheapest model.
 25. As the router, I want phase `edit` to pick the cheapest model that clears the edit bar, so that implementation is not pinned to a marketing “coding specialist” unless that model is actually cheapest-above-bar.
 26. As the router, I want phase `tool` to require tool-capable models, so that a no-tools model is never selected when `tools` are present.

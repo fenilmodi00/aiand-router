@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>PROTOTYPE — Observability Decision contract</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a222c;
+      --line: #2c3a48;
+      --text: #e8eef4;
+      --muted: #8b9aab;
+      --accent: #3d9cf0;
+      --ok: #6bcf8e;
+      --warn: #e6b84d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.45 system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header, main { max-width: 1100px; margin: 0 auto; padding: 1.25rem 1.5rem; }
+    header h1 { font-size: 1.35rem; margin: 0 0 0.4rem; }
+    header p { color: var(--muted); margin: 0 0 0.5rem; max-width: 70ch; }
+    .mark { color: var(--warn); font-size: 0.8rem; letter-spacing: 0.04em; }
+    section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem; margin-top: 1rem; }
+    h2 { font-size: 0.95rem; margin: 0 0 0.75rem; color: var(--muted); font-weight: 600; }
+    .btns { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+    button {
+      background: #243040;
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.4rem 0.7rem;
+      cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); }
+    button.active { background: #1e4a73; border-color: var(--accent); }
+    .tabs { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 0.7rem; }
+    .tabs button { border-radius: 999px; font-size: 0.85rem; }
+    .walk p { margin: 0 0 0.7rem; color: var(--muted); }
+    .state { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 800px) { .state { grid-template-columns: 1fr; } }
+    dl { display: grid; grid-template-columns: 11rem 1fr; gap: 0.25rem 0.6rem; margin: 0; }
+    dt { color: var(--muted); }
+    dd { margin: 0; word-break: break-all; }
+    dd.changed { color: var(--ok); }
+    pre {
+      margin: 0;
+      background: #0b1016;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.7rem 0.8rem;
+      overflow: auto;
+      font-size: 0.78rem;
+      line-height: 1.4;
+    }
+    .note { margin-top: 0.75rem; color: var(--muted); font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <p class="mark">THROW AWAY PROTOTYPE — not production, not a dashboard</p>
+    <h1>Observability Decision contract</h1>
+    <p>
+      Does this header + JSONL shape feel right for a trained hop?
+      Click cases. Watch <strong>headers</strong> (what a client sees now) vs the
+      <strong>JSONL row</strong> (what we log after tokens exist). Savings is vs
+      <em>most expensive eligible</em>, never vs rules. Rules cost delta is shadow/promotion only.
+    </p>
+  </header>
+  <main>
+    <section>
+      <h2>Free play</h2>
+      <div class="btns" id="freeplay"></div>
+    </section>
+    <section>
+      <h2>Guided walkthroughs</h2>
+      <div class="tabs" id="tabs"></div>
+      <div class="walk" id="walk"></div>
+    </section>
+    <section>
+      <h2>Current observation</h2>
+      <p class="note" id="changed"></p>
+      <div class="state">
+        <div>
+          <h2>Readable fields</h2>
+          <dl id="fields"></dl>
+        </div>
+        <div>
+          <h2>X-Router-* headers (ex-ante)</h2>
+          <pre id="headers"></pre>
+          <h2 style="margin-top:1rem">JSONL row (ex-post)</h2>
+          <pre id="jsonl"></pre>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script>
+(function () {
+  "use strict";
+
+  /** Pure contract builder — no DOM. Lift this shape into the gateway later. */
+  const Contract = {
+    slimHeaderKeys: [
+      "X-Router-Model",
+      "X-Router-Phase",
+      "X-Router-Effort",
+      "X-Router-Complexity-Bin",
+      "X-Router-Confidence",
+      "X-Router-Rule",
+      "X-Router-Path",
+      "X-Router-Baseline-Model",
+      "X-Router-Savings-Usd",
+      "X-Router-Reason-Codes",
+      "X-Router-Candidates",
+      "X-Router-Threshold",
+      "X-Router-Escalated-From",
+    ],
+
+    observe: function (hop) {
+      const served = hop.escalated_to || hop.selected;
+      const baseline = hop.baseline_model_id;
+      const cost = hop.cost_usd;
+      const baselineCost = hop.baseline_cost_usd;
+      const savings = round6(Math.max(0, baselineCost - cost));
+      const savingsEst = hop.savings_usd_est != null ? hop.savings_usd_est : savings;
+
+      const jsonl = {
+        requested: hop.requested || "router/auto",
+        path: hop.path,
+        selected: served,
+        phase: hop.phase,
+        effort: hop.effort,
+        complexity_bin: hop.complexity_bin,
+        confidence: hop.path === "shadow" ? hop.rules_confidence : hop.confidence,
+        p_success: hop.p_success || null,
+        rule: hop.rule,
+        reason_codes: hop.reason_codes.slice(),
+        threshold: hop.threshold,
+        max_regret: hop.max_regret,
+        eligible: hop.eligible.slice(),
+        baseline_name: "most_expensive_eligible",
+        baseline_model_id: baseline,
+        savings_usd_est: savingsEst,
+        savings_usd: savings,
+        cost_usd: cost,
+        rules_cost_delta_usd: hop.rules_cost_delta_usd,
+        trained_selected: hop.trained_selected || null,
+        trained_confidence: hop.trained_confidence || null,
+        escalated_from: hop.escalated_from || null,
+        tokens_in: hop.tokens_in,
+        tokens_out: hop.tokens_out,
+        status: hop.status || 200,
+        tool_valid: hop.tool_valid != null ? hop.tool_valid : true,
+        cache_hit: false,
+      };
+
+      const headers = {
+        "X-Router-Model": served,
+        "X-Router-Phase": hop.phase,
+        "X-Router-Effort": hop.effort,
+        "X-Router-Complexity-Bin": hop.complexity_bin,
+        "X-Router-Rule": hop.rule,
+        "X-Router-Path": hop.path,
+        "X-Router-Baseline-Model": baseline,
+        "X-Router-Savings-Usd": String(savingsEst),
+        "X-Router-Reason-Codes": hop.reason_codes.join(","),
+        "X-Router-Candidates": hop.eligible.join(","),
+        "X-Router-Threshold": String(hop.threshold),
+      };
+      if (jsonl.confidence != null) headers["X-Router-Confidence"] = String(jsonl.confidence);
+      if (hop.escalated_from) headers["X-Router-Escalated-From"] = hop.escalated_from;
+      if (hop.path === "shadow" && hop.trained_selected) {
+        headers["X-Router-Trained-Would"] = hop.trained_selected;
+      }
+      return { headers: headers, jsonl: jsonl, note: hop.note || "" };
+    },
+  };
+
+  function round6(n) {
+    return Math.round(n * 1e6) / 1e6;
+  }
+
+  const K3 = "moonshotai/kimi-k3";
+  const FLASH = "deepseek-ai/deepseek-v4-flash";
+  const MOTIF = "motif-technologies/motif-3";
+  const PRO = "deepseek-ai/deepseek-v4-pro";
+  const GLM = "zai-org/glm-5.2";
+  const QWEN = "qwen/qwen3.6-27b";
+
+  const hops = {
+    threshold: {
+      label: "Threshold pick (Flash)",
+      note: "Trained live. Standard edit. Flash clears the bar; cheapest above threshold. Baseline is K3 (eligible). Savings vs K3, not vs rules.",
+      requested: "router/auto",
+      path: "trained",
+      selected: FLASH,
+      phase: "edit",
+      effort: "medium",
+      complexity_bin: "standard",
+      confidence: 0.86,
+      p_success: { [FLASH]: 0.86, [MOTIF]: 0.88, [PRO]: 0.91, [GLM]: 0.90, [K3]: 0.94 },
+      rule: "threshold",
+      reason_codes: ["bin:standard", "pick:cheapest_above_bar"],
+      threshold: 0.2,
+      max_regret: 0.15,
+      eligible: [FLASH, MOTIF, PRO, GLM, K3],
+      baseline_model_id: K3,
+      baseline_cost_usd: 0.012,
+      cost_usd: 0.00052,
+      savings_usd_est: 0.0115,
+      rules_cost_delta_usd: null,
+      tokens_in: 4000,
+      tokens_out: 800,
+    },
+    max_regret: {
+      label: "Max-regret (skip Qwen)",
+      note: "Qwen is cheaper than Flash but P(success) is more than max_regret behind the top scorer (K3). Flash still cheapest that stays within regret.",
+      requested: "router/auto",
+      path: "trained",
+      selected: FLASH,
+      phase: "plan",
+      effort: "high",
+      complexity_bin: "hard",
+      confidence: 0.72,
+      p_success: { [QWEN]: 0.41, [FLASH]: 0.72, [PRO]: 0.84, [K3]: 0.93 },
+      rule: "max_regret",
+      reason_codes: ["bin:hard", "regret:qwen_too_far", "pick:cheapest_within_regret"],
+      threshold: 0.2,
+      max_regret: 0.15,
+      eligible: [QWEN, FLASH, PRO, K3],
+      baseline_model_id: K3,
+      baseline_cost_usd: 0.018,
+      cost_usd: 0.0007,
+      savings_usd_est: 0.0172,
+      rules_cost_delta_usd: null,
+      tokens_in: 6000,
+      tokens_out: 1200,
+    },
+    fallback: {
+      label: "Fallback declined",
+      note: "Nothing clears threshold. Scorer declines → fallback Flash. Rule is fallback_declined. Savings still vs most expensive eligible (K3), not vs rules.",
+      requested: "router/auto",
+      path: "trained",
+      selected: FLASH,
+      phase: "debug",
+      effort: "high",
+      complexity_bin: "frontier",
+      confidence: 0.18,
+      p_success: { [FLASH]: 0.18, [PRO]: 0.19, [K3]: 0.22 },
+      rule: "fallback_declined",
+      reason_codes: ["bin:frontier", "decline:below_threshold", "fallback:deepseek-v4-flash"],
+      threshold: 0.55,
+      max_regret: 0.1,
+      eligible: [FLASH, PRO, K3],
+      baseline_model_id: K3,
+      baseline_cost_usd: 0.02,
+      cost_usd: 0.0009,
+      savings_usd_est: 0.019,
+      rules_cost_delta_usd: null,
+      tokens_in: 8000,
+      tokens_out: 1500,
+    },
+    shadow: {
+      label: "Shadow (rules serving)",
+      note: "Live pick is still rules (Pro after debug-fail). Trained would have picked Flash. Savings stamp is vs K3 on the *served* model (Pro). rules_cost_delta = trained − rules (negative = trained cheaper). Not called savings. No fake confidence on the rules hop.",
+      requested: "router/auto",
+      path: "shadow",
+      selected: PRO,
+      rules_confidence: null,
+      phase: "debug",
+      effort: "medium",
+      complexity_bin: "hard",
+      confidence: 0.78,
+      p_success: { [FLASH]: 0.61, [PRO]: 0.78, [K3]: 0.9 },
+      rule: "threshold",
+      reason_codes: ["bin:hard", "shadow:rules_serving", "trained_would:deepseek-v4-flash"],
+      threshold: 0.2,
+      max_regret: 0.15,
+      eligible: [FLASH, PRO, K3],
+      baseline_model_id: K3,
+      baseline_cost_usd: 0.012,
+      cost_usd: 0.003,
+      savings_usd_est: 0.009,
+      rules_cost_delta_usd: -0.00248,
+      trained_selected: FLASH,
+      trained_confidence: 0.61,
+      tokens_in: 4000,
+      tokens_out: 800,
+    },
+    escalate: {
+      label: "Escalate after bad tools",
+      note: "Trained picked Flash; tool JSON invalid → one escalate to Pro. Selected becomes Pro. Escalated-From stays. Savings vs K3 on the *final* model (smaller). p_success map is still the pre-hop eligible set.",
+      requested: "router/auto",
+      path: "trained",
+      selected: FLASH,
+      escalated_from: FLASH,
+      escalated_to: PRO,
+      phase: "edit",
+      effort: "medium",
+      complexity_bin: "standard",
+      confidence: 0.84,
+      p_success: { [FLASH]: 0.84, [PRO]: 0.91, [K3]: 0.94 },
+      rule: "threshold",
+      reason_codes: ["bin:standard", "pick:cheapest_above_bar", "escalated:tool_json"],
+      threshold: 0.2,
+      max_regret: 0.15,
+      eligible: [FLASH, PRO, K3],
+      baseline_model_id: K3,
+      baseline_cost_usd: 0.012,
+      cost_usd: 0.0032,
+      savings_usd_est: 0.0115,
+      rules_cost_delta_usd: null,
+      tokens_in: 4000,
+      tokens_out: 900,
+      tool_valid: false,
+    },
+    allowlist: {
+      label: "Allow-list drops K3",
+      note: "Client forbade K3. Baseline must not be K3 — most expensive *eligible* is GLM. Claiming savings vs K3 here would be a lie.",
+      requested: "router/auto",
+      path: "trained",
+      selected: FLASH,
+      phase: "edit",
+      effort: "medium",
+      complexity_bin: "trivial",
+      confidence: 0.92,
+      p_success: { [FLASH]: 0.92, [QWEN]: 0.88, [GLM]: 0.95 },
+      rule: "threshold",
+      reason_codes: ["bin:trivial", "allow_list", "pick:cheapest_above_bar"],
+      threshold: 0.2,
+      max_regret: 0.15,
+      eligible: [FLASH, QWEN, GLM],
+      baseline_model_id: GLM,
+      baseline_cost_usd: 0.0048,
+      cost_usd: 0.00052,
+      savings_usd_est: 0.0042,
+      rules_cost_delta_usd: null,
+      tokens_in: 2000,
+      tokens_out: 400,
+    },
+    effort_max: {
+      label: "effort=max (only K3)",
+      note: "Eligible ceiling is K3 alone. Selected = baseline → savings = 0. Honest, not a bug.",
+      requested: "router/auto",
+      path: "trained",
+      selected: K3,
+      phase: "plan",
+      effort: "max",
+      complexity_bin: "frontier",
+      confidence: 0.81,
+      p_success: { [K3]: 0.81 },
+      rule: "threshold",
+      reason_codes: ["bin:frontier", "effort:max", "pick:only_eligible"],
+      threshold: 0.6,
+      max_regret: 0.05,
+      eligible: [K3],
+      baseline_model_id: K3,
+      baseline_cost_usd: 0.02,
+      cost_usd: 0.02,
+      savings_usd_est: 0,
+      rules_cost_delta_usd: null,
+      tokens_in: 5000,
+      tokens_out: 2000,
+    },
+    scorer_down: {
+      label: "Scorer down → rules",
+      note: "Trained hop throws. Serve fallback/rules, 200 to client. Path=rules, reason_code scorer_down. No fake P(success). Savings still vs most expensive eligible.",
+      requested: "router/auto",
+      path: "rules",
+      selected: FLASH,
+      phase: "edit",
+      effort: "medium",
+      complexity_bin: "standard",
+      confidence: null,
+      p_success: null,
+      rule: "fallback_declined",
+      reason_codes: ["scorer_down", "path:rules"],
+      threshold: 0.2,
+      max_regret: 0.15,
+      eligible: [FLASH, MOTIF, K3],
+      baseline_model_id: K3,
+      baseline_cost_usd: 0.012,
+      cost_usd: 0.00052,
+      savings_usd_est: 0.0115,
+      rules_cost_delta_usd: null,
+      tokens_in: 4000,
+      tokens_out: 800,
+    },
+  };
+
+  const walkthroughs = [
+    {
+      id: "happy",
+      title: "Happy trained hop",
+      blurb: "Standard edit, Flash clears the bar, savings vs K3. Watch slim headers vs the full JSONL p_success map.",
+      steps: ["threshold"],
+    },
+    {
+      id: "policy",
+      title: "Rule enum (threshold → regret → decline)",
+      blurb: "Same contract, three rule values. Confirm fallback_declined is still a 200 with Flash, not a client error.",
+      steps: ["threshold", "max_regret", "fallback"],
+    },
+    {
+      id: "shadow",
+      title: "Shadow vs savings",
+      blurb: "Rules is serving. Trained-would is Motif. Savings vs K3 on Flash; rules_cost_delta is the extra field. They must not be the same number.",
+      steps: ["shadow"],
+    },
+    {
+      id: "honest",
+      title: "Honesty cases",
+      blurb: "Allow-list drops K3 → baseline becomes GLM. effort=max → savings 0. Escalate → final model, Escalated-From set. Scorer down → no fake confidence.",
+      steps: ["allowlist", "effort_max", "escalate", "scorer_down"],
+    },
+  ];
+
+  let lastKeys = new Set();
+  let walkIndex = null;
+  let stepIndex = 0;
+
+  function fieldEntries(obs) {
+    const j = obs.jsonl;
+    return [
+      ["Path", j.path],
+      ["Selected", j.selected],
+      ["Phase (hint)", j.phase],
+      ["Effort", j.effort],
+      ["Complexity bin", j.complexity_bin],
+      ["Confidence", j.confidence == null ? "(none — rules/scorer down)" : j.confidence],
+      ["Rule", j.rule],
+      ["Reason codes", j.reason_codes.join(", ")],
+      ["Eligible", j.eligible.join(", ")],
+      ["Baseline", j.baseline_name + " → " + j.baseline_model_id],
+      ["Savings (header / est)", j.savings_usd_est],
+      ["Savings (JSONL / realized)", j.savings_usd],
+      ["Cost USD", j.cost_usd],
+      ["Rules cost delta", j.rules_cost_delta_usd == null ? "(omit — not shadow/gate)" : j.rules_cost_delta_usd],
+      ["Trained would pick", j.trained_selected || "(n/a)"],
+      ["Escalated from", j.escalated_from || "(n/a)"],
+    ];
+  }
+
+  function render(hopId) {
+    const hop = hops[hopId];
+    const obs = Contract.observe(hop);
+    const entries = fieldEntries(obs);
+    const keys = new Set(entries.map(function (e) { return e[0] + "=" + String(e[1]); }));
+    const dl = document.getElementById("fields");
+    dl.innerHTML = "";
+    entries.forEach(function (pair) {
+      const dt = document.createElement("dt");
+      dt.textContent = pair[0];
+      const dd = document.createElement("dd");
+      dd.textContent = pair[1] == null ? "" : String(pair[1]);
+      if (lastKeys.size && !lastKeys.has(pair[0] + "=" + String(pair[1]))) dd.className = "changed";
+      dl.appendChild(dt);
+      dl.appendChild(dd);
+    });
+    lastKeys = keys;
+    document.getElementById("headers").textContent = JSON.stringify(obs.headers, null, 2);
+    document.getElementById("jsonl").textContent = JSON.stringify(obs.jsonl, null, 2);
+    document.getElementById("changed").textContent = hop.note;
+    document.querySelectorAll("#freeplay button").forEach(function (b) {
+      b.classList.toggle("active", b.dataset.id === hopId);
+    });
+  }
+
+  function renderWalk(id) {
+    walkIndex = walkthroughs.findIndex(function (w) { return w.id === id; });
+    stepIndex = 0;
+    document.querySelectorAll("#tabs button").forEach(function (b) {
+      b.classList.toggle("active", b.dataset.id === id);
+    });
+    const w = walkthroughs[walkIndex];
+    const box = document.getElementById("walk");
+    box.innerHTML = "";
+    const p = document.createElement("p");
+    p.textContent = w.blurb;
+    box.appendChild(p);
+    const row = document.createElement("div");
+    row.className = "btns";
+    w.steps.forEach(function (sid, i) {
+      const b = document.createElement("button");
+      b.textContent = (i + 1) + ". " + hops[sid].label;
+      b.addEventListener("click", function () {
+        stepIndex = i;
+        render(sid);
+      });
+      row.appendChild(b);
+    });
+    box.appendChild(row);
+    render(w.steps[0]);
+  }
+
+  const fp = document.getElementById("freeplay");
+  Object.keys(hops).forEach(function (id) {
+    const b = document.createElement("button");
+    b.dataset.id = id;
+    b.textContent = hops[id].label;
+    b.addEventListener("click", function () { render(id); });
+    fp.appendChild(b);
+  });
+
+  const tabs = document.getElementById("tabs");
+  walkthroughs.forEach(function (w) {
+    const b = document.createElement("button");
+    b.dataset.id = w.id;
+    b.textContent = w.title;
+    b.addEventListener("click", function () { renderWalk(w.id); });
+    tabs.appendChild(b);
+  });
+
+  renderWalk("happy");
+})();
+  </script>
+</body>
+</html>

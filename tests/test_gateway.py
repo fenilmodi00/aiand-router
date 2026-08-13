@@ -247,7 +247,7 @@ def test_jsonl_records_phase_selected_reason_and_cost(tmp_path):
     assert row["selected"] == "deepseek-ai/deepseek-v4-flash"
     assert "deepseek-ai/deepseek-v4-flash" in row["reason"]
     assert "cost_usd" in row
-    assert row["cost_usd"] == 0.000003
+    assert row["cost_usd"] == 0.000002
 
 
 def test_models_list_includes_router_auto(tmp_path):
@@ -842,7 +842,7 @@ models:
     assert provider.calls[0]["model"] == "dear/stream"
 
 
-def test_models_list_includes_all_nine_and_motif_disabled(tmp_path):
+def test_models_list_includes_all_nine_and_motif_enabled(tmp_path):
     client, _ = _client(tmp_path)
     response = client.get("/v1/models", headers=AUTH)
     ids = [m["id"] for m in response.json()["data"]]
@@ -860,7 +860,7 @@ def test_models_list_includes_all_nine_and_motif_disabled(tmp_path):
     ):
         assert mid in ids
     motif = next(m for m in response.json()["data"] if m["id"] == "motif-technologies/motif-3")
-    assert motif.get("enabled") is False
+    assert motif.get("enabled") is True
 
 
 def test_cached_input_price_feeds_cost(tmp_path):
