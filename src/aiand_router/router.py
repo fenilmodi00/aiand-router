@@ -109,6 +109,19 @@ class Decision:
     threshold: float
     reason: str
     candidates: list[str]
+    effort: str = "medium"
+    path: str = "rules"
+    rule: str | None = None
+    complexity_bin: str | None = None
+    confidence: float | None = None
+    p_success: dict[str, float] | None = None
+    max_regret: float | None = None
+    reason_codes: list[str] | None = None
+    baseline_model_id: str | None = None
+    trained_selected: str | None = None
+    trained_confidence: float | None = None
+    savings_usd: float | None = None
+    rules_cost_delta_usd: float | None = None
 
 
 def load_config(path: Path) -> dict[str, Any]:

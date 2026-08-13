@@ -515,6 +515,7 @@ def test_learned_router_is_used_only_after_flag_says_it_won(tmp_path):
         budget=15,
         cache_dir=tmp_path / "cache",
         learned_flag=flag,
+        trained_path="off",
     )
     client = TestClient(app)
     response = client.post(
@@ -568,6 +569,7 @@ models:
         config_path=yaml_path,
         cache_dir=tmp_path / "cache",
         learned_flag=flag,
+        trained_path="off",
     )
     client = TestClient(app)
     body = {

@@ -90,6 +90,23 @@ Optional headers:
 
 The response body keeps `model: router/auto`. The real aiand id is on `X-Router-Model` (plus phase, Pioneer `score=`, threshold, candidates) and in `data/requests.jsonl`.
 
+## Trained path
+
+Default `TRAINED_PATH` is **`shadow`**: the client still gets the rules pick; JSONL and `X-Router-Trained-Would` record what the trained hop would have chosen. Set `TRAINED_PATH=trained` to serve the cheapest eligible model that clears effort threshold and max_regret. `TRAINED_PATH=off` is today’s rules path (learned stub only if `learned_wins.json` says so). Invalid values are treated as shadow.
+
+Scorer weights load from `SCORER_PATH` (default `data/scorer.json`) at process start. Missing or corrupt weights fall back to rules with reason_code `scorer_down` — they do not invent P(success).
+
+Opt-in train (not CI; shares `BUDGET_LIMIT_USD`, default **15** in code — set `100` in the environment for the smoke fit):
+
+```bash
+set AIAND_TRAIN=1
+python -m aiand_router.train teacher --queries queries.jsonl --out data/silver.jsonl
+python -m aiand_router.train gold --queries queries.jsonl --out data/gold.jsonl
+python -m aiand_router.train fit --gold data/gold.jsonl --silver data/silver.jsonl --out data/scorer.json
+```
+
+The `$100` smoke artifact is labeled `not_spec_floors`. It is not Pioneer quality and not the SWE-bench Verified promotion gate. Savings, when logged, are versus `most_expensive_eligible` on that request — never an invented percentage.
+
 ## Flashlight demo
 
 A ~200-line client walks discover → plan → edit → test → fix → summarize against this gateway. It reports `{tests_passed, patch_applied}` after the test step so a failing seed can escalate on debug.

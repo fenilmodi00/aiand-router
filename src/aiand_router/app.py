@@ -15,6 +15,7 @@ import httpx
 from .cache import RequestCache, request_cache_key
 from .learn import learned_enabled, learned_select
 from .provider import HttpAiandProvider
+from .scorer import apply_trained_path, load_scorer, parse_trained_path, trained_select
 from .router import (
     DEBUG_PHASES,
     VIRTUAL_MODELS,
@@ -50,6 +51,8 @@ def create_app(
     aiand_base: str | None = None,
     cache_dir: Path | None = None,
     learned_flag: Path | None = None,
+    trained_path: str | None = None,
+    scorer_path: Path | None = None,
 ) -> FastAPI:
     cfg = load_config(config_path or ROOT / "config" / "models.yaml")
     models = load_models(cfg)
@@ -74,6 +77,11 @@ def create_app(
     last_outcome: dict[str, Any] = {}
     replay_html = (Path(__file__).with_name("replay.html")).read_text(encoding="utf-8")
     flag_path = learned_flag or ROOT / "data" / "learned_wins.json"
+    hop_path = parse_trained_path(
+        trained_path if trained_path is not None else os.getenv("TRAINED_PATH")
+    )
+    scorer_file = scorer_path or Path(os.getenv("SCORER_PATH") or ROOT / "data" / "scorer.json")
+    scorer_artifact = load_scorer(scorer_file)
 
     app = FastAPI(title="AIand Coding Router", version="0.1.0")
     app.add_middleware(
@@ -194,10 +202,7 @@ def create_app(
                 for name in DEBUG_PHASES:
                     thresholds[name] = bump
                 select_cfg["phase_threshold"] = thresholds
-            picker = learned_select if learned_enabled(flag_path) else select_model
-            decision = picker(
-                select_cfg,
-                models,
+            pick_kwargs = dict(
                 phase=phase,
                 needs_tools=needs_tools,
                 tokens=tokens,
@@ -210,14 +215,19 @@ def create_app(
                 max_tokens=req_max_i,
                 latency_limit_ms=_latency_limit(cfg, headers),
             )
+            use_learned = hop_path == "off" and learned_enabled(flag_path)
+            picker = learned_select if use_learned else select_model
+            decision = picker(select_cfg, models, **pick_kwargs)
+            decision.effort = effort
+            if hop_path != "off":
+                trained = None
+                if scorer_artifact is not None:
+                    trained = trained_select(select_cfg, models, scorer_artifact, **pick_kwargs)
+                decision = apply_trained_path(
+                    hop_path, decision, trained, tokens=tokens, by_id=by_id
+                )
 
-        meta = {
-            "X-Router-Phase": decision.phase,
-            "X-Router-Model": decision.model.id,
-            "X-Router-Reason": decision.reason,
-            "X-Router-Threshold": str(decision.threshold),
-            "X-Router-Candidates": ",".join(decision.candidates),
-        }
+        meta = _router_headers(decision)
 
         streaming = bool(body.get("stream"))
         ck = request_cache_key(body, decision.model.id)
@@ -226,20 +236,17 @@ def create_app(
             if cached is not None:
                 append_jsonl(
                     log,
-                    {
-                        "phase": decision.phase,
-                        "requested": requested,
-                        "selected": decision.model.id,
-                        "reason": decision.reason,
-                        "candidates": decision.candidates,
-                        "stream": False,
-                        "tokens_in": 0,
-                        "tokens_out": 0,
-                        "cost_usd": 0.0,
-                        "latency_ms": 0,
-                        "status": 200,
-                        "cache_hit": True,
-                    },
+                    _jsonl_row(
+                        decision,
+                        requested=requested,
+                        stream=False,
+                        tokens_in=0,
+                        tokens_out=0,
+                        cost_usd=0.0,
+                        latency_ms=0,
+                        status=200,
+                        cache_hit=True,
+                    ),
                 )
                 return JSONResponse(cached, headers=meta)
 
@@ -263,7 +270,8 @@ def create_app(
                 meta["X-Router-Escalated-From"] = decision.model.id
                 meta["X-Router-Model"] = nxt.id
                 decision.reason += f" ; escalated to {nxt.id}"
-                meta["X-Router-Reason"] = decision.reason
+                if decision.path not in {"shadow", "trained"}:
+                    meta["X-Router-Reason"] = decision.reason
                 upstream_body["model"] = nxt.id
                 result = await _call_provider(upstream, upstream_body)
                 decision.model = nxt
@@ -277,22 +285,26 @@ def create_app(
         )
         spend_log.add(cost)
         message = (((result.get("json") or {}).get("choices") or [{}])[0].get("message") or {})
-        row = {
-            "phase": decision.phase,
-            "requested": requested,
-            "selected": decision.model.id,
-            "reason": decision.reason,
-            "candidates": decision.candidates,
-            "stream": streaming,
-            "tokens_in": usage.get("prompt_tokens", tokens),
-            "tokens_out": usage.get("completion_tokens", 0),
-            "cost_usd": round(cost, 6),
-            "latency_ms": latency_ms,
-            "status": result.get("status"),
-            "cache_hit": False,
-            "tool_valid": tool_calls_valid(message),
-            "json_valid": json_content_valid(message) if needs_json else None,
-        }
+        tok_in = usage.get("prompt_tokens", tokens)
+        tok_out = usage.get("completion_tokens", 0)
+        if decision.baseline_model_id and decision.baseline_model_id in by_id:
+            decision.savings_usd = round(
+                max(0.0, estimate_cost(by_id[decision.baseline_model_id], tok_in, tok_out) - cost),
+                6,
+            )
+        row = _jsonl_row(
+            decision,
+            requested=requested,
+            stream=streaming,
+            tokens_in=tok_in,
+            tokens_out=tok_out,
+            cost_usd=round(cost, 6),
+            latency_ms=latency_ms,
+            status=result.get("status"),
+            cache_hit=False,
+            tool_valid=tool_calls_valid(message),
+            json_valid=json_content_valid(message) if needs_json else None,
+        )
         if last_outcome:
             row["tests_passed"] = last_outcome.get("tests_passed")
             row["patch_applied"] = last_outcome.get("patch_applied")
@@ -312,6 +324,84 @@ def create_app(
         return JSONResponse(payload, headers=meta)
 
     return app
+
+
+def _router_headers(decision: Decision) -> dict[str, str]:
+    if decision.path in {"shadow", "trained"}:
+        meta = {
+            "X-Router-Phase": decision.phase,
+            "X-Router-Model": decision.model.id,
+            "X-Router-Effort": decision.effort,
+            "X-Router-Path": decision.path,
+            "X-Router-Threshold": str(decision.threshold),
+            "X-Router-Candidates": ",".join(decision.candidates),
+        }
+        if decision.complexity_bin:
+            meta["X-Router-Complexity-Bin"] = decision.complexity_bin
+        if decision.confidence is not None:
+            meta["X-Router-Confidence"] = str(decision.confidence)
+        if decision.rule:
+            meta["X-Router-Rule"] = decision.rule
+        if decision.baseline_model_id:
+            meta["X-Router-Baseline-Model"] = decision.baseline_model_id
+        if decision.savings_usd is not None:
+            meta["X-Router-Savings-Usd"] = str(decision.savings_usd)
+        if decision.reason_codes:
+            meta["X-Router-Reason-Codes"] = ",".join(decision.reason_codes)
+        if decision.path == "shadow" and decision.trained_selected:
+            meta["X-Router-Trained-Would"] = decision.trained_selected
+        return meta
+    meta = {
+        "X-Router-Phase": decision.phase,
+        "X-Router-Model": decision.model.id,
+        "X-Router-Reason": decision.reason,
+        "X-Router-Threshold": str(decision.threshold),
+        "X-Router-Candidates": ",".join(decision.candidates),
+    }
+    if decision.reason_codes:
+        meta["X-Router-Reason-Codes"] = ",".join(decision.reason_codes)
+    if "scorer_down" in (decision.reason_codes or []):
+        meta["X-Router-Path"] = "rules"
+        if decision.rule:
+            meta["X-Router-Rule"] = decision.rule
+    return meta
+
+
+def _jsonl_row(decision: Decision, **extra: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "phase": decision.phase,
+        "selected": decision.model.id,
+        "reason": decision.reason,
+        "candidates": decision.candidates,
+        "path": decision.path,
+        **extra,
+    }
+    if decision.trained_selected:
+        row["trained_selected"] = decision.trained_selected
+    if decision.trained_confidence is not None:
+        row["trained_confidence"] = decision.trained_confidence
+    if decision.confidence is not None:
+        row["confidence"] = decision.confidence
+    if decision.complexity_bin:
+        row["complexity_bin"] = decision.complexity_bin
+    if decision.p_success is not None:
+        row["p_success"] = decision.p_success
+    if decision.rule:
+        row["rule"] = decision.rule
+    if decision.reason_codes:
+        row["reason_codes"] = decision.reason_codes
+    if decision.max_regret is not None:
+        row["max_regret"] = decision.max_regret
+    row["threshold"] = decision.threshold
+    if decision.baseline_model_id:
+        row["baseline_model_id"] = decision.baseline_model_id
+    if decision.savings_usd is not None:
+        row["savings_usd"] = decision.savings_usd
+    if decision.rules_cost_delta_usd is not None:
+        row["rules_cost_delta_usd"] = decision.rules_cost_delta_usd
+    if decision.effort:
+        row["effort"] = decision.effort
+    return row
 
 
 def _should_escalate(result: dict[str, Any], *, needs_json: bool = False) -> bool:
