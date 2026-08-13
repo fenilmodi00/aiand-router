@@ -13,6 +13,14 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 import httpx
 
 from .cache import RequestCache, request_cache_key
+from .console import (
+    LOG_QUERY_KEYS,
+    aiand_origin,
+    inferences_payload,
+    overview_payload,
+    proxy_aiand,
+    redact as _redact,
+)
 from .learn import learned_enabled, learned_select
 from .provider import HttpAiandProvider
 from .scorer import apply_trained_path, load_scorer, parse_trained_path, trained_select
@@ -53,6 +61,7 @@ def create_app(
     learned_flag: Path | None = None,
     trained_path: str | None = None,
     scorer_path: Path | None = None,
+    aiand_http: Any | None = None,
 ) -> FastAPI:
     cfg = load_config(config_path or ROOT / "config" / "models.yaml")
     models = load_models(cfg)
@@ -126,9 +135,88 @@ def create_app(
                     "enabled": m.enabled,
                     "aa_index": m.aa_index,
                     "aa_source": m.aa_source,
+                    "display_name": m.display_name,
+                    "input_per_1m": m.input_per_1m,
+                    "output_per_1m": m.output_per_1m,
                 }
             )
         return {"object": "list", "data": data}
+
+    @app.get("/v1/console/overview")
+    def console_overview(
+        range: str = "30d",
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        _check_auth(authorization)
+        return overview_payload(
+            log_path=log,
+            models=models,
+            spend_usd=spend_log.total(),
+            budget_usd=limit,
+            aiand_key_set=bool(key),
+            range_key=range,
+            redact_keys=redact_keys,
+            virtual_model=str(cfg.get("virtual_model") or "router/auto"),
+        )
+
+    @app.get("/v1/console/inferences")
+    def console_inferences(
+        q: str = "",
+        model: str = "",
+        range: str = "30d",
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        _check_auth(authorization)
+        return inferences_payload(
+            log_path=log,
+            q=q,
+            model=model,
+            range_key=range,
+            redact_keys=redact_keys,
+        )
+
+    @app.get("/v1/console/upstream/summary")
+    async def console_upstream_summary(
+        range: str = "30d",
+        authorization: str | None = Header(default=None),
+    ):
+        _check_auth(authorization)
+        return await proxy_aiand(
+            origin=aiand_origin(base),
+            api_key=key,
+            path="/analytics/summary",
+            params={"range": range},
+            client=aiand_http,
+        )
+
+    @app.get("/v1/console/upstream/metrics")
+    async def console_upstream_metrics(
+        range: str = "30d",
+        authorization: str | None = Header(default=None),
+    ):
+        _check_auth(authorization)
+        return await proxy_aiand(
+            origin=aiand_origin(base),
+            api_key=key,
+            path="/analytics/metrics",
+            params={"range": range},
+            client=aiand_http,
+        )
+
+    @app.get("/v1/console/upstream/logs")
+    async def console_upstream_logs(
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ):
+        _check_auth(authorization)
+        params = {k: request.query_params[k] for k in LOG_QUERY_KEYS if k in request.query_params}
+        return await proxy_aiand(
+            origin=aiand_origin(base),
+            api_key=key,
+            path="/logs",
+            params=params,
+            client=aiand_http,
+        )
 
     @app.post("/v1/router/outcome")
     async def report_outcome(
@@ -308,6 +396,8 @@ def create_app(
         if last_outcome:
             row["tests_passed"] = last_outcome.get("tests_passed")
             row["patch_applied"] = last_outcome.get("patch_applied")
+        if "X-Router-Escalated-From" in meta:
+            row["escalated_from"] = meta["X-Router-Escalated-From"]
         append_jsonl(log, row)
 
         if result.get("stream"):
@@ -454,17 +544,3 @@ def _latency_limit(cfg: dict[str, Any], headers: dict[str, str]) -> float | None
     except (TypeError, ValueError):
         return None
     return limit if limit > 0 else None
-
-
-def _redact(row: dict[str, Any], keys: list[str] | None = None) -> dict[str, Any]:
-    keys = [k.lower() for k in (keys or ["key", "authorization", "token", "secret"])]
-    substr = {"key", "secret", "authorization", "password"} & set(keys)
-    out = {}
-    for k, v in row.items():
-        lk = k.lower()
-        if lk in keys:
-            continue
-        if any(s in lk for s in substr):
-            continue
-        out[k] = v
-    return out

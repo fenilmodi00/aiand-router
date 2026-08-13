@@ -865,6 +865,18 @@ def test_models_list_includes_all_nine_and_motif_enabled(tmp_path):
     assert motif.get("enabled") is True
 
 
+def test_models_list_includes_registry_prices(tmp_path):
+    client, _ = _client(tmp_path)
+    payload = client.get("/v1/models", headers=AUTH).json()["data"]
+    auto = next(m for m in payload if m["id"] == "router/auto")
+    assert "input_per_1m" not in auto
+    assert auto["owned_by"] == "aiand-router"
+    flash = next(m for m in payload if m["id"] == "deepseek-ai/deepseek-v4-flash")
+    assert flash["display_name"] == "DeepSeek V4 Flash"
+    assert flash["input_per_1m"] == 0.15
+    assert flash["output_per_1m"] == 0.25
+
+
 def test_cached_input_price_feeds_cost(tmp_path):
     yaml_path = tmp_path / "models.yaml"
     yaml_path.write_text(
