@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Go-live ladder — card</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+  <article class="page">
+    <nav class="crumbs">
+      <a href="../lessons/0001-go-live-ladder.html">Lesson 0001</a> ·
+      <a href="glossary.html">Glossary</a>
+    </nav>
+    <header>
+      <h1>Go-live ladder</h1>
+      <p class="lede">Print this. One column: what must be true before the next rung.</p>
+    </header>
+    <ol class="ladder">
+      <li><span class="n">1</span><div><strong>Seam</strong> pytest hop + train + gateway green. No paid train yet.</div></li>
+      <li><span class="n">2</span><div><strong>Serve</strong> <code>uvicorn … --host 127.0.0.1 --port 8000</code>. Client <code>model: router/auto</code>. Path unset = shadow. Distinct router key.</div></li>
+      <li><span class="n">3</span><div><strong>Score</strong> <code>data/scorer.json</code> (<code>not_spec_floors</code>). Restart. Grep <code>path=shadow</code>, compare <code>selected</code> / <code>trained_selected</code>.</div></li>
+      <li><span class="n">4</span><div><strong>Flip</strong> <code>TRAINED_PATH=trained</code> after shadow looks sane. Not Verified. Missing file → <code>scorer_down</code> → rules.</div></li>
+    </ol>
+    <p><code>off | shadow | trained</code>. Invalid → shadow. Savings vs <code>most_expensive_eligible</code> only.</p>
+    <p class="source">Source: <a href="../.scratch/trained-hop/spec.md">trained-hop spec</a>, <a href="../README.md#trained-path">README</a>.</p>
+  </article>
+</body>
+</html>

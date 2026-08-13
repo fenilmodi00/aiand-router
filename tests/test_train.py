@@ -58,7 +58,10 @@ def test_teacher_writes_silver_and_uses_motif_then_cache(tmp_path, monkeypatch):
     provider = FakeProvider([_label(), _label()])
     spend = SpendLog(tmp_path / "spend.txt", 15)
     queries = tmp_path / "q.jsonl"
-    queries.write_text(json.dumps({"prompt": "rename a variable"}) + "\n", encoding="utf-8")
+    queries.write_text(
+        json.dumps({"prompt": "rename a variable", "phase": "edit", "needs_tools": True}) + "\n",
+        encoding="utf-8",
+    )
     out = tmp_path / "silver.jsonl"
     kwargs = dict(
         provider=provider,
@@ -69,6 +72,8 @@ def test_teacher_writes_silver_and_uses_motif_then_cache(tmp_path, monkeypatch):
     assert main(["teacher", "--queries", str(queries), "--out", str(out), "--limit", "1"], **kwargs) == 0
     row = json.loads(out.read_text(encoding="utf-8").splitlines()[0])
     assert row["complexity_bin"] == "standard"
+    assert row["phase"] == "edit"
+    assert row["needs_tools"] is True
     assert 0 <= row["p_success"]["deepseek-ai/deepseek-v4-flash"] <= 1
     assert provider.calls[0]["model"] == MOTIF
     assert provider.calls[0]["temperature"] == 0
@@ -140,6 +145,9 @@ def test_gold_sparse_skips_k3_and_fit_writes_not_spec_floors(tmp_path, monkeypat
     assert data["not_spec_floors"] is True
     assert "deepseek-ai/deepseek-v4-flash" in data["p_success"]
     assert "google/gemma-4-31b-it" not in data["p_success"]
+    assert "deepseek-ai/deepseek-v4-flash" in data["weights"]
+    assert "google/gemma-4-31b-it" not in data["weights"]
+    assert "platt" in data
 
 
 def test_gold_refuses_without_opt_in(tmp_path, monkeypatch):

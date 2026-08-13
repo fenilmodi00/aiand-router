@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>You are not training an LLM — queries.jsonl</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+  <article class="page">
+    <nav class="crumbs">
+      <a href="0001-go-live-ladder.html">Lesson 0001</a> ·
+      <a href="../reference/train-pipeline.html">Pipeline card</a> ·
+      <a href="../reference/glossary.html">Glossary</a> ·
+      <a href="../datasets/smoke-queries.jsonl">Starter file</a>
+    </nav>
+    <header>
+      <h1>You are not training an LLM. You are labeling a JSONL of coding requests.</h1>
+      <p class="lede">Frontend analogy: <code>queries.jsonl</code> is a fixtures file. The train CLI is three npm scripts. The Scorer is a built artifact the gateway imports — like compiled CSS, not a new browser.</p>
+    </header>
+
+    <div class="callout ok">
+      <strong>Win for this lesson.</strong> A real starter dataset is already on disk:
+      <a href="../datasets/smoke-queries.jsonl"><code>datasets/smoke-queries.jsonl</code></a>
+      (48 coding-agent prompts). Validate it below. Do <em>not</em> spend credits yet.
+    </div>
+
+    <h2>What “train the router” actually means</h2>
+    <p>
+      AIand already hosts Flash, Qwen, Motif, GLM, K3. Those weights are not yours to train.
+      The hop spec’s Scorer is a <em>tiny in-process classifier</em>: complexity bin + P(success) per eligible model, then cheapest-above-bar.
+      <a href="../.scratch/trained-hop/spec.md">Hop spec, Solution</a>.
+    </p>
+    <p>
+      Think <code>fixtures.json</code> → mock review → Playwright against the real API → a <code>dist/</code> file the app loads. Three paid-or-local jobs, then a JSON artifact:
+    </p>
+    <div class="flow">
+      <div class="box"><strong>1. queries</strong> unpaid JSONL of prompts</div>
+      <div class="arrow">→</div>
+      <div class="box"><strong>2. teacher</strong> Motif (then GLM) guesses bins + silver P(success)</div>
+      <div class="arrow">→</div>
+      <div class="box"><strong>3. gold</strong> Flash + measured trio actually answer, short</div>
+      <div class="arrow">→</div>
+      <div class="box"><strong>4. fit</strong> local math → <code>scorer.json</code></div>
+    </div>
+    <p>
+      Teacher labels from the <em>query alone</em> are <strong>silver</strong> — a guess, not gold. Dense success matrices in the literature are built by <em>running</em> candidates
+      (<a href="../.scratch/trained-router/research/teacher-labeling.md">teacher-labeling note</a>;
+      RouteLLM: <a href="https://arxiv.org/abs/2406.18665">Ong et al., 2024</a>).
+      This CLI writes silver, then gold-where-present, and must not calibrate on silver.
+      <a href="../.scratch/trained-hop/spec.md">Stories 33–34</a>.
+    </p>
+
+    <h2>The file format (you already know this)</h2>
+    <p>
+      <a href="https://jsonlines.org/">JSON Lines</a>: one JSON object per line, newline-separated, not one giant array.
+      The train CLI accepts <code>prompt</code> or OpenAI-style <code>messages</code>
+      (<a href="../src/aiand_router/train.py">train.py</a> <code>_messages</code>).
+    </p>
+<pre><code>{"prompt": "Rename tmp to userCount in src/stats.ts.", "phase": "edit", "hint_bin": "trivial"}</code></pre>
+    <p>
+      <code>phase</code> and <code>hint_bin</code> are for <em>you</em> to keep the set balanced. Extra keys are ignored by the reader.
+      Today the teacher job stamps <code>phase=plan</code> on silver rows — a shortcut, not something you need to fix this session.
+    </p>
+    <p>
+      48 rows is a <em>starter</em>, not the $100 ceiling (teacher ≤1000, sparse gold ≤200 × Flash+trio).
+      Public SWE-bench Verified is a <strong>gate</strong>, not this smoke corpus
+      (<a href="../.scratch/trained-router/research/bootstrap-datasets.md">bootstrap-datasets</a>).
+    </p>
+
+    <h2>Skill: prove the file is valid JSONL</h2>
+    <p>Paste or edit. Click validate. You want 48 valid rows and a mix of <code>hint_bin</code> / <code>phase</code>.</p>
+    <div class="quiz" id="jsonl"></div>
+
+    <h2>What you will run later (not now)</h2>
+    <p>PowerShell, venv on, from the repo root. Opt-in is required so pytest cannot spend:</p>
+<pre><code>$env:AIAND_TRAIN="1"
+python -m aiand_router.train teacher --queries datasets/smoke-queries.jsonl --out data/silver.jsonl --limit 5
+python -m aiand_router.train gold --queries datasets/smoke-queries.jsonl --out data/gold.jsonl --limit 5
+python -m aiand_router.train fit --gold data/gold.jsonl --silver data/silver.jsonl --out data/scorer.json</code></pre>
+    <p>
+      <code>--limit 5</code> is a wallet-safe rehearsal. Teacher talks to Motif-3, then GLM on hard/low-confidence rows (≤25% escalate).
+      Gold talks to Flash + Qwen + Kimi K2.7 Code + V4 Pro, <code>max_tokens=64</code>, never K3.
+      Fit is local — no provider.
+      Cache hits are free. Job refuses if <code>AIAND_TRAIN</code> is unset.
+      <a href="../README.md#trained-path">README, Trained path</a>.
+    </p>
+    <div class="callout warn">
+      Skip this block until you are ready to spend. Next lesson we run <code>--limit 5</code> together and read one silver row. Ask before raising the limit toward 200.
+    </div>
+
+    <h2>Retrieve it</h2>
+    <div class="quiz" id="quiz"></div>
+
+    <p class="source">
+      <strong>Primary source:</strong>
+      <a href="../.scratch/trained-hop/spec.md">trained-hop spec</a>, stories 28–36 (teacher → mini gold → loadable <code>not_spec_floors</code> artifact).
+      Format: <a href="https://jsonlines.org/">jsonlines.org</a>.
+      Why teacher ≠ gold: <a href="../.scratch/trained-router/research/teacher-labeling.md">teacher-labeling.md</a>.
+    </p>
+    <footer>
+      If the fixtures analogy, a JSONL line, or why we are not training DeepSeek is unclear — ask here.
+      You do not need ML background for the next step.
+    </footer>
+  </article>
+  <script src="../assets/quiz.js"></script>
+  <script src="../assets/jsonl-check.js"></script>
+  <script>
+    mountJsonlCheck(
+      document.getElementById("jsonl"),
+      "{\"prompt\": \"Rename the variable tmp to userCount in src/stats.ts and leave behavior unchanged.\", \"phase\": \"edit\", \"hint_bin\": \"trivial\"}\n{\"prompt\": \"Plan how to add an optional x-request-id header that is copied onto the JSONL row.\", \"phase\": \"plan\", \"hint_bin\": \"standard\"}\n"
+    );
+    mountQuiz(document.getElementById("quiz"), [
+      {
+        prompt: "“Train the router” in this repo produces:",
+        options: [
+          { text: "the Scorer artifact" },
+          { text: "a new AIand LLM" },
+          { text: "the OpenCode app" }
+        ],
+        answer: "the Scorer artifact",
+        ok: "Yes. Catalog models stay at AIand. You fit scorer.json.",
+        no: "You are not fine-tuning Flash or rebuilding OpenCode. The artifact is scorer.json."
+      },
+      {
+        prompt: "datasets/smoke-queries.jsonl contains:",
+        options: [
+          { text: "coding prompts unlabeled" },
+          { text: "success gold measured" },
+          { text: "silver labels guessed" }
+        ],
+        answer: "coding prompts unlabeled",
+        ok: "Yes. Labels appear only after teacher (silver) or gold (measured).",
+        no: "Gold and silver are outputs of the CLI, not the query file."
+      },
+      {
+        prompt: "First paid command after the file exists:",
+        options: [
+          { text: "teacher with --limit 5" },
+          { text: "gold on two hundred" },
+          { text: "fit with empty gold" }
+        ],
+        answer: "teacher with --limit 5",
+        ok: "Yes. Tiny teacher rehearsal, then gold, then free fit.",
+        no: "Do not jump to 200 gold cells or fit without gold. Limit 5 first."
+      }
+    ]);
+  </script>
+</body>
+</html>

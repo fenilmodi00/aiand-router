@@ -1,0 +1,48 @@
+{"prompt": "Rename the variable tmp to userCount in src/stats.ts and leave behavior unchanged.", "phase": "edit", "hint_bin": "trivial"}
+{"prompt": "Add a one-line docstring to function parseIsoDate explaining that it returns UTC.", "phase": "edit", "hint_bin": "trivial"}
+{"prompt": "Fix the typo 'recieve' to 'receive' in README.md. Do not change anything else.", "phase": "edit", "hint_bin": "trivial"}
+{"prompt": "What files exist under src/aiand_router/? List paths only.", "phase": "discover", "hint_bin": "trivial"}
+{"prompt": "Summarize this module in two sentences: a FastAPI app that proxies OpenAI-style chat completions.", "phase": "summarize", "hint_bin": "trivial"}
+{"prompt": "Plan the smallest change to add a healthz alias that returns the existing /health JSON.", "phase": "plan", "hint_bin": "trivial"}
+{"prompt": "Call list_files on . with path src and stop after the tool result.", "phase": "tool", "hint_bin": "trivial"}
+{"prompt": "The unit test fails with AssertionError: expected 2 got 3 on a counter increment. What is the likely off-by-one?", "phase": "debug", "hint_bin": "trivial"}
+{"prompt": "Add a TypeScript function formatUsd(n: number) that returns a string like $1.23 with two decimals.", "phase": "edit", "hint_bin": "standard"}
+{"prompt": "Write a Python helper that reads a .jsonl file and yields parsed objects, skipping blank lines.", "phase": "edit", "hint_bin": "standard"}
+{"prompt": "Plan how to add an optional x-request-id header that is copied onto the JSONL row.", "phase": "plan", "hint_bin": "standard"}
+{"prompt": "Find where eligible_models is defined and name the file. Do not propose a patch yet.", "phase": "discover", "hint_bin": "standard"}
+{"prompt": "Given tools, call read_file on config/models.yaml then stop.", "phase": "tool", "hint_bin": "standard"}
+{"prompt": "pytest says ImportError: cannot import name load_scorer. Where would you look first?", "phase": "debug", "hint_bin": "standard"}
+{"prompt": "Summarize the difference between TRAINED_PATH=shadow and TRAINED_PATH=trained in three bullets.", "phase": "summarize", "hint_bin": "standard"}
+{"prompt": "Add input validation so BUDGET_LIMIT_USD below 0 is treated as 0 in the spend log.", "phase": "edit", "hint_bin": "standard"}
+{"prompt": "Parse this JSON object of usage tokens and return prompt_tokens + completion_tokens as an int.", "phase": "edit", "hint_bin": "standard"}
+{"prompt": "Write a regex that matches aiand model ids like org/name with a slash and no spaces.", "phase": "edit", "hint_bin": "standard"}
+{"prompt": "Plan a cache key for chat bodies that ignores message order? No — it must be sensitive to messages. Sketch the key fields.", "phase": "plan", "hint_bin": "standard"}
+{"prompt": "List every env var this gateway reads that can spend money or change the pick.", "phase": "discover", "hint_bin": "standard"}
+{"prompt": "Refactor router.select_model so effort=low still runs hard constraints but skips Pioneer score. Keep the public signature.", "phase": "edit", "hint_bin": "hard"}
+{"prompt": "Plan how to add streaming tool-calls without buffering the whole upstream SSE in memory.", "phase": "plan", "hint_bin": "hard"}
+{"prompt": "A client sends tools and json_schema together. Trace which hard constraint drops which models.", "phase": "debug", "hint_bin": "hard"}
+{"prompt": "Find all call sites that write data/requests.jsonl and check they redact authorization.", "phase": "discover", "hint_bin": "hard"}
+{"prompt": "Call the tools needed to open src/aiand_router/app.py, jump to create_app, and quote the TRAINED_PATH default.", "phase": "tool", "hint_bin": "hard"}
+{"prompt": "Summarize scorer_down for an on-call engineer: what the client sees, what JSONL records, what not to do.", "phase": "summarize", "hint_bin": "hard"}
+{"prompt": "Implement cheapest-above-bar given p_success, threshold, and max_regret. Return the model id or fallback.", "phase": "edit", "hint_bin": "hard"}
+{"prompt": "Debug: shadow headers show X-Router-Trained-Would equal to X-Router-Model on every request. List three causes.", "phase": "debug", "hint_bin": "hard"}
+{"prompt": "Plan a migration from intercept-only mean gold to per-model logistic + Platt without changing the HTTP contract.", "phase": "plan", "hint_bin": "hard"}
+{"prompt": "Add a test that tools-present requests never include a no-tools model in p_success keys.", "phase": "edit", "hint_bin": "hard"}
+{"prompt": "Design a flywheel: ingest production JSONL nightly, refit the Scorer, keep not_spec_floors until a promotion gate passes. Name the splits.", "phase": "plan", "hint_bin": "frontier"}
+{"prompt": "How should a new catalog id without a dense gold slice behave on path=trained? Cite the hop spec rule.", "phase": "plan", "hint_bin": "frontier"}
+{"prompt": "Propose an in-process feature vector for Rec A using only phase family, tools flag, and log tokens. No embeddings.", "phase": "plan", "hint_bin": "frontier"}
+{"prompt": "A calibrated P(success) of 0.9 that is really 0.4 will pick too-cheap models. What observable in JSONL would reveal that?", "phase": "debug", "hint_bin": "frontier"}
+{"prompt": "Map flashlight phases discover/plan/edit/debug/summarize onto complexity bins. Bins must not become the pick.", "phase": "summarize", "hint_bin": "frontier"}
+{"prompt": "Locate every place savings_usd is computed and confirm the baseline is most_expensive_eligible, never K3 unless eligible.", "phase": "discover", "hint_bin": "frontier"}
+{"prompt": "Use tools to read CONTEXT.md and quote the definition of silver P(success) vs success gold.", "phase": "tool", "hint_bin": "frontier"}
+{"prompt": "Implement Platt scaling a, b on gold-only logits. Silver rows must not enter the calibration fit.", "phase": "edit", "hint_bin": "frontier"}
+{"prompt": "On-call: spend.txt hit BUDGET_LIMIT_USD mid-gold. What does the CLI do next, and what must stay unlabeled?", "phase": "debug", "hint_bin": "frontier"}
+{"prompt": "Write a one-page operator runbook: shadow for a day, grep path=, then TRAINED_PATH=trained. Include the rollback env.", "phase": "summarize", "hint_bin": "frontier"}
+{"prompt": "Why must teacher ids exclude qwen/, moonshotai/, and deepseek-ai/ in this org's train CLI?", "phase": "plan", "hint_bin": "hard"}
+{"prompt": "Add max_tokens=64 to a gold complete() body and explain why gold is short on purpose.", "phase": "edit", "hint_bin": "standard"}
+{"prompt": "The teacher returned prose instead of JSON. What does the CLI store for that query?", "phase": "debug", "hint_bin": "standard"}
+{"prompt": "List Motif-3 and GLM 5.2 roles in teacher labeling: who runs first, who escalates, what temperature.", "phase": "discover", "hint_bin": "standard"}
+{"prompt": "Call a pretend teacher with json_schema teacher_label and show the required keys complexity_bin and p_success.", "phase": "tool", "hint_bin": "standard"}
+{"prompt": "Summarize why this smoke fit is labeled not_spec_floors and is not SWE-bench Verified.", "phase": "summarize", "hint_bin": "hard"}
+{"prompt": "Empty prompt after a client sends messages with only a tool role. How should estimate_tokens behave?", "phase": "debug", "hint_bin": "hard"}
+{"prompt": "Pin a real model id in the chat body. Confirm the hop must not auto-select. Quote the user story.", "phase": "plan", "hint_bin": "trivial"}

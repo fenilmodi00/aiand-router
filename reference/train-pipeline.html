@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Train pipeline — card</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+  <article class="page">
+    <nav class="crumbs">
+      <a href="../lessons/0002-queries-jsonl.html">Lesson 0002</a> ·
+      <a href="glossary.html">Glossary</a>
+    </nav>
+    <header>
+      <h1>Train pipeline</h1>
+      <p class="lede">Print this. You are fitting a Scorer, not an LLM.</p>
+    </header>
+    <ol class="ladder">
+      <li>
+        <span class="n">0</span>
+        <div><strong>queries.jsonl</strong> one JSON object per line: <code>prompt</code> or <code>messages</code>. Unpaid. Starter: <code>datasets/smoke-queries.jsonl</code> (48).</div>
+      </li>
+      <li>
+        <span class="n">1</span>
+        <div><strong>teacher</strong> <code>$env:AIAND_TRAIN="1"</code> then Motif-3 → GLM escalate. Writes bins + silver P(success). Unlabeled ≠ fake. Ceiling ≤1000.</div>
+      </li>
+      <li>
+        <span class="n">2</span>
+        <div><strong>gold</strong> Flash + Qwen + K2.7 Code + V4 Pro, <code>max_tokens=64</code>. No K3. Sparse ≤200. Dense ≤100 except K3.</div>
+      </li>
+      <li>
+        <span class="n">3</span>
+        <div><strong>fit</strong> local. Gold-where-present; silver only on unobserved cells; Platt on gold logits. Writes <code>data/scorer.json</code> with <code>not_spec_floors</code>.</div>
+      </li>
+    </ol>
+    <p>Opt-in or the CLI refuses. Cache hits are free. Shared <code>BUDGET_LIMIT_USD</code> (code default 15).</p>
+    <p class="source">
+      <a href="../.scratch/trained-hop/spec.md">Hop spec 28–36</a> ·
+      <a href="../README.md#trained-path">README</a> ·
+      <a href="https://jsonlines.org/">JSON Lines</a>
+    </p>
+  </article>
+</body>
+</html>

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Go-live ladder — trained hop</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+  <article class="page">
+    <nav class="crumbs">
+      <a href="../MISSION.md">Mission</a> ·
+      <a href="../reference/go-live-ladder.html">Ladder card</a> ·
+      <a href="../reference/glossary.html">Glossary</a>
+    </nav>
+    <header>
+      <h1>The hop is built. Live routing is a ladder, not a flag.</h1>
+      <p class="lede">Tickets 01–05 are done. 70 tests passed. That does not put trained picks on the wire. This lesson is the operator sequence that actually serves requests.</p>
+    </header>
+
+    <div class="callout ok">
+      <strong>Verdict.</strong> Implementation of the trained hop is complete. The gateway can already route: default <code>TRAINED_PATH</code> is <code>shadow</code>, which still <em>serves the rules pick</em>. There is no <code>data/scorer.json</code> in this workspace, so a flip to <code>trained</code> would hit <code>scorer_down</code> and serve rules anyway.
+    </div>
+
+    <h2>What “complete” covered</h2>
+    <p>
+      The map in <a href="../.scratch/trained-hop/map.md">.scratch/trained-hop/map.md</a> marks all five tickets resolved: shadow plumbing, live pick + <code>scorer_down</code>, opt-in teacher CLI, mini gold / Rec A fit, README. The test seam the spec asked for — <code>POST /v1/chat/completions</code> on <code>create_app</code> with a fake upstream — is green.
+    </p>
+    <p>
+      That is <em>code</em>. A live hop also needs a running process, an aiand key, and (for trained picks) a loadable Scorer artifact. <code>data/</code> is gitignored and currently empty. Missing or corrupt weights are specified to fall back, not invent P(success).
+      <a href="../.scratch/trained-hop/spec.md">Hop spec</a>, stories 16–17 and 40.
+    </p>
+
+    <h2>Three paths, one process</h2>
+    <p>Same FastAPI app. Same <code>router/auto</code>. The env var only changes <em>which Decision is served</em>:</p>
+    <ul>
+      <li><code>off</code> — today’s rules (learned stub only if its own flag is on).</li>
+      <li><code>shadow</code> (default, including invalid values) — client gets the <strong>rules</strong> model; JSONL and <code>X-Router-Trained-Would</code> record the trained would-be.</li>
+      <li><code>trained</code> — client gets the cheapest eligible model that clears effort threshold and max_regret.</li>
+    </ul>
+    <p>
+      If the Scorer file is missing, shadow and trained both degrade to rules with reason_code <code>scorer_down</code> and no Confidence header.
+      That is intentional: a forgotten <code>data/scorer.json</code> must not fabricate probabilities.
+    </p>
+
+    <h2>The ladder</h2>
+    <p>Do not skip rungs. The production proposal’s Verified gate is a <em>later</em> document; this cycle’s operator switch is “shadow looks sane,” not SWE-bench.</p>
+    <ol class="ladder">
+      <li>
+        <span class="n">1</span>
+        <div>
+          <strong>HTTP seam green</strong>
+          Already true. Fake-provider tests for shadow / trained / scorer_down. Do not spend credits until this rung holds.
+          <a href="../.scratch/trained-hop/spec.md">Spec, last line of Implementation Decisions.</a>
+        </div>
+      </li>
+      <li>
+        <span class="n">2</span>
+        <div>
+          <strong>Process up — this is “live for routing”</strong>
+          Start uvicorn. Point OpenCode (or curl) at <code>http://127.0.0.1:8000/v1</code> with <code>model: router/auto</code>. Leave <code>TRAINED_PATH</code> unset. Clients already get routed completions on the rules path. Distinct <code>ROUTER_API_KEY</code> from <code>AIAND_API_KEY</code> — the client never holds the aiand key.
+        </div>
+      </li>
+      <li>
+        <span class="n">3</span>
+        <div>
+          <strong>Scorer on disk + shadow watch</strong>
+          Opt-in train writes <code>data/scorer.json</code> labeled <code>not_spec_floors</code>. Restart the process so it loads. Grep JSONL for <code>path=shadow</code> and compare <code>selected</code> vs <code>trained_selected</code>. No fitted file → skip this rung; you are still routing, just not scoring.
+        </div>
+      </li>
+      <li>
+        <span class="n">4</span>
+        <div>
+          <strong>Flip <code>TRAINED_PATH=trained</code></strong>
+          Explicit operator switch after shadow looks sane — not automatic, not the Verified promotion gate.
+          <a href="../.scratch/trained-router/spec.md">Production floors stay in the proposal spec.</a>
+        </div>
+      </li>
+    </ol>
+
+    <h2>Do rung 2 now</h2>
+    <p>PowerShell, from the repo root, venv on. This is the only new skill this lesson asks you to perform:</p>
+<pre><code>.venv\Scripts\activate
+uvicorn aiand_router.app:app --app-dir src --host 127.0.0.1 --port 8000</code></pre>
+    <p>In a second terminal:</p>
+<pre><code>curl http://127.0.0.1:8000/health</code></pre>
+    <p>Expect JSON with <code>"ok": true</code> and <code>"aiand_key_set": true</code>. Then one chat hop (router key, not the aiand key):</p>
+<pre><code>curl http://127.0.0.1:8000/v1/chat/completions `
+  -H "Authorization: Bearer YOUR_ROUTER_KEY" `
+  -H "Content-Type: application/json" `
+  -d "{\"model\":\"router/auto\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"</code></pre>
+    <p>
+      Read <code>X-Router-Model</code> (the real aiand id) and <code>X-Router-Path</code>. Body <code>model</code> stays <code>router/auto</code>.
+      OpenCode config is in the <a href="../README.md#opencode">README</a>: <code>baseURL</code> <code>http://127.0.0.1:8000/v1</code>.
+    </p>
+    <div class="callout warn">
+      Do not set <code>TRAINED_PATH=trained</code> on this rung. Without <code>data/scorer.json</code> you would only confirm <code>scorer_down</code>. That test already exists in pytest.
+    </div>
+
+    <h2>Where you are</h2>
+    <p>Tick what is true in this workspace. Immediate feedback — no guessing.</p>
+    <div class="rungs" id="rungs">
+      <h3>Rung check</h3>
+    </div>
+
+    <h2>Retrieve it</h2>
+    <p>Answers are the same length on purpose. Recall, then click.</p>
+    <div class="quiz" id="quiz"></div>
+
+    <p class="source">
+      <strong>Primary source:</strong>
+      <a href="../.scratch/trained-hop/spec.md">.scratch/trained-hop/spec.md</a>
+      — user stories 16–18, 40–41, and “Do not spend credits until the HTTP seam is green.”
+      Operator commands: <a href="../README.md#trained-path">README, Trained path</a>.
+      What “deploy” means in general: <a href="https://fastapi.tiangolo.com/deployment/">FastAPI Deployment</a>.
+    </p>
+
+    <footer>
+      If any header, path, or command is unclear, ask in this chat — that is the point of a teacher, not a second spec.
+      Next: <a href="0002-queries-jsonl.html">lesson 0002 — the query file</a> (you do not train an LLM).
+    </footer>
+  </article>
+  <script src="../assets/quiz.js"></script>
+  <script>
+    mountRungCheck(
+      document.getElementById("rungs"),
+      [
+        { id: "tests", label: "pytest for hop + train + gateway is green (70 passed)" },
+        { id: "proc", label: "uvicorn is running on 127.0.0.1:8000" },
+        { id: "hop", label: "a client got HTTP 200 for model router/auto" },
+        { id: "scorer", label: "data/scorer.json exists and loads (not_spec_floors)" },
+        { id: "shadow", label: "JSONL shows path=shadow with trained_selected filled" },
+        { id: "flip", label: "TRAINED_PATH=trained and X-Router-Path is trained" }
+      ],
+      function (s) {
+        if (s.flip) return "Rung 4 — live trained pick. Smoke only; not Verified.";
+        if (s.shadow) return "Rung 3 done — watch a few more hops, then flip.";
+        if (s.scorer) return "Artifact is on disk. Restart uvicorn, stay on shadow, grep JSONL.";
+        if (s.hop) return "Rung 2 done — the router is live for requests. Trained picks still wait on a Scorer.";
+        if (s.proc) return "Process is up. Send one /v1/chat/completions to finish rung 2.";
+        if (s.tests) return "Rung 1 done. Next: boot uvicorn (rung 2). Do not flip trained yet.";
+        return "Start at rung 1: you already have this — tests passed this session.";
+      }
+    );
+    mountQuiz(document.getElementById("quiz"), [
+      {
+        prompt: "No scorer.json, TRAINED_PATH unset. A client request is served:",
+        options: [
+          { text: "the rules-path model" },
+          { text: "the trained-path one" },
+          { text: "the learned-path one" }
+        ],
+        answer: "the rules-path model",
+        ok: "Yes. Default is shadow, but a missing artifact is scorer_down → rules.",
+        no: "Trained needs a loadable artifact. The learned stub is a different flag, and only when path=off."
+      },
+      {
+        prompt: "First action that makes this router live for requests:",
+        options: [
+          { text: "boot this gateway" },
+          { text: "flip trained path" },
+          { text: "spend gold budget" }
+        ],
+        answer: "boot this gateway",
+        ok: "Yes. Rules already pick. Uvicorn + a client is live routing.",
+        no: "Flipping trained or spending gold does not start a listener. Boot first."
+      },
+      {
+        prompt: "TRAINED_PATH=trained is the right switch:",
+        options: [
+          { text: "shadow log looks sane" },
+          { text: "pytest suite is green" },
+          { text: "Verified gate is done" }
+        ],
+        answer: "shadow log looks sane",
+        ok: "Yes. This cycle’s operator flip is shadow-sane, not the Verified gate.",
+        no: "Green tests are rung 1. Verified is the production proposal — out of this hop."
+      }
+    ]);
+  </script>
+</body>
+</html>

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -15,9 +16,20 @@ from .provider import HttpAiandProvider
 from .router import (
     SpendLog,
     estimate_cost,
+    estimate_tokens,
     load_config,
     load_models,
     Model,
+)
+from .scorer import BINS, featurize
+
+_TEACHER_SYS = (
+    "Label this coding-agent request for a model router. Do not solve the task. "
+    "complexity_bin must be one of trivial, standard, hard, frontier. "
+    "trivial=rename/typo/lookup; standard=localized implement/fix; "
+    "hard=multi-file/ambiguous/debug; frontier=novel/huge/adversarial. "
+    "p_success maps each catalog model id to P(that model would succeed) in [0,1]. "
+    "Catalog ids: {ids}. label_confidence in [0,1]."
 )
 
 OPT_IN_ENV = "AIAND_TRAIN"
@@ -75,7 +87,7 @@ def _read_queries(path: Path, limit: int) -> list[dict[str, Any]]:
     return rows
 
 
-def _messages(row: dict[str, Any]) -> list[dict[str, str]]:
+def _messages(row: dict[str, Any]) -> list[dict[str, Any]]:
     if row.get("messages"):
         return list(row["messages"])
     return [{"role": "user", "content": str(row.get("prompt") or "")}]
@@ -136,15 +148,19 @@ async def _complete(
 async def _teacher_call(
     provider: Any,
     model_id: str,
-    messages: list[dict[str, str]],
+    messages: list[dict[str, Any]],
     *,
     cache: RequestCache,
     spend: SpendLog,
     models_by_id: dict[str, Model],
 ) -> dict[str, Any] | None:
+    ids = ", ".join(sorted(models_by_id))
     body = {
         "model": model_id,
-        "messages": messages,
+        "messages": [
+            {"role": "system", "content": _TEACHER_SYS.format(ids=ids)},
+            *messages,
+        ],
         "temperature": 0,
         "response_format": _SCHEMA,
         "max_tokens": 512,
@@ -170,17 +186,22 @@ async def run_teacher(
     cache: RequestCache,
     models_by_id: dict[str, Model],
 ) -> None:
-    rows = []
+    rows: list[dict[str, Any]] = []
     escalated = 0
     cap = max(1, int(len(queries) * 0.25))
-    if any(t.startswith(EXCLUDED_PREFIXES) for t in (CHEAP_TEACHER, ESCALATE_TEACHER)):
+    if any(tid.startswith(prefix) for tid in (CHEAP_TEACHER, ESCALATE_TEACHER) for prefix in EXCLUDED_PREFIXES):
         raise ValueError("teacher ids must exclude measured-trio and fallback providers")
     for q in queries:
         messages = _messages(q)
         label = await _teacher_call(
             provider, CHEAP_TEACHER, messages, cache=cache, spend=spend, models_by_id=models_by_id
         )
-        needs_esc = not label or label["complexity_bin"] in {"hard", "frontier"} or label["label_confidence"] < 0.60
+        needs_esc = True
+        if label is not None:
+            needs_esc = (
+                label["complexity_bin"] in {"hard", "frontier"}
+                or float(label["label_confidence"]) < 0.60
+            )
         if needs_esc and escalated < cap:
             esc = await _teacher_call(
                 provider, ESCALATE_TEACHER, messages, cache=cache, spend=spend, models_by_id=models_by_id
@@ -189,17 +210,33 @@ async def run_teacher(
             if esc:
                 label = esc
         if not label:
-            rows.append({"prompt": messages[-1]["content"], "unlabeled": True})
+            rows.append({"prompt": _prompt_of(messages), "unlabeled": True})
+            if spend.total() >= spend.limit_usd:
+                break
             continue
         row = {
-            "prompt": messages[-1]["content"],
+            "prompt": _prompt_of(messages),
             "complexity_bin": label["complexity_bin"],
             "p_success": label["p_success"],
             "teacher": CHEAP_TEACHER,
+            "tokens": estimate_tokens(messages),
+            "needs_tools": bool(q.get("needs_tools")),
+            "phase": str(q.get("phase") or "plan"),
         }
         if "bloom_level" in label:
             row["bloom_level"] = label["bloom_level"]
         rows.append(row)
+        if len(rows) % 10 == 0:
+            print(
+                f"teacher {len(rows)}/{len(queries)} spend={spend.total():.4f}",
+                flush=True,
+            )
+    labeled = sum(1 for r in rows if not r.get("unlabeled"))
+    print(
+        f"teacher done labeled={labeled} unlabeled={len(rows) - labeled} "
+        f"spend={spend.total():.4f} -> {out}",
+        flush=True,
+    )
     out.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
 
 
@@ -229,6 +266,8 @@ async def run_gold(
             result = await _complete(
                 provider, body, cache=cache, spend=spend, models_by_id=models_by_id
             )
+            if result.get("status") == 429:
+                break
             if result.get("status", 200) < 400 and result.get("json"):
                 cache.put(request_cache_key(body, model_id), result["json"])
             status = result.get("status", 200)
@@ -236,17 +275,69 @@ async def run_gold(
             success = status < 400 and bool(message.get("content") or message.get("tool_calls"))
             rows.append(
                 {
-                    "prompt": messages[-1]["content"],
+                    "prompt": _prompt_of(messages),
                     "model_id": model_id,
                     "success": success,
                     "unobserved": False,
+                    "tokens": estimate_tokens(messages),
+                    "needs_tools": bool(q.get("needs_tools")),
+                    "phase": str(q.get("phase") or "plan"),
                 }
             )
             if spend.total() >= spend.limit_usd:
                 break
         if spend.total() >= spend.limit_usd:
             break
+        if len(rows) % 20 == 0:
+            print(f"gold {len(rows)} cells spend={spend.total():.4f}", flush=True)
+    print(f"gold done cells={len(rows)} spend={spend.total():.4f} -> {out}", flush=True)
     out.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+
+
+def _prompt_of(messages: list[dict[str, Any]]) -> str:
+    last = messages[-1] if messages else {}
+    content = last.get("content")
+    return content if isinstance(content, str) else str(content or "")
+
+
+def _row_x(row: dict[str, Any]) -> list[float]:
+    messages = row.get("messages") or [{"role": "user", "content": row.get("prompt") or ""}]
+    tokens = int(row.get("tokens") or estimate_tokens(messages))
+    return featurize(str(row.get("phase") or "plan"), bool(row.get("needs_tools")), tokens)
+
+
+def _fit_binary(xs: list[list[float]], ys: list[float], steps: int = 80, lr: float = 0.35) -> list[float]:
+    dim = len(xs[0])
+    w = [0.0] * dim
+    n = max(1, len(xs))
+    for _ in range(steps):
+        grad = [0.0] * dim
+        for x, y in zip(xs, ys):
+            z = sum(w[i] * x[i] for i in range(dim))
+            z = max(-30.0, min(30.0, z))
+            err = (1.0 / (1.0 + math.exp(-z))) - y
+            for i in range(dim):
+                grad[i] += err * x[i]
+        for i in range(dim):
+            w[i] -= lr * grad[i] / n
+    return w
+
+
+def _fit_platt(zs: list[float], ys: list[float]) -> tuple[float, float]:
+    if len(zs) < 2:
+        return 1.0, 0.0
+    a, b = 1.0, 0.0
+    n = len(zs)
+    for _ in range(60):
+        ga = gb = 0.0
+        for z, y in zip(zs, ys):
+            p = 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, a * z + b))))
+            err = p - y
+            ga += err * z
+            gb += err
+        a -= 0.2 * ga / n
+        b -= 0.2 * gb / n
+    return a, b
 
 
 def fit_scorer(gold_path: Path, silver_path: Path | None, out: Path) -> None:
@@ -262,23 +353,69 @@ def fit_scorer(gold_path: Path, silver_path: Path | None, out: Path) -> None:
             for line in silver_path.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
-    by_model: dict[str, list[float]] = {}
+    gold_cells = {(str(r.get("prompt")), r["model_id"]) for r in gold if not r.get("unobserved") and "model_id" in r}
+    gold_ids = {mid for _, mid in gold_cells}
+    by_model_x: dict[str, list[list[float]]] = {mid: [] for mid in gold_ids}
+    by_model_y: dict[str, list[float]] = {mid: [] for mid in gold_ids}
     for row in gold:
-        if row.get("unobserved"):
+        if row.get("unobserved") or "model_id" not in row:
             continue
-        by_model.setdefault(row["model_id"], []).append(1.0 if row.get("success") else 0.0)
-    bins: list[str] = []
+        mid = row["model_id"]
+        by_model_x[mid].append(_row_x(row))
+        by_model_y[mid].append(1.0 if row.get("success") else 0.0)
     for row in silver:
         if row.get("unlabeled"):
             continue
-        bins.append(row.get("complexity_bin") or "standard")
-    # ponytail: intercept-only mean of gold; silver regularizer waits for a feature logistic. Unobserved ids stay out of live p_success.
-    p_success = {mid: sum(vs) / len(vs) for mid, vs in by_model.items() if vs}
+        x = _row_x(row)
+        prompt = str(row.get("prompt") or "")
+        for mid, p in (row.get("p_success") or {}).items():
+            if mid not in gold_ids:
+                continue
+            if (prompt, mid) in gold_cells:
+                continue
+            by_model_x[mid].append(x)
+            by_model_y[mid].append(float(p))
+    weights = {}
+    zs_all: list[float] = []
+    ys_all: list[float] = []
+    for mid, xs in by_model_x.items():
+        if not xs:
+            continue
+        w = _fit_binary(xs, by_model_y[mid])
+        weights[mid] = w
+        n_gold = sum(1 for r in gold if r.get("model_id") == mid and not r.get("unobserved"))
+        for x, y in zip(xs[:n_gold], by_model_y[mid][:n_gold]):
+            zs_all.append(sum(w[i] * x[i] for i in range(len(w))))
+            ys_all.append(y)
+    a, b = _fit_platt(zs_all, ys_all)
+    bin_xs: list[list[float]] = []
+    bin_ys: dict[str, list[float]] = {bn: [] for bn in BINS}
+    for row in silver:
+        if row.get("unlabeled") or row.get("complexity_bin") not in BINS:
+            continue
+        x = _row_x(row)
+        bin_xs.append(x)
+        for bn in BINS:
+            bin_ys[bn].append(1.0 if row["complexity_bin"] == bn else 0.0)
+    bin_weights = {bn: _fit_binary(bin_xs, bin_ys[bn]) for bn in BINS} if bin_xs else {}
+    p_success = {}
+    for mid in gold_ids:
+        gold_ys = [
+            1.0 if r.get("success") else 0.0
+            for r in gold
+            if r.get("model_id") == mid and not r.get("unobserved")
+        ]
+        if gold_ys:
+            p_success[mid] = sum(gold_ys) / len(gold_ys)
+    bins = [str(r.get("complexity_bin")) for r in silver if r.get("complexity_bin") in BINS]
     bin_ = max(set(bins), key=bins.count) if bins else "standard"
     artifact = {
         "not_spec_floors": True,
         "complexity_bin": bin_,
         "p_success": p_success,
+        "weights": weights,
+        "bin_weights": bin_weights,
+        "platt": {"a": a, "b": b},
         "n_gold": len(gold),
         "n_silver": len(silver),
     }
@@ -357,4 +494,7 @@ def main(
 
 
 if __name__ == "__main__":
+    from dotenv import load_dotenv
+
+    load_dotenv()
     raise SystemExit(main())

@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
-from .router import Decision, Model, eligible_models, fallback_decision, estimate_cost
+from .router import (
+    PHASE_FAMILY,
+    Decision,
+    Model,
+    eligible_models,
+    estimate_cost,
+    fallback_decision,
+)
 
 SHIP_EFFORT = {
     "low": {"threshold": 0.05, "max_regret": 0.30},
@@ -14,6 +22,8 @@ SHIP_EFFORT = {
     "high": {"threshold": 0.20, "max_regret": 0.15},
     "max": {"threshold": 0.60, "max_regret": 0.03},
 }
+FAMILIES = ("discover", "plan", "edit", "tool", "debug", "summarize")
+BINS = ("trivial", "standard", "hard", "frontier")
 
 
 def parse_trained_path(raw: str | None) -> str:
@@ -28,24 +38,70 @@ def load_scorer(path: Path | None) -> dict[str, Any] | None:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    if not isinstance(data, dict) or "p_success" not in data:
+    if not isinstance(data, dict):
+        return None
+    if "p_success" not in data and "weights" not in data:
         return None
     return data
 
 
-def effort_knobs(cfg: dict[str, Any], effort: str) -> tuple[float, float]:
-    table = cfg.get("trained_effort") or SHIP_EFFORT
-    row = table.get(effort) or table.get("medium") or SHIP_EFFORT["medium"]
-    return float(row["threshold"]), float(row["max_regret"])
+def featurize(phase: str, needs_tools: bool, tokens: int) -> list[float]:
+    fam = PHASE_FAMILY.get(phase, "plan")
+    return [
+        1.0,
+        1.0 if needs_tools else 0.0,
+        math.log1p(max(0, tokens)),
+        *[1.0 if fam == f else 0.0 for f in FAMILIES],
+    ]
 
 
-def score_eligible(artifact: dict[str, Any], eligible_ids: list[str]) -> tuple[str, dict[str, float]]:
+def _sigmoid(z: float) -> float:
+    z = max(-30.0, min(30.0, z))
+    return 1.0 / (1.0 + math.exp(-z))
+
+
+def _dot(w: list[float], x: list[float]) -> float:
+    n = min(len(w), len(x))
+    return sum(float(w[i]) * x[i] for i in range(n))
+
+
+def score_eligible(
+    artifact: dict[str, Any],
+    eligible_ids: list[str],
+    *,
+    phase: str = "plan",
+    needs_tools: bool = False,
+    tokens: int = 1,
+) -> tuple[str, dict[str, float]]:
+    weights = artifact.get("weights")
+    if isinstance(weights, dict) and weights:
+        x = featurize(phase, needs_tools, tokens)
+        bin_w = artifact.get("bin_weights") or {}
+        bin_ = max(BINS, key=lambda b: _dot(list(bin_w.get(b) or []), x))
+        platt = artifact.get("platt") or {}
+        a = float(platt.get("a", 1.0))
+        b = float(platt.get("b", 0.0))
+        p_success = {}
+        for i in eligible_ids:
+            w = weights.get(i)
+            if not w:
+                continue
+            p_success[i] = _sigmoid(a * _dot([float(v) for v in w], x) + b)
+        return bin_, p_success
     raw = artifact.get("p_success") or {}
     p_success = {i: float(raw[i]) for i in eligible_ids if i in raw}
     bin_ = str(artifact.get("complexity_bin") or "standard")
-    if bin_ not in {"trivial", "standard", "hard", "frontier"}:
+    if bin_ not in BINS:
         bin_ = "standard"
     return bin_, p_success
+
+
+def effort_knobs(cfg: dict[str, Any], effort: str) -> tuple[float, float]:
+    table = cfg.get("trained_effort") or SHIP_EFFORT
+    row = table.get(effort) if effort in SHIP_EFFORT else None
+    if not row:
+        row = table.get("medium") or SHIP_EFFORT["medium"]
+    return float(row["threshold"]), float(row["max_regret"])
 
 
 def pick_cheapest_above_bar(
@@ -104,7 +160,13 @@ def trained_select(
         latency_limit_ms=latency_limit_ms,
     )
     t, regret = effort_knobs(cfg, effort)
-    bin_, p_success = score_eligible(artifact, [m.id for m in eligible])
+    bin_, p_success = score_eligible(
+        artifact,
+        [m.id for m in eligible],
+        phase=phase,
+        needs_tools=needs_tools,
+        tokens=tokens,
+    )
     chosen, rule = pick_cheapest_above_bar(eligible, p_success, threshold=t, max_regret=regret)
     if chosen is None:
         fb = fallback_decision(cfg, models, phase, aa_bar)
@@ -115,7 +177,7 @@ def trained_select(
         fb.p_success = p_success
         fb.threshold = t
         fb.max_regret = regret
-        fb.reason_codes = [f"bin:{bin_}", "decline:below_threshold"]
+        fb.reason_codes = [f"bin:{bin_}", f"decline:{rule}"]
         fb.candidates = [m.id for m in eligible]
         _stamp_baseline(fb, eligible, tokens)
         return fb

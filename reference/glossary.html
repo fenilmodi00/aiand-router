@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hop glossary — card</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+  <article class="page">
+    <nav class="crumbs">
+      <a href="../CONTEXT.md">CONTEXT.md</a> ·
+      <a href="../lessons/0001-go-live-ladder.html">Lesson 0001</a>
+    </nav>
+    <header>
+      <h1>Hop glossary</h1>
+      <p class="lede">Names from CONTEXT.md. Do not invent synonyms.</p>
+    </header>
+    <h2>Paths</h2>
+    <p><strong>Rules router</strong> — hard constraints, phase bar, effort pick (cheapest / Pioneer score / strongest AA).</p>
+    <p><strong>Trained router</strong> — complexity bin + calibrated P(success) per eligible id; cheapest that clears threshold and max_regret.</p>
+    <p><strong>Learned stub</strong> — dark highest-AA module. Not the trained router.</p>
+    <p><strong>Scorer</strong> — the fitted hop head loaded from disk. Live serve does not retrain.</p>
+    <p><strong>scorer_down</strong> — missing/corrupt artifact. Serve rules, no fake confidence.</p>
+    <p><strong>Promotion gate</strong> — eval that must beat rules before production live. This <code>$100</code> cycle does not run it. Operator <code>TRAINED_PATH=trained</code> ≠ the gate.</p>
+    <h2>Labels</h2>
+    <p><strong>Calibrated P(success)</strong> — 0–1 chance this candidate succeeds; live confidence is this value for the winner.</p>
+    <p><strong>Complexity bin</strong> — <code>trivial | standard | hard | frontier</code>. Feature and reason_code, not the pick.</p>
+    <p><strong>Success gold</strong> — measured after actually running a candidate. Missing ≠ 0.</p>
+    <p><strong>Silver P(success)</strong> — teacher’s query-only guess. Regularizer on unobserved cells only.</p>
+    <p><strong>not_spec_floors</strong> — smoke n and dumps below production. Do not promote as Verified.</p>
+    <p class="source">Full language: <a href="../CONTEXT.md">CONTEXT.md</a>.</p>
+  </article>
+</body>
+</html>
