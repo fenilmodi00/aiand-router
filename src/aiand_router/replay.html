@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>AIand router replay</title>
+  <style>
+    body { font-family: sans-serif; margin: 1.5rem; background: #111; color: #eee; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #444; padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; }
+    th { background: #222; }
+    .fail { color: #f88; }
+    .ok { color: #8f8; }
+    textarea, input, select { background: #222; color: #eee; border: 1px solid #444; padding: 0.3rem; }
+    button { margin-top: 0.4rem; }
+  </style>
+</head>
+<body>
+  <h1>AIand router replay</h1>
+  <p>Phase, candidates, winner, reason, cost, and test outcome from the request log. AA scores are public priors, not aiand measurements.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>phase</th>
+        <th>selected</th>
+        <th>candidates</th>
+        <th>reason</th>
+        <th>cost</th>
+        <th>outcome</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <h2>Ask the router</h2>
+  <p>Live check that the recording is not fake. Uses the local router key, never the aiand key.</p>
+  <label>router key <input id="key" value="change-me" autocomplete="off"></label>
+  <label>phase
+    <select id="phase">
+      <option>discover</option><option>plan</option><option>edit</option>
+      <option>debug</option><option>summarize</option>
+    </select>
+  </label>
+  <p><textarea id="q" rows="3" cols="60">ping</textarea></p>
+  <button type="button" id="ask">send router/auto</button>
+  <pre id="out"></pre>
+  <script>
+    fetch("/replay/events").then(r => r.json()).then(events => {
+      const tbody = document.getElementById("rows");
+      for (const e of events) {
+        const tr = document.createElement("tr");
+        const outcome = e.tests_passed === false ? "tests failed"
+          : e.tests_passed === true ? "tests passed"
+          : e.cache_hit ? "cache hit" : "";
+        tr.innerHTML = `<td>${e.phase || e.kind || ""}</td>
+          <td><code>${e.selected || ""}</code></td>
+          <td><code>${(e.candidates || []).join(", ")}</code></td>
+          <td>${e.reason || ""}</td>
+          <td>${e.cost_usd ?? ""}</td>
+          <td class="${e.tests_passed === false ? "fail" : "ok"}">${outcome}</td>`;
+        tbody.appendChild(tr);
+      }
+    });
+    document.getElementById("ask").onclick = async () => {
+      const out = document.getElementById("out");
+      const r = await fetch("/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + document.getElementById("key").value,
+          "Content-Type": "application/json",
+          "x-agent-phase": document.getElementById("phase").value,
+        },
+        body: JSON.stringify({
+          model: "router/auto",
+          messages: [{role: "user", content: document.getElementById("q").value}],
+        }),
+      });
+      out.textContent = r.headers.get("x-router-model") + " — " + (r.headers.get("x-router-reason") || r.status);
+    };
+  </script>
+</body>
+</html>

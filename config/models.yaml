@@ -1,0 +1,137 @@
+# Public catalog prices: https://docs.aiand.com/models/catalog/
+# AA scores are public priors, not aiand-hosted measurements.
+# motif-3 and kimi-k3 were in the project brief; k3 may not be on every org catalog.
+
+virtual_model: router/auto
+fallback_model: qwen/qwen3.6-27b
+
+phase_threshold:
+  discover: 35
+  plan: 50
+  edit: 40
+  tool: 38
+  debug: 50
+  summarize: 24
+
+# K3 only when the bar is at least this, or routing_effort=max
+premium_aa_floor: 58
+# After a reported test failure, debug must clear this (above Flash's AA 52)
+debug_fail_threshold: 53
+
+models:
+  - id: qwen/qwen3.6-27b
+    display_name: Qwen 3.6 27B
+    enabled: true
+    input_per_1m: 0.0
+    output_per_1m: 0.0
+    context_window: 262144
+    supports_tools: true
+    supports_json: true
+    aa_index: 38
+    aa_source: artificial_analysis
+    measured_on: not_aiand
+    measured_success: null
+
+  - id: deepseek-ai/deepseek-v4-flash
+    display_name: DeepSeek V4 Flash
+    enabled: true
+    input_per_1m: 0.15
+    output_per_1m: 0.25
+    context_window: 1048576
+    supports_tools: true
+    supports_json: true
+    aa_index: 52
+    aa_source: artificial_analysis
+    measured_on: not_aiand
+    measured_success: null
+
+  - id: google/gemma-4-31b-it
+    display_name: Gemma 4 31B
+    enabled: true
+    input_per_1m: 0.20
+    output_per_1m: 0.50
+    context_window: 262144
+    supports_tools: true
+    supports_json: true
+    aa_index: 30
+    aa_source: artificial_analysis
+    measured_on: not_aiand
+    measured_success: null
+
+  - id: openai/gpt-oss-120b
+    display_name: GPT OSS 120B
+    enabled: true
+    input_per_1m: 0.15
+    output_per_1m: 0.60
+    context_window: 131072
+    supports_tools: true
+    supports_json: true
+    aa_index: 24
+    aa_source: artificial_analysis
+    measured_on: not_aiand
+    measured_success: null
+
+  - id: moonshotai/kimi-k2.7-code
+    display_name: Kimi K2.7 Code
+    enabled: true
+    input_per_1m: 0.75
+    output_per_1m: 3.50
+    context_window: 262144
+    supports_tools: true
+    supports_json: true
+    aa_index: 42
+    aa_source: artificial_analysis
+    measured_on: not_aiand
+    measured_success: null
+
+  - id: deepseek-ai/deepseek-v4-pro
+    display_name: DeepSeek V4 Pro
+    enabled: true
+    input_per_1m: 1.00
+    output_per_1m: 2.50
+    context_window: 1048576
+    supports_tools: true
+    supports_json: true
+    aa_index: 53
+    aa_source: artificial_analysis
+    measured_on: not_aiand
+    measured_success: null
+
+  - id: zai-org/glm-5.2
+    display_name: GLM 5.2
+    enabled: true
+    input_per_1m: 1.00
+    output_per_1m: 4.00
+    context_window: 1048576
+    supports_tools: true
+    supports_json: true
+    aa_index: 53
+    aa_source: artificial_analysis
+    measured_on: not_aiand
+    measured_success: null
+
+  - id: moonshotai/kimi-k3
+    display_name: Kimi K3
+    enabled: true
+    input_per_1m: 3.00
+    output_per_1m: 12.50
+    context_window: 1048576
+    supports_tools: true
+    supports_json: true
+    aa_index: 60
+    aa_source: artificial_analysis
+    measured_on: not_aiand
+    measured_success: null
+
+  - id: motif-technologies/motif-3
+    display_name: Motif 3
+    enabled: false
+    input_per_1m: 0.0
+    output_per_1m: 0.0
+    context_window: 131072
+    supports_tools: true
+    supports_json: true
+    aa_index: null
+    aa_source: unknown
+    measured_on: not_in_public_catalog
+    measured_success: null

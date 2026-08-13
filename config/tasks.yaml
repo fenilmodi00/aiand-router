@@ -1,0 +1,35 @@
+# Seeded eval slice. Add rows here later; the runner iterates this list.
+# Measured trio: qwen/qwen3.6-27b, moonshotai/kimi-k2.7-code, deepseek-ai/deepseek-v4-pro.
+# AA scores are priors, not aiand-hosted measurements.
+
+baselines:
+  executed:
+    premium:
+      model: deepseek-ai/deepseek-v4-pro
+    kimi:
+      model: moonshotai/kimi-k2.7-code
+    adaptive:
+      model: router/auto
+  stubbed:
+    - qwen-only
+    - flash-only
+    - glm-only
+    - random
+    - oracle
+
+tasks:
+  - id: discover-repo
+    phase: discover
+    prompt: List the files in a tiny Python repo that has a failing unit test.
+  - id: plan-fix
+    phase: plan
+    prompt: Plan the smallest change to make is_even(2) return True.
+  - id: edit-parity
+    phase: edit
+    prompt: "Fix def is_even(n) so even numbers return True instead of False."
+  - id: debug-assert
+    phase: debug
+    prompt: "pytest failed with AssertionError on is_even(2). Repair it."
+  - id: summarize-change
+    phase: summarize
+    prompt: Summarize the one-line parity fix in a sentence.
