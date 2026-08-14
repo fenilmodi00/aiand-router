@@ -1,3 +1,12 @@
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { getModels } from "@/lib/api";
 
 export default async function ModelsPage() {
@@ -5,54 +14,55 @@ export default async function ModelsPage() {
   const rows = res.data?.data ?? [];
 
   return (
-    <div className="content">
-      <div className="section-head" style={{ marginTop: 0 }}>
-        <div>
-          <h2 className="big">Models</h2>
-          <div className="card-sub">
-            Gateway catalog. AA index is a public prior (not_aiand), not a measured quality score.
-          </div>
-        </div>
+    <div className="mx-auto max-w-[1360px] px-11 pt-[26px] pb-[120px]">
+      <div className="mb-[18px]">
+        <h2 className="text-xl font-semibold">Models</h2>
+        <p className="mt-1 text-[13px] text-muted-foreground">
+          Gateway catalog. AA index is a public prior (not_aiand), not a measured quality score.
+        </p>
       </div>
       {!res.ok ? (
-        <div className="empty" style={{ height: 120, marginBottom: 16 }}>
-          Could not load /v1/models ({res.error}).
-        </div>
+        <Alert className="mb-4">
+          <AlertTitle>Could not load /v1/models</AlertTitle>
+          <AlertDescription>{res.error}</AlertDescription>
+        </Alert>
       ) : null}
-      <div className="table">
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Enabled</th>
-              <th className="r">AA prior</th>
-              <th>Source</th>
-              <th>Owned by</th>
-            </tr>
-          </thead>
-          <tbody>
+      <div className="overflow-hidden rounded-lg border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>ID</TableHead>
+              <TableHead>Enabled</TableHead>
+              <TableHead className="text-right">AA prior</TableHead>
+              <TableHead>Source</TableHead>
+              <TableHead>Owned by</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {rows.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="empty-row">
+              <TableRow>
+                <TableCell colSpan={5} className="py-12 text-center text-muted-foreground">
                   No models returned.
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ) : (
               rows.map((m) => (
-                <tr key={m.id}>
-                  <td>
+                <TableRow key={m.id}>
+                  <TableCell>
                     {m.id}
-                    {m.id === "router/auto" ? <div className="muted">virtual</div> : null}
-                  </td>
-                  <td>{m.id === "router/auto" ? "—" : m.enabled ? "yes" : "no"}</td>
-                  <td className="r">{m.aa_index == null ? "—" : m.aa_index}</td>
-                  <td>{m.aa_source || (m.id === "router/auto" ? "—" : "not_aiand")}</td>
-                  <td>{m.owned_by || "—"}</td>
-                </tr>
+                    {m.id === "router/auto" ? (
+                      <div className="font-mono text-[11px] text-muted-foreground">virtual</div>
+                    ) : null}
+                  </TableCell>
+                  <TableCell>{m.id === "router/auto" ? "—" : m.enabled ? "yes" : "no"}</TableCell>
+                  <TableCell className="text-right">{m.aa_index == null ? "—" : m.aa_index}</TableCell>
+                  <TableCell>{m.aa_source || (m.id === "router/auto" ? "—" : "not_aiand")}</TableCell>
+                  <TableCell>{m.owned_by || "—"}</TableCell>
+                </TableRow>
               ))
             )}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
     </div>
   );

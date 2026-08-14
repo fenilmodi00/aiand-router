@@ -1,3 +1,5 @@
+import { PipelineDots } from "@/components/PipelineDots";
+import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { MIX_COLORS, type Candidate, type CandidateMix } from "@/lib/types";
 import { pct } from "@/lib/format";
 
@@ -80,7 +82,8 @@ export function RoutingPipeline({
   const orangeW = requests > 0 ? Math.min(26, 12 + Math.sqrt(requests) * 2) : 14;
 
   return (
-    <div className="card pipeline">
+    <Card className="pipeline mt-[18px] gap-0 overflow-visible py-0">
+      <CardContent className="px-0">
       <svg
         viewBox={`0 0 1180 ${height}`}
         width="100%"
@@ -98,6 +101,7 @@ export function RoutingPipeline({
         </defs>
 
         <path
+          id="rp-in"
           d={`M ${leftX + nodeW} ${routerY} C ${leftX + nodeW + 140} ${routerY}, ${routerX - 150} ${routerY}, ${routerX} ${routerY}`}
           stroke="var(--orange)"
           strokeWidth={orangeW}
@@ -113,6 +117,7 @@ export function RoutingPipeline({
             return (
               <path
                 key={row.id}
+                id={`rp-m-${i}`}
                 d={`M ${routerX + nodeW} ${routerY} C ${routerX + nodeW + 140} ${routerY}, ${modelX - 130} ${my}, ${modelX} ${my}`}
                 stroke={accentFor(row.id, i)}
                 strokeWidth={w}
@@ -122,23 +127,23 @@ export function RoutingPipeline({
         </g>
 
         <g transform={`translate(${leftX}, ${routerY - nodeH / 2})`}>
-          <rect width={nodeW} height={nodeH} rx="10" fill="#151517" stroke="#232329" />
+          <rect width={nodeW} height={nodeH} rx="10" fill="var(--card)" stroke="var(--border)" />
           <rect width="4" height={nodeH} fill="var(--orange)" clipPath="url(#rpNodeClip)" />
-          <text x="20" y="29" fill="var(--fg)" fontSize="13.5" fontWeight="600">
+          <text x="20" y="29" fill="var(--foreground)" fontSize="13.5" fontWeight="600">
             Requests
           </text>
-          <text x="20" y="47" fill="var(--muted)" fontSize="11.5">
+          <text x="20" y="47" fill="var(--muted-foreground)" fontSize="11.5">
             {requests} sampled
           </text>
         </g>
 
         <g transform={`translate(${routerX}, ${routerY - nodeH / 2})`}>
-          <rect width={nodeW} height={nodeH} rx="10" fill="#151517" stroke="#232329" />
+          <rect width={nodeW} height={nodeH} rx="10" fill="var(--card)" stroke="var(--border)" />
           <rect width="4" height={nodeH} fill="var(--green)" clipPath="url(#rpNodeClip)" />
-          <text x="20" y="29" fill="var(--fg)" fontSize="13.5" fontWeight="600">
+          <text x="20" y="29" fill="var(--foreground)" fontSize="13.5" fontWeight="600">
             router/auto
           </text>
-          <text x="20" y="47" fill="var(--muted)" fontSize="11.5">
+          <text x="20" y="47" fill="var(--muted-foreground)" fontSize="11.5">
             router
           </text>
         </g>
@@ -150,16 +155,16 @@ export function RoutingPipeline({
             row.display_name.length > 22 ? `${row.display_name.slice(0, 20)}…` : row.display_name;
           return (
             <g key={row.id} transform={`translate(${modelX}, ${y})`}>
-              <rect width={modelW} height={modelH} rx="10" fill="#151517" stroke="#232329" />
+              <rect width={modelW} height={modelH} rx="10" fill="var(--card)" stroke="var(--border)" />
               <rect width="4" height={modelH} fill={color} clipPath="url(#rpModelClip)" />
               <circle cx="20" cy={modelH / 2} r="4.5" fill={color} />
-              <text x="36" y="27" fill="var(--fg)" fontSize="13" fontWeight="500">
+              <text x="36" y="27" fill="var(--foreground)" fontSize="13" fontWeight="500">
                 {label}
               </text>
               <text
                 x={modelW - 14}
                 y="27"
-                fill="var(--muted)"
+                fill="var(--muted-foreground)"
                 fontSize="11.5"
                 textAnchor="end"
                 fontFamily="var(--font-mono), ui-monospace, monospace"
@@ -169,10 +174,16 @@ export function RoutingPipeline({
             </g>
           );
         })}
+
+        <PipelineDots
+          colors={shown.map((row, i) => accentFor(row.id, i))}
+          counts={shown.map((row) => row.count)}
+        />
       </svg>
-      <p className="pipeline-desc">
+      </CardContent>
+      <CardFooter className="border-0 bg-transparent text-sm text-muted-foreground">
         Routes each request to the cheapest candidate that still meets the quality bar.
-      </p>
-    </div>
+      </CardFooter>
+    </Card>
   );
 }

@@ -1,6 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { toast } from "sonner";
+import { CopyIcon } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 
 const CURL = `curl -X POST "http://127.0.0.1:8000/v1/chat/completions" \\
     -H "Content-Type: application/json" \\
@@ -21,44 +25,40 @@ const CURL = `curl -X POST "http://127.0.0.1:8000/v1/chat/completions" \\
 }'`;
 
 export function InferenceSnippet() {
-  const [label, setLabel] = useState("Copy");
   return (
-    <div className="card" id="run-inference">
-      <div className="code-head">
-        <span>
-          Routed through&nbsp;<span className="accent">router/auto</span>
+    <Card id="run-inference" className="gap-0 py-0">
+      <CardHeader className="flex flex-row items-center gap-2.5 border-b py-4">
+        <span className="text-sm text-muted-foreground">
+          Routed through{" "}
+          <span className="font-mono text-[12.5px] text-highlight">router/auto</span>
         </span>
-        <span className="right">
-          <span className="version-pill">
-            local&nbsp;<b>GATEWAY</b>
-          </span>
-          <button
-            className="btn btn-sm"
+        <span className="ml-auto flex items-center gap-2.5">
+          <Badge variant="outline" className="h-8 rounded-lg px-3 font-normal">
+            local <span className="font-semibold tracking-wider">GATEWAY</span>
+          </Badge>
+          <Button
+            variant="outline"
+            size="sm"
             type="button"
             onClick={() => {
-              navigator.clipboard.writeText(CURL).then(() => {
-                setLabel("Copied");
-                setTimeout(() => setLabel("Copy"), 1400);
-              });
+              navigator.clipboard.writeText(CURL).then(() => toast.success("Copied"));
             }}
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <rect x="9" y="9" width="12" height="12" rx="2" />
-              <path d="M5 15V5a2 2 0 012-2h10" />
-            </svg>
-            <span>{label}</span>
-          </button>
+            <CopyIcon data-icon="inline-start" />
+            Copy
+          </Button>
         </span>
-      </div>
-      <pre className="code">
-        curl -X POST <span className="g">&quot;http://127.0.0.1:8000/v1/chat/completions&quot;</span> \
-    -H <span className="g">&quot;Content-Type: application/json&quot;</span> \
-    -H <span className="g">&quot;Authorization: Bearer &lt;YOUR_API_KEY&gt;&quot;</span> \
-    -d <span className="g">
-          {`'{
+      </CardHeader>
+      <CardContent className="px-0">
+        <pre className="overflow-x-auto px-[26px] py-[22px] font-mono text-[13px] leading-[1.65] text-muted-foreground">
+          curl -X POST <span className="text-[color:var(--code-green)]">&quot;http://127.0.0.1:8000/v1/chat/completions&quot;</span> \
+    -H <span className="text-[color:var(--code-green)]">&quot;Content-Type: application/json&quot;</span> \
+    -H <span className="text-[color:var(--code-green)]">&quot;Authorization: Bearer &lt;YOUR_API_KEY&gt;&quot;</span> \
+    -d <span className="text-[color:var(--code-green)]">
+            {`'{
   "model": "`}
-          <span className="o">router/auto</span>
-          {`",
+            <span className="text-highlight">router/auto</span>
+            {`",
   "messages": [
     {
       "role": "system",
@@ -71,8 +71,9 @@ export function InferenceSnippet() {
   ],
   "stream": false
 }'`}
-        </span>
-      </pre>
-    </div>
+          </span>
+        </pre>
+      </CardContent>
+    </Card>
   );
 }

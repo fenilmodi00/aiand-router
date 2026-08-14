@@ -1,6 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { LinkIcon } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { shortTs } from "@/lib/format";
 import type { UsageBucket } from "@/lib/types";
 
 const VW = 720;
@@ -9,8 +13,8 @@ const L = 56;
 const R = 708;
 const T = 10;
 const B = 214;
-const BASE = "#a8b0bc";
-const ORANGE = "#f2613c";
+const BASE = "var(--muted-foreground)";
+const ORANGE = "var(--highlight)";
 
 type Pt = { ts: string; label: string; spend: number; baseline: number };
 
@@ -67,7 +71,13 @@ function cumulative(buckets: UsageBucket[]): Pt[] {
   });
 }
 
-export function RouterSavingsChart({ buckets }: { buckets: UsageBucket[] }) {
+export function RouterSavingsChart({
+  buckets,
+  unrealized = false,
+}: {
+  buckets: UsageBucket[];
+  unrealized?: boolean;
+}) {
   const points = useMemo((): Pt[] => {
     if (!buckets.length) {
       return [
@@ -103,22 +113,20 @@ export function RouterSavingsChart({ buckets }: { buckets: UsageBucket[] }) {
   const xLabels = [0, Math.floor((n - 1) / 2), n - 1].filter((i, idx, arr) => arr.indexOf(i) === idx);
 
   return (
-    <>
-      <div className="savings-head">
-        <div className="card-title">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-            <path d="M10 13a5 5 0 0 0 7.54.54l1.42-1.42a5 5 0 0 0-7.07-7.07L10.5 6.3" />
-            <path d="M14 11a5 5 0 0 0-7.54-.54L5.04 11.88a5 5 0 0 0 7.07 7.07L13.5 17.7" />
-          </svg>
+    <Card className="gap-0 py-0">
+      <CardHeader className="flex flex-row items-center gap-2.5 pt-[22px]">
+        <CardTitle className="flex items-center gap-2 text-[15px]">
+          <LinkIcon className="text-muted-foreground" />
           Router Savings
-        </div>
-        <span className="est-pill">estimated</span>
-      </div>
-      <p className="card-sub">
-        Estimated savings versus always routing to the most expensive eligible candidate — not your
-        total org spend.
-      </p>
-      <div className="savings-plot">
+        </CardTitle>
+        <Badge className="h-5 bg-highlight text-accent-foreground">estimated</Badge>
+      </CardHeader>
+      <CardDescription className="px-(--card-spacing) pb-0">
+        {unrealized
+          ? "This traffic did not use the router. Solid line is what you spent; dashed is Flash (default medium pick). The gap is what you have not saved."
+          : "Estimated savings versus always routing to the most expensive eligible candidate — not your total org spend."}
+      </CardDescription>
+      <CardContent className="relative mt-[18px] pb-[22px]">
         <svg
           viewBox={`0 0 ${VW} ${VH}`}
           width="100%"
@@ -129,14 +137,14 @@ export function RouterSavingsChart({ buckets }: { buckets: UsageBucket[] }) {
           onMouseLeave={() => setHover(null)}
           onPointerLeave={() => setHover(null)}
         >
-          <g fontFamily="JetBrains Mono, monospace" fontSize="10" fill="#71717a">
+          <g fontFamily="JetBrains Mono, monospace" fontSize="10" fill="var(--muted-foreground)">
             {ticks.map((t) => (
               <text key={t} x={L - 8} y={yOf(t) + 3} textAnchor="end">
                 {axisUsd(t)}
               </text>
             ))}
           </g>
-          <g stroke="#2a2a32" strokeDasharray="3 5" fill="none">
+          <g stroke="var(--border)" strokeDasharray="3 5" fill="none">
             {ticks.map((t) => (
               <line key={t} x1={L} y1={yOf(t)} x2={R} y2={yOf(t)} />
             ))}
@@ -152,12 +160,12 @@ export function RouterSavingsChart({ buckets }: { buckets: UsageBucket[] }) {
           />
           {p && hi != null ? (
             <>
-              <line x1={xs[hi]} y1={T} x2={xs[hi]} y2={B} stroke="#fafafa" strokeWidth="1" />
-              <circle cx={xs[hi]} cy={ysBase[hi]} r="4" fill={BASE} stroke="#0a0a0b" strokeWidth="1" />
-              <circle cx={xs[hi]} cy={ysSpend[hi]} r="4" fill={ORANGE} stroke="#0a0a0b" strokeWidth="1" />
+              <line x1={xs[hi]} y1={T} x2={xs[hi]} y2={B} stroke="var(--foreground)" strokeWidth="1" />
+              <circle cx={xs[hi]} cy={ysBase[hi]} r="4" fill={BASE} stroke="var(--background)" strokeWidth="1" />
+              <circle cx={xs[hi]} cy={ysSpend[hi]} r="4" fill={ORANGE} stroke="var(--background)" strokeWidth="1" />
             </>
           ) : null}
-          <g fontFamily="JetBrains Mono, monospace" fontSize="10" fill="#71717a">
+          <g fontFamily="JetBrains Mono, monospace" fontSize="10" fill="var(--muted-foreground)">
             {xLabels.map((i) => (
               <text key={`${points[i]!.ts}-${i}`} x={xs[i]} y={236} textAnchor="middle">
                 {points[i]!.label}
@@ -167,35 +175,36 @@ export function RouterSavingsChart({ buckets }: { buckets: UsageBucket[] }) {
         </svg>
         {p && hi != null ? (
           <div
-            className="savings-tip"
+            className="pointer-events-none absolute min-w-49 max-w-65 translate-x-[-8px] translate-y-3 rounded-[10px] border border-border bg-popover p-2.5 text-[12.5px] shadow-lg"
             style={{
               left: `${Math.min(72, Math.max(4, (xs[hi]! / VW) * 100))}%`,
               top: `${Math.min(ysBase[hi]!, ysSpend[hi]!) * (100 / VH)}%`,
             }}
           >
-            <div className="h">{p.label}</div>
-            <div className="row">
-              <span>
-                <span className="dot" style={{ background: BASE }} />
+            <div className="mb-2 font-semibold">{p.ts ? shortTs(p.ts) : p.label}</div>
+            <div className="mt-1 flex items-center justify-between gap-4.5 text-muted-foreground">
+              <span className="inline-flex items-center">
+                <span className="mr-1.5 inline-block size-2 rounded-full" style={{ background: BASE }} />
                 Your spend
               </span>
-              <b>{tipUsd(p.baseline)}</b>
+              <b className="font-mono text-xs font-medium text-foreground">{tipUsd(p.baseline)}</b>
             </div>
-            <div className="row">
-              <span>
-                <span className="dot" style={{ background: ORANGE }} />
+            <div className="mt-1 flex items-center justify-between gap-4.5 text-muted-foreground">
+              <span className="inline-flex items-center">
+                <span className="mr-1.5 inline-block size-2 rounded-full" style={{ background: ORANGE }} />
                 With router (est.)
               </span>
-              <b>{tipUsd(p.spend)}</b>
+              <b className="font-mono text-xs font-medium text-foreground">{tipUsd(p.spend)}</b>
             </div>
-            {save != null && savePct != null && save >= 0 ? (
-              <div className="foot">
-                Could save {tipUsd(save)} ({savePct.toFixed(1)}%) · est.
+            {save != null && save >= 0 ? (
+              <div className="mt-2 border-t border-border pt-2 text-xs text-highlight">
+                {unrealized ? "Not saved" : "Saved"} {tipUsd(save)}
+                {savePct != null ? ` (${savePct.toFixed(1)}%)` : ""} · est.
               </div>
             ) : null}
           </div>
         ) : null}
-      </div>
-    </>
+      </CardContent>
+    </Card>
   );
 }

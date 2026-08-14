@@ -2,8 +2,37 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { ChevronDownIcon, PlayIcon, TerminalIcon } from "lucide-react";
 import { colorFor } from "@/lib/format";
 import { MIX_COLORS, type CatalogModel } from "@/lib/types";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupTextarea,
+} from "@/components/ui/input-group";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Slider } from "@/components/ui/slider";
+import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
 const EFFORTS = [
   { id: "low", hint: "Cheap-first" },
@@ -328,160 +357,211 @@ export function Playground({ models, loadError }: { models: CatalogModel[]; load
     }
   }
 
+  const effortIndex = EFFORTS.findIndex((e) => e.id === effort);
+
   return (
-    <div className="pg-workspace">
-      <div className="pg-left">
-        <div className="pg-brand">
-          <div className="pg-brand-id">
+    <div className="grid min-h-[calc(100vh-140px)] overflow-hidden rounded-xl border bg-card lg:grid-cols-[minmax(320px,42%)_1fr]">
+      <div className="flex flex-col gap-4 overflow-auto border-b p-[22px] lg:border-r lg:border-b-0">
+        <div>
+          <div className="inline-flex items-center gap-1.5 text-[15px] font-semibold">
             router/auto
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M6 9l6 6 6-6" />
-            </svg>
+            <ChevronDownIcon className="text-muted-foreground" />
           </div>
-          <div className="pg-brand-sub">Routes to the best-performing model</div>
+          <p className="mt-1 text-[12.5px] text-muted-foreground">Routes to the best-performing model</p>
         </div>
 
-        <label className="pg-label">
-          System prompt
-          <textarea value={system} onChange={(e) => setSystem(e.target.value)} rows={3} />
-        </label>
-
-        <label className="pg-label">
-          Query
-          <div className="pg-query">
-            <textarea
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              rows={6}
-              onKeyDown={(e) => {
-                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                  e.preventDefault();
-                  void run();
-                }
-              }}
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="pg-system">System prompt</FieldLabel>
+            <Textarea
+              id="pg-system"
+              value={system}
+              onChange={(e) => setSystem(e.target.value)}
+              rows={3}
+              className="min-h-[72px] font-mono text-[13px]"
             />
-            <button
-              className="pg-run"
-              type="button"
-              disabled={busy || !query.trim() || allowed.length === 0}
-              onClick={() => void run()}
-            >
-              {busy ? "Running…" : "Run →"}
-            </button>
-          </div>
-        </label>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="pg-query">Query</FieldLabel>
+            <InputGroup>
+              <InputGroupTextarea
+                id="pg-query"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                rows={6}
+                className="min-h-[140px] font-mono text-[13px]"
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                    e.preventDefault();
+                    void run();
+                  }
+                }}
+              />
+              <InputGroupAddon align="block-end" className="justify-end">
+                <InputGroupButton
+                  variant="default"
+                  size="sm"
+                  disabled={busy || !query.trim() || allowed.length === 0}
+                  onClick={() => void run()}
+                >
+                  {busy ? <Spinner data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />}
+                  {busy ? "Running…" : "Run"}
+                </InputGroupButton>
+              </InputGroupAddon>
+            </InputGroup>
+          </Field>
+          <Field>
+            <div className="flex items-baseline justify-between gap-3">
+              <FieldLabel>Routing effort</FieldLabel>
+              <FieldDescription className="font-mono text-[11.5px] text-success">
+                {effortMeta.id} — {effortMeta.hint}
+              </FieldDescription>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <span className="shrink-0 text-[11px] text-muted-foreground">Faster</span>
+              <Slider
+                min={0}
+                max={EFFORTS.length - 1}
+                step={1}
+                value={effortIndex}
+                onValueChange={(v) => {
+                  const n = Array.isArray(v) ? v[0] : v;
+                  if (n != null) setEffort(EFFORTS[n]!.id);
+                }}
+                aria-label="Routing effort"
+              />
+              <span className="shrink-0 text-[11px] text-muted-foreground">Smarter</span>
+            </div>
+            <div className="flex justify-between px-[42px]">
+              {EFFORTS.map((e) => (
+                <Button
+                  key={e.id}
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  className={cn("h-auto px-0 font-mono text-[11px]", e.id === effort ? "text-success" : "text-muted-foreground")}
+                  onClick={() => setEffort(e.id)}
+                >
+                  {e.id}
+                </Button>
+              ))}
+            </div>
+          </Field>
+        </FieldGroup>
 
-        <div className="pg-effort">
-          <div className="pg-effort-head">
-            <span>Routing effort</span>
-            <span className="pg-effort-tip">
-              {effortMeta.id} — {effortMeta.hint}
-            </span>
-          </div>
-          <div className="pg-effort-row">
-            <span className="pg-effort-end">Faster</span>
-            <input
-              type="range"
-              min={0}
-              max={EFFORTS.length - 1}
-              step={1}
-              value={EFFORTS.findIndex((e) => e.id === effort)}
-              onChange={(e) => setEffort(EFFORTS[Number(e.target.value)]!.id)}
-              aria-label="Routing effort"
-            />
-            <span className="pg-effort-end">Smarter</span>
-          </div>
-          <div className="pg-effort-ticks">
-            {EFFORTS.map((e) => (
-              <button
-                key={e.id}
-                type="button"
-                className={e.id === effort ? "on" : ""}
-                onClick={() => setEffort(e.id)}
-              >
-                {e.id}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="pg-cands">
-          <div className="pg-cands-head">
+        <div className="flex flex-col gap-2">
+          <p className="text-xs text-muted-foreground">
             {allowed.length} of {candidates.length} enabled
-          </div>
-          {loadError ? <div className="pg-note">Could not load /v1/models ({loadError}).</div> : null}
-          <div className="pg-cands-list">
-            {candidates.map((m, i) => (
-              <label key={m.id} className="pg-cand">
-                <input type="checkbox" checked={checked.has(m.id)} onChange={() => toggle(m.id)} />
-                <span className="pg-cand-dot" style={{ background: colorFor(m.id, i, MIX_COLORS) }} />
-                <span className="pg-cand-name">{displayName(m, m.id)}</span>
-                {priceLabel(m.input_per_1m) ? <span className="pg-cand-price">{priceLabel(m.input_per_1m)}</span> : null}
-              </label>
-            ))}
-          </div>
-          <p className="pg-caption">
+          </p>
+          {loadError ? (
+            <Alert>
+              <AlertTitle>Catalog error</AlertTitle>
+              <AlertDescription>Could not load /v1/models ({loadError}).</AlertDescription>
+            </Alert>
+          ) : null}
+          <ScrollArea className="h-[220px] rounded-lg border bg-muted">
+            <div className="flex flex-col">
+              {candidates.map((m, i) => (
+                <label
+                  key={m.id}
+                  className="flex cursor-pointer items-center gap-2.5 border-b px-3 py-2 text-[13px] last:border-b-0"
+                >
+                  <Checkbox checked={checked.has(m.id)} onCheckedChange={() => toggle(m.id)} />
+                  <span className="size-2 shrink-0 rounded-full" style={{ background: colorFor(m.id, i, MIX_COLORS) }} />
+                  <span className="min-w-0 flex-1 truncate">{displayName(m, m.id)}</span>
+                  {priceLabel(m.input_per_1m) ? (
+                    <span className="shrink-0 font-mono text-xs text-muted-foreground">{priceLabel(m.input_per_1m)}</span>
+                  ) : null}
+                </label>
+              ))}
+            </div>
+          </ScrollArea>
+          <p className="text-xs leading-snug text-muted-foreground">
             Effort and candidate models apply to this request only. Edit the saved policy on the{" "}
-            <Link href="/routers/auto">router&apos;s settings page</Link>.
+            <Link href="/routers/auto" className="underline underline-offset-2 hover:text-foreground">
+              router&apos;s settings page
+            </Link>
+            .
           </p>
         </div>
 
-        <div className="pg-toggles">
-          <label className="pg-toggle">
-            <span>Output Schema</span>
-            <input type="checkbox" role="switch" checked={jsonMode} onChange={(e) => setJsonMode(e.target.checked)} />
-          </label>
-          <label className="pg-toggle">
-            <span>Stream response</span>
-            <input type="checkbox" role="switch" checked={stream} onChange={(e) => setStream(e.target.checked)} />
-          </label>
-        </div>
+        <FieldGroup>
+          <Field orientation="horizontal">
+            <FieldLabel htmlFor="pg-json">Output Schema</FieldLabel>
+            <Switch id="pg-json" checked={jsonMode} onCheckedChange={setJsonMode} />
+          </Field>
+          <Field orientation="horizontal">
+            <FieldLabel htmlFor="pg-stream">Stream response</FieldLabel>
+            <Switch id="pg-stream" checked={stream} onCheckedChange={setStream} />
+          </Field>
+        </FieldGroup>
       </div>
 
-      <div className="pg-right">
-        <div className="pg-tabs" role="tablist">
-          <button type="button" role="tab" aria-selected={tab === "code"} className={tab === "code" ? "on" : ""} onClick={() => setTab("code")}>
-            <span className="pg-tab-ico">&gt;_</span> Code
-          </button>
-          <button type="button" role="tab" aria-selected={tab === "output"} className={tab === "output" ? "on" : ""} onClick={() => setTab("output")}>
-            <span className="pg-tab-ico">▷</span> Output
-          </button>
-          <button type="button" role="tab" aria-selected={tab === "overview"} className={tab === "overview" ? "on" : ""} onClick={() => setTab("overview")}>
-            Overview
-          </button>
-        </div>
-        <div className="pg-pane">
-          {tab === "code" ? (
-            <>
-              <pre className="pg-out">{curlFor(codeSrc)}</pre>
-              <pre className="pg-out" style={{ marginTop: 20, opacity: 0.9 }}>
-                {JSON.stringify(requestPayload(codeSrc), null, 2)}
-              </pre>
-            </>
-          ) : null}
-          {tab === "output" ? (
-            !hop && !busy ? (
-              <div className="empty pg-empty">No hop yet.</div>
-            ) : (
-              <pre className="pg-out">
-                {busy
-                  ? liveText || (stream ? "Waiting for tokens…" : "Routing…")
-                  : hop?.error && !hop.text
-                    ? hop.error
-                    : hop?.text}
-              </pre>
-            )
-          ) : null}
-          {tab === "overview" ? <OverviewPane hop={busy ? null : hop} models={candidates} /> : null}
-        </div>
-      </div>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} className="min-h-0 min-w-0 gap-0">
+        <TabsList variant="line" className="w-full justify-start rounded-none border-b px-3.5 pt-2.5">
+          <TabsTrigger value="code">
+            <TerminalIcon data-icon="inline-start" />
+            Code
+          </TabsTrigger>
+          <TabsTrigger value="output">
+            <PlayIcon data-icon="inline-start" />
+            Output
+          </TabsTrigger>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+        </TabsList>
+        <TabsContent value="code" className="overflow-auto p-[22px]">
+          <pre className="font-mono text-[12.5px] leading-[1.6] whitespace-pre-wrap text-muted-foreground">
+            {curlFor(codeSrc)}
+          </pre>
+          <pre className="mt-5 font-mono text-[12.5px] leading-[1.6] whitespace-pre-wrap text-muted-foreground opacity-90">
+            {JSON.stringify(requestPayload(codeSrc), null, 2)}
+          </pre>
+        </TabsContent>
+        <TabsContent value="output" className="overflow-auto p-[22px]">
+          {!hop && !busy ? (
+            <Empty className="min-h-[240px] border border-dashed">
+              <EmptyHeader>
+                <EmptyTitle>No hop yet</EmptyTitle>
+                <EmptyDescription>Run a query to see the model output.</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            <pre className="font-mono text-[12.5px] leading-[1.6] whitespace-pre-wrap text-muted-foreground">
+              {busy
+                ? liveText || (stream ? "Waiting for tokens…" : "Routing…")
+                : hop?.error && !hop.text
+                  ? hop.error
+                  : hop?.text}
+            </pre>
+          )}
+        </TabsContent>
+        <TabsContent value="overview" className="overflow-auto p-[22px]">
+          <OverviewPane hop={busy ? null : hop} models={candidates} />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+function Kv({ k, v, green }: { k: string; v: string; green?: boolean }) {
+  return (
+    <div className="flex justify-between gap-4 border-b py-2.5 text-[13px]">
+      <span className="text-muted-foreground">{k}</span>
+      <span className={cn("text-right font-mono text-[12.5px] break-all", green && "text-success")}>{v}</span>
     </div>
   );
 }
 
 function OverviewPane({ hop, models }: { hop: Hop | null; models: CatalogModel[] }) {
   if (!hop) {
-    return <div className="empty pg-empty">No hop yet.</div>;
+    return (
+      <Empty className="min-h-[240px] border border-dashed">
+        <EmptyHeader>
+          <EmptyTitle>No hop yet</EmptyTitle>
+          <EmptyDescription>Run a query to see routing details.</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
   }
 
   const modelId = hdr(hop.headers, "x-router-model");
@@ -531,149 +611,114 @@ function OverviewPane({ hop, models }: { hop: Hop | null; models: CatalogModel[]
   if (rule && !pills.includes(rule)) pills.push(rule);
 
   return (
-    <div className="pg-overview">
-      <div className="pg-pick">
-        <div className="pg-pick-name">{displayName(chosen, modelId || "—")}</div>
-        <div className="pg-pick-via">via router/auto{path ? ` · ${path}` : ""}</div>
-        <div className={hop.ok ? "pg-ok" : "pg-bad"}>{hop.ok ? "✓ Success" : `HTTP ${hop.status}${hop.error ? ` · ${hop.error}` : ""}`}</div>
+    <div className="max-w-[720px]">
+      <div className="mb-1 border-b pb-4">
+        <div className="text-lg font-semibold">{displayName(chosen, modelId || "—")}</div>
+        <div className="mt-1 text-[13px] text-muted-foreground">
+          via router/auto{path ? ` · ${path}` : ""}
+        </div>
+        <div className={cn("mt-2 text-[13px] font-medium", hop.ok ? "text-success" : "text-highlight")}>
+          {hop.ok ? "✓ Success" : `HTTP ${hop.status}${hop.error ? ` · ${hop.error}` : ""}`}
+        </div>
       </div>
 
-      <div className="pg-kv">
-        <span className="k">End-to-end latency</span>
-        <span className="v">{(hop.e2eMs / 1000).toFixed(3)}s</span>
-      </div>
-      <div className="pg-kv">
-        <span className="k">TTFT</span>
-        <span className="v">{hop.ttftMs == null ? "—" : `${(hop.ttftMs / 1000).toFixed(3)}s`}</span>
-      </div>
-      <div className="pg-kv">
-        <span className="k">Finish reason</span>
-        <span className="v">{hop.finishReason || "—"}</span>
-      </div>
-      <div className="pg-kv">
-        <span className="k">Phase</span>
-        <span className="v">{phase || "—"}</span>
-      </div>
-      <div className="pg-kv">
-        <span className="k">Routing rule</span>
-        <span className="v">{rule || (reason ? reason.split(";")[0] : "—")}</span>
-      </div>
-      <div className="pg-kv">
-        <span className="k">Confidence</span>
-        <span className="v">{conf != null ? asPct(conf) : "—"}</span>
-      </div>
-
-      <div className="pg-kv">
-        <span className="k">Input tokens</span>
-        <span className="v">{hop.usage ? hop.usage.prompt.toLocaleString() : "—"}</span>
-      </div>
-      <div className="pg-kv">
-        <span className="k">Output tokens</span>
-        <span className="v">{hop.usage ? hop.usage.completion.toLocaleString() : "—"}</span>
-      </div>
-      <div className="pg-kv">
-        <span className="k">Total tokens</span>
-        <span className="v">{hop.usage ? hop.usage.total.toLocaleString() : "—"}</span>
-      </div>
-
-      <div className="pg-kv">
-        <span className="k">Savings</span>
-        <span className="v green">
-          {savings == null ? "—" : `${money(savings)}${savingsPct != null ? ` (${Math.round(savingsPct)}%)` : ""}`}
-        </span>
-      </div>
-      <div className="pg-kv">
-        <span className="k">Most expensive option</span>
-        <span className="v">{baselineCost == null ? "—" : money(baselineCost)}</span>
-      </div>
-
-      <div className="pg-kv">
-        <span className="k">Model ID</span>
-        <span className="v">{modelId || "—"}</span>
-      </div>
-      <div className="pg-kv">
-        <span className="k">Provider</span>
-        <span className="v">aiand-router</span>
-      </div>
-      <div className="pg-kv">
-        <span className="k">Type</span>
-        <span className="v">Router</span>
-      </div>
-      <div className="pg-kv">
-        <span className="k">Threshold</span>
-        <span className="v">{threshold || "—"}</span>
-      </div>
-      <div className="pg-kv">
-        <span className="k">Inference ID</span>
-        <span className="v">{hop.inferenceId || "—"}</span>
-      </div>
+      <Kv k="End-to-end latency" v={`${(hop.e2eMs / 1000).toFixed(3)}s`} />
+      <Kv k="TTFT" v={hop.ttftMs == null ? "—" : `${(hop.ttftMs / 1000).toFixed(3)}s`} />
+      <Kv k="Finish reason" v={hop.finishReason || "—"} />
+      <Kv k="Phase" v={phase || "—"} />
+      <Kv k="Routing rule" v={rule || (reason ? reason.split(";")[0] : "—")} />
+      <Kv k="Confidence" v={conf != null ? asPct(conf) : "—"} />
+      <Kv k="Input tokens" v={hop.usage ? hop.usage.prompt.toLocaleString() : "—"} />
+      <Kv k="Output tokens" v={hop.usage ? hop.usage.completion.toLocaleString() : "—"} />
+      <Kv k="Total tokens" v={hop.usage ? hop.usage.total.toLocaleString() : "—"} />
+      <Kv
+        k="Savings"
+        v={savings == null ? "—" : `${money(savings)}${savingsPct != null ? ` (${Math.round(savingsPct)}%)` : ""}`}
+        green
+      />
+      <Kv k="Most expensive option" v={baselineCost == null ? "—" : money(baselineCost)} />
+      <Kv k="Model ID" v={modelId || "—"} />
+      <Kv k="Provider" v="aiand-router" />
+      <Kv k="Type" v="Router" />
+      <Kv k="Threshold" v={threshold || "—"} />
+      <Kv k="Inference ID" v={hop.inferenceId || "—"} />
 
       {hop.system ? (
-        <div className="pg-sys">
-          <div className="k">System prompt</div>
-          <p>{hop.system}</p>
+        <div className="border-b py-3.5">
+          <div className="text-[11px] font-medium tracking-[0.06em] text-muted-foreground uppercase">System prompt</div>
+          <p className="mt-2 text-[13px] leading-normal text-muted-foreground">{hop.system}</p>
         </div>
       ) : null}
 
-      <div className="pg-decision">
-        <div className="pg-decision-title">Routing decision</div>
-        <div className="pg-decision-grid">
-          <div>
-            <div className="k">Chosen model</div>
-            <div className="v">{displayName(chosen, modelId || "—")}</div>
-          </div>
-          <div>
-            <div className="k">Rule</div>
-            <div className="v">{rule || "—"}</div>
-          </div>
-          <div>
-            <div className="k">Confidence</div>
-            <div className="v">{conf != null ? asConf(conf) : "—"}</div>
-          </div>
-          <div>
-            <div className="k">Savings</div>
-            <div className="v green">
-              {savings == null ? "—" : `${money(savings)}${savingsPct != null ? ` / ${savingsPct.toFixed(1)}%` : ""}`}
+      <Card className="mt-[18px] gap-0 bg-muted py-0">
+        <CardHeader className="pt-4 pb-0">
+          <CardTitle className="text-[11px] font-medium tracking-[0.06em] text-muted-foreground uppercase">
+            Routing decision
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pb-2">
+          <div className="my-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div>
+              <div className="text-[11px] font-medium tracking-[0.06em] text-muted-foreground uppercase">Chosen model</div>
+              <div className="mt-1 text-[13px] font-medium">{displayName(chosen, modelId || "—")}</div>
+            </div>
+            <div>
+              <div className="text-[11px] font-medium tracking-[0.06em] text-muted-foreground uppercase">Rule</div>
+              <div className="mt-1 text-[13px] font-medium">{rule || "—"}</div>
+            </div>
+            <div>
+              <div className="text-[11px] font-medium tracking-[0.06em] text-muted-foreground uppercase">Confidence</div>
+              <div className="mt-1 text-[13px] font-medium">{conf != null ? asConf(conf) : "—"}</div>
+            </div>
+            <div>
+              <div className="text-[11px] font-medium tracking-[0.06em] text-muted-foreground uppercase">Savings</div>
+              <div className="mt-1 text-[13px] font-medium text-success">
+                {savings == null ? "—" : `${money(savings)}${savingsPct != null ? ` / ${savingsPct.toFixed(1)}%` : ""}`}
+              </div>
             </div>
           </div>
-        </div>
-        {pills.length ? (
-          <div className="pg-pills">
-            {pills.map((p) => (
-              <span key={p} className="pg-pill">
-                {p}
-              </span>
-            ))}
-          </div>
-        ) : null}
-        <table className="pg-cand-table">
-          <thead>
-            <tr>
-              <th>Candidate</th>
-              <th>Score</th>
-              <th className="r">Est. cost</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(candIds.length ? candIds : hop.allowed).map((id) => {
-              const row = byId(models, id);
-              const chosenRow = id === modelId;
-              const cost = hasUsage ? hopCost(row, prompt, completion) : null;
-              const rowScore = chosenRow ? (conf ?? score) : null;
-              return (
-                <tr key={id} className={chosenRow ? "chosen" : ""}>
-                  <td>
-                    {displayName(row, id)}
-                    {chosenRow ? <span className="pg-chosen-tag">CHOSEN</span> : null}
-                  </td>
-                  <td>{rowScore != null ? asConf(rowScore) : "—"}</td>
-                  <td className="r">{cost == null ? "—" : money(cost)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+          {pills.length ? (
+            <div className="mb-3 flex flex-wrap gap-1.5">
+              {pills.map((p) => (
+                <Badge key={p} variant="outline" className="font-mono text-[11px] font-normal">
+                  {p}
+                </Badge>
+              ))}
+            </div>
+          ) : null}
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-[11px] tracking-[0.06em] uppercase">Candidate</TableHead>
+                <TableHead className="text-[11px] tracking-[0.06em] uppercase">Score</TableHead>
+                <TableHead className="text-right text-[11px] tracking-[0.06em] uppercase">Est. cost</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(candIds.length ? candIds : hop.allowed).map((id) => {
+                const row = byId(models, id);
+                const chosenRow = id === modelId;
+                const cost = hasUsage ? hopCost(row, prompt, completion) : null;
+                const rowScore = chosenRow ? (conf ?? score) : null;
+                return (
+                  <TableRow key={id} className={cn(chosenRow && "bg-highlight/15")}>
+                    <TableCell>
+                      {displayName(row, id)}
+                      {chosenRow ? (
+                        <Badge className="ml-2 bg-highlight text-[10px] font-bold tracking-wider text-accent-foreground">
+                          CHOSEN
+                        </Badge>
+                      ) : null}
+                    </TableCell>
+                    <TableCell>{rowScore != null ? asConf(rowScore) : "—"}</TableCell>
+                    <TableCell className="text-right">{cost == null ? "—" : money(cost)}</TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
     </div>
   );
 }

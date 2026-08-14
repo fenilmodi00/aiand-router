@@ -1,8 +1,36 @@
 "use client";
 
-import { useState } from "react";
-import type { Candidate, Inference } from "@/lib/types";
+import { useEffect, useState } from "react";
+import { LayoutGridIcon, ListIcon, SearchIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { shortTs } from "@/lib/format";
+import type { Candidate, Inference } from "@/lib/types";
+
+const PAGE_SIZE = 25;
 
 function qualityCell(row: Inference): string {
   if (row.tests_passed === true) return "pass";
@@ -27,120 +55,184 @@ export function InferencesTable({
   error?: string | null;
 }) {
   const [grid, setGrid] = useState(false);
+  const [page, setPage] = useState(1);
+  const [modelValue, setModelValue] = useState<string | null>(model || null);
+  const items = [
+    { label: "Model", value: null },
+    ...candidates.map((c) => ({ label: c.display_name, value: c.id })),
+  ];
+  const emptyMsg = error ? `Gateway error: ${error}` : "No data matches your filters.";
+  const total = rows.length;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const start = (safePage - 1) * PAGE_SIZE;
+  const pageRows = rows.slice(start, start + PAGE_SIZE);
+
+  useEffect(() => {
+    setPage(1);
+  }, [rows, q, model, range]);
+
   return (
-    <>
-      <form className="toolbar" action="/routers/auto" method="get">
+    <div className="flex flex-col gap-4">
+      <form className="flex flex-wrap gap-3" action="/routers/auto" method="get">
         <input type="hidden" name="range" value={range} />
-        <label className="search">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-            <circle cx="11" cy="11" r="7" />
-            <path d="M20 20l-3.5-3.5" />
-          </svg>
-          <input type="search" name="q" defaultValue={q} placeholder="Search inferences..." aria-label="Search inferences" />
-        </label>
-        <select className="filter" name="model" defaultValue={model} aria-label="Model">
-          <option value="">Model</option>
-          {candidates.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.display_name}
-            </option>
-          ))}
-        </select>
-        <button className="btn" type="submit" style={{ height: 40 }}>
+        <input type="hidden" name="model" value={modelValue ?? ""} />
+        <InputGroup className="h-10 min-w-[180px] flex-1">
+          <InputGroupAddon>
+            <SearchIcon />
+          </InputGroupAddon>
+          <InputGroupInput
+            type="search"
+            name="q"
+            defaultValue={q}
+            placeholder="Search inferences..."
+            aria-label="Search inferences"
+          />
+        </InputGroup>
+        <Select items={items} value={modelValue} onValueChange={(v) => setModelValue(v as string | null)}>
+          <SelectTrigger className="h-10" aria-label="Model">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {items.map((item) => (
+                <SelectItem key={String(item.value)} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+        <Button type="submit" variant="outline" className="h-10">
           Filter
-        </button>
-        <span className="view-toggle">
-          <button type="button" aria-label="Grid view" className={grid ? "on" : ""} onClick={() => setGrid(true)}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <rect x="3" y="3" width="7" height="7" rx="1.5" />
-              <rect x="14" y="3" width="7" height="7" rx="1.5" />
-              <rect x="3" y="14" width="7" height="7" rx="1.5" />
-              <rect x="14" y="14" width="7" height="7" rx="1.5" />
-            </svg>
-          </button>
-          <button type="button" aria-label="List view" className={!grid ? "on" : ""} onClick={() => setGrid(false)}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <path d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </button>
-        </span>
+        </Button>
+        <ToggleGroup
+          value={[grid ? "grid" : "list"]}
+          onValueChange={(v) => {
+            if (v[0]) setGrid(v[0] === "grid");
+          }}
+          spacing={0}
+          className="rounded-lg border border-input"
+        >
+          <ToggleGroupItem value="grid" aria-label="Grid view" className="size-10">
+            <LayoutGridIcon />
+          </ToggleGroupItem>
+          <ToggleGroupItem value="list" aria-label="List view" className="size-10">
+            <ListIcon />
+          </ToggleGroupItem>
+        </ToggleGroup>
       </form>
       {grid ? (
-        <div className="infer-grid">
-          {rows.length === 0 ? (
-            <div className="empty" style={{ height: 120, gridColumn: "1 / -1" }}>
-              {error ? `Gateway error: ${error}` : "No data matches your filters."}
-            </div>
-          ) : (
-            rows.map((row, i) => (
-              <div className="card infer-card" key={`${row.ts}-${i}`}>
-                <div className="k">Time</div>
-                <div className="v">{shortTs(row.ts)}</div>
-                <div className="k" style={{ marginTop: 10 }}>
-                  Model
-                </div>
-                <div className="v">
-                  {row.selected || "—"}
-                  <div className="muted">{row.path}</div>
-                </div>
-                <div className="k" style={{ marginTop: 10 }}>
-                  Status / cache
-                </div>
-                <div className="v">
-                  {row.status} · {row.cache_hit ? "hit" : "miss"}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
+        rows.length === 0 ? (
+          <Empty className="min-h-[120px] border">
+            <EmptyHeader>
+              <EmptyTitle>No inferences</EmptyTitle>
+              <EmptyDescription>{emptyMsg}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3">
+            {pageRows.map((row, i) => (
+              <Card key={`${row.ts}-${i}`} size="sm">
+                <CardHeader>
+                  <CardTitle className="text-[11px] tracking-[0.06em] text-muted-foreground uppercase">
+                    Time
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-2.5">
+                  <div>{shortTs(row.ts)}</div>
+                  <div className="text-[11px] tracking-[0.06em] text-muted-foreground uppercase">Model</div>
+                  <div>
+                    {row.selected || "—"}
+                    <div className="font-mono text-[11px] text-muted-foreground">{row.path}</div>
+                  </div>
+                  <div className="text-[11px] tracking-[0.06em] text-muted-foreground uppercase">
+                    Status / cache
+                  </div>
+                  <div>
+                    {row.status} · {row.cache_hit ? "hit" : "miss"}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )
       ) : (
-        <div className="table">
-          <table>
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Model</th>
-                <th>Input</th>
-                <th className="r">E2E latency</th>
-                <th className="r">TTFT</th>
-                <th className="r">Tokens</th>
-                <th>Status</th>
-                <th className="r">Cache</th>
-                <th className="r">LLMaJ Score</th>
-              </tr>
-            </thead>
-            <tbody>
+        <div className="overflow-hidden rounded-lg border bg-card">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Time</TableHead>
+                <TableHead>Model</TableHead>
+                <TableHead>Input</TableHead>
+                <TableHead className="text-right">E2E latency</TableHead>
+                <TableHead className="text-right">TTFT</TableHead>
+                <TableHead className="text-right">Tokens</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Cache</TableHead>
+                <TableHead className="text-right">LLMaJ Score</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {rows.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="empty-row">
-                    {error ? `Gateway error: ${error}` : "No data matches your filters."}
-                  </td>
-                </tr>
+                <TableRow>
+                    <TableCell colSpan={9} className="py-12 text-center text-muted-foreground">
+                    {emptyMsg}
+                  </TableCell>
+                </TableRow>
               ) : (
-                rows.map((row, i) => (
-                  <tr key={`${row.ts}-${row.selected}-${i}`}>
-                    <td>{shortTs(row.ts)}</td>
-                    <td>
+                pageRows.map((row, i) => (
+                  <TableRow key={`${row.ts}-${row.selected}-${i}`}>
+                    <TableCell>{shortTs(row.ts)}</TableCell>
+                    <TableCell>
                       {row.selected || "—"}
-                      <div className="muted">
+                      <div className="font-mono text-[11px] text-muted-foreground">
                         {row.path}
                         {row.phase ? ` · ${row.phase}` : ""}
                       </div>
-                    </td>
-                    <td>{row.tokens_in}</td>
-                    <td className="r">{row.latency_ms} ms</td>
-                    <td className="r">{row.ttft_ms == null ? "—" : `${row.ttft_ms} ms`}</td>
-                    <td className="r">{row.tokens_out}</td>
-                    <td>{row.status}</td>
-                    <td className="r">{row.cache_hit ? "hit" : "—"}</td>
-                    <td className="r">{qualityCell(row)}</td>
-                  </tr>
+                    </TableCell>
+                    <TableCell>{row.tokens_in}</TableCell>
+                    <TableCell className="text-right">{row.latency_ms} ms</TableCell>
+                    <TableCell className="text-right">{row.ttft_ms == null ? "—" : `${row.ttft_ms} ms`}</TableCell>
+                    <TableCell className="text-right">{row.tokens_out}</TableCell>
+                    <TableCell>{row.status}</TableCell>
+                    <TableCell className="text-right">{row.cache_hit ? "hit" : "—"}</TableCell>
+                    <TableCell className="text-right">{qualityCell(row)}</TableCell>
+                  </TableRow>
                 ))
               )}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
-    </>
+      {total > 0 ? (
+        <div className="flex items-center justify-end gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={safePage <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+          >
+            Previous
+          </Button>
+          <span className="text-sm tabular-nums text-muted-foreground">
+            {start + 1}–{start + pageRows.length} of {total}
+            <span className="ml-2 text-muted-foreground/70">
+              {safePage} / {pageCount}
+            </span>
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={safePage >= pageCount}
+            onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+          >
+            Next
+          </Button>
+        </div>
+      ) : null}
+    </div>
   );
 }

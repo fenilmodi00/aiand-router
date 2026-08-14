@@ -1,5 +1,6 @@
 import "server-only";
 
+import { logToInference, overlayOverview, parseLogs } from "./aiand";
 import {
   EMPTY_HEALTH,
   EMPTY_OVERVIEW,
@@ -12,6 +13,12 @@ import {
   type Overview,
   type Range,
 } from "./types";
+
+export type OrgBundle = {
+  overview: Overview;
+  inferences: Inference[];
+  errors: Inference[];
+};
 
 function baseUrl(): string {
   return (process.env.ROUTER_BASE_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
@@ -45,6 +52,11 @@ function coerceOverview(data: Partial<Overview> | null, range: Range): Overview 
     candidates: data?.candidates ?? [],
     candidate_mix: data?.candidate_mix ?? [],
     usage_buckets: data?.usage_buckets ?? [],
+    unsaved_usd: data?.unsaved_usd ?? 0,
+    org_overlay: data?.org_overlay ?? false,
+    org_sample_n: data?.org_sample_n ?? 0,
+    org_input_tokens: data?.org_input_tokens ?? 0,
+    org_output_tokens: data?.org_output_tokens ?? 0,
   };
 }
 
@@ -120,13 +132,128 @@ export async function getHealth(): Promise<FetchResult<Health>> {
   return r;
 }
 
+function aiandOrigin(): string {
+  return (process.env.AIAND_BASE_URL || "https://api.aiand.com/v1").replace(/\/v1\/?$/, "");
+}
+
+function scrub(text: string): string {
+  const key = process.env.DATA_AIAND_API_KEY || "";
+  return key ? text.split(key).join("[redacted]") : text;
+}
+
+async function aiand<T>(path: string): Promise<FetchResult<T>> {
+  const key = process.env.DATA_AIAND_API_KEY || "";
+  if (!key) {
+    return { ok: false, status: 0, data: null, error: "DATA_AIAND_API_KEY is not set" };
+  }
+  try {
+    const r = await fetch(`${aiandOrigin()}${path}`, {
+      headers: { Authorization: `Bearer ${key}` },
+      cache: "no-store",
+    });
+    const body = await r.json().catch(() => null);
+    if (!r.ok) {
+      return {
+        ok: false,
+        status: r.status,
+        data: null,
+        error: scrub(errorMessage(r.status, r.statusText, body)),
+      };
+    }
+    return { ok: true, status: r.status, data: body as T, error: null };
+  } catch (e) {
+    return {
+      ok: false,
+      status: 0,
+      data: null,
+      error: e instanceof Error ? e.message : "fetch failed",
+    };
+  }
+}
+
+type LogsPage = {
+  data?: unknown[];
+  has_more?: boolean;
+  next_after?: string;
+  next_after_id?: string;
+};
+
+async function fetchLogPages(range: string, pages = 2): Promise<unknown[]> {
+  const rows: unknown[] = [];
+  let after = "";
+  let afterId = "";
+  for (let i = 0; i < pages; i++) {
+    const qs = new URLSearchParams({ range, limit: "100" });
+    if (after) qs.set("after", after);
+    if (afterId) qs.set("after_id", afterId);
+    const r = await aiand<LogsPage>(`/logs?${qs}`);
+    if (!r.ok || !r.data) break;
+    const chunk = Array.isArray(r.data.data) ? r.data.data : [];
+    rows.push(...chunk);
+    if (!r.data.has_more) break;
+    after = r.data.next_after || "";
+    afterId = r.data.next_after_id || "";
+    if (!after && !afterId) break;
+  }
+  return rows;
+}
+
 export async function getUpstream(kind: "summary" | "metrics" | "logs", range: Range) {
   const mapped = toAiandRange(range);
-  const path =
-    kind === "logs"
-      ? `/v1/console/upstream/logs?range=${mapped}`
-      : `/v1/console/upstream/${kind}?range=${mapped}`;
-  return gateway<unknown>(path);
+  if (kind === "logs") return aiand<unknown>(`/logs?range=${mapped}&limit=100`);
+  return aiand<unknown>(`/analytics/${kind}?range=${mapped}`);
+}
+
+export async function getOrgUsage(
+  range: Range,
+  q = "",
+  model = "",
+): Promise<FetchResult<OrgBundle>> {
+  const mapped = toAiandRange(range);
+  const [summaryRes, metricsRes, modelsRes, errorRes] = await Promise.all([
+    aiand<unknown>(`/analytics/summary?range=${mapped}`),
+    aiand<unknown>(`/analytics/metrics?range=${mapped}`),
+    getModels(),
+    aiand<LogsPage>(`/logs?range=${mapped}&errors=true&limit=50`),
+  ]);
+  if (!summaryRes.ok && !metricsRes.ok) {
+    return {
+      ok: false,
+      status: summaryRes.status || metricsRes.status,
+      data: null,
+      error: summaryRes.error || metricsRes.error || "AIand analytics unavailable",
+    };
+  }
+  const logs = await fetchLogPages(mapped);
+  const catalog = (modelsRes.data?.data || [])
+    .filter((m) => m.id !== "router/auto")
+    .map((m) => ({
+      id: m.id,
+      display_name: m.display_name || m.id,
+      enabled: m.enabled !== false,
+    }));
+  const overview = overlayOverview({
+    range,
+    summary: summaryRes.data,
+    metrics: metricsRes.data,
+    logs,
+    catalog,
+  });
+  const needle = q.trim().toLowerCase();
+  const inferences = parseLogs(logs)
+    .map(logToInference)
+    .filter((row) => {
+      if (model && row.selected !== model) return false;
+      if (!needle) return true;
+      return `${row.selected || ""} ${row.path}`.toLowerCase().includes(needle);
+    });
+  const errors = parseLogs(errorRes.data).map(logToInference);
+  return {
+    ok: true,
+    status: 200,
+    data: { overview, inferences, errors },
+    error: summaryRes.ok ? null : summaryRes.error,
+  };
 }
 
 export function maskKey(): MaskedKey {

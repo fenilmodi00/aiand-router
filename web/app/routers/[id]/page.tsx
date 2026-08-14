@@ -1,14 +1,29 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { BarChart3Icon, ChevronLeftIcon, KeyRoundIcon } from "lucide-react";
+import { CandidateMixPioneer } from "@/components/CandidateMixPioneer";
+import { CostVsBaseline } from "@/components/CostVsBaseline";
 import { InferenceSnippet } from "@/components/InferenceSnippet";
 import { InferencesTable } from "@/components/InferencesTable";
 import { KeyPill } from "@/components/KeyPill";
+import { LinkToggle, RangeMenu } from "@/components/RangeMenu";
 import { mixRows, RoutingPipeline } from "@/components/RoutingPipeline";
 import { RouterSavingsChart } from "@/components/RouterSavingsChart";
 import { StatCard } from "@/components/StatCard";
 import { UsageChart } from "@/components/UsageChart";
-import { getInferences, getOverview, maskKey } from "@/lib/api";
-import { parseRange, pct, RANGE_LABEL, usd } from "@/lib/format";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { getInferences, getOrgUsage, getOverview, maskKey } from "@/lib/api";
+import { compact, parseRange, pct, RANGE_LABEL, usd } from "@/lib/format";
 import type { Range } from "@/lib/types";
 
 const QUALITY_RANGES: { id: Range; label: string }[] = [
@@ -32,12 +47,16 @@ export default async function RouterDetailPage({
   const q = sp.q || "";
   const model = sp.model || "";
 
-  const [overviewRes, inferencesRes] = await Promise.all([
+  const [overviewRes, inferencesRes, orgRes] = await Promise.all([
     getOverview(range),
     getInferences(range, q, model),
+    getOrgUsage(range, q, model),
   ]);
-  const o = overviewRes.data!;
-  const inferences = inferencesRes.data?.data ?? [];
+  const local = overviewRes.data!;
+  const org = orgRes.data?.overview;
+  const useOrg = local.routed_requests === 0 && !!org && org.routed_requests > 0;
+  const o = useOrg && org ? org : local;
+  const inferences = useOrg ? (orgRes.data?.inferences ?? []) : (inferencesRes.data?.data ?? []);
   const n = o.candidates.filter((c) => c.enabled).length || o.candidates.length;
   const meta = n ? `Router · Auto · ${n} candidates` : "Router · Auto";
   const rows = mixRows(o.candidates, o.candidate_mix);
@@ -51,195 +70,226 @@ export default async function RouterDetailPage({
     if (model) p.set("model", model);
     return `/routers/auto?${p}`;
   };
+  const hrefs = Object.fromEntries((Object.keys(RANGE_LABEL) as Range[]).map((r) => [r, qs(r)])) as Record<
+    Range,
+    string
+  >;
 
   return (
-    <div className="content">
-      <nav className="breadcrumb" aria-label="Breadcrumb">
-        <Link className="back" href="/routers" aria-label="Back to routers">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M15 6l-6 6 6 6" />
-          </svg>
+    <div className="mx-auto max-w-[1360px] px-11 pt-[26px] pb-[120px]">
+      {/* Pioneer-style breadcrumb: back arrow + breadcrumb path */}
+      <nav className="mb-[22px] flex items-center gap-2 text-[13px] text-muted-foreground" aria-label="Breadcrumb">
+        <Link href="/routers" className="inline-flex size-[22px] items-center justify-center rounded-md hover:bg-[#17171a] hover:text-foreground" aria-label="Back to routers">
+          <ChevronLeftIcon />
         </Link>
-        <Link href="/routers">Routers</Link>
-        <span className="sep">/</span>
-        <span className="current">router/auto</span>
+        <Link href="/routers" className="hover:text-foreground">Routers</Link>
+        <span className="text-muted-foreground/50">/</span>
+        <span className="text-[#d4d4d8]">router/auto</span>
       </nav>
 
-      <section className="hero">
-        <div className="card hero-main">
-          <h1>Inference router/auto</h1>
-          <div className="hero-meta">{meta}</div>
-          <p className="hero-desc">
-            Integrate <strong>router/auto</strong> into your stack
-          </p>
-          <div className="hero-actions">
-            <Link className="btn" href="/playground">
+      <section className="mb-10 grid gap-6 lg:grid-cols-[1.22fr_1fr]">
+        <Card className="flex flex-col gap-0 px-9 py-[34px]">
+          <CardHeader className="p-0">
+            <CardTitle className="text-[29px] font-semibold tracking-tight">Inference router/auto</CardTitle>
+            <CardDescription className="mt-3 font-mono text-[11px] tracking-[0.08em] uppercase">
+              {meta}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="mt-4 p-0 text-[13.5px] text-muted-foreground">
+            Integrate <strong className="font-semibold text-foreground">router/auto</strong> into your stack
+          </CardContent>
+          <div className="mt-auto flex gap-3 pt-12">
+            <Button render={<Link href="/playground" />} nativeButton={false} variant="outline" className="h-10">
               Try in playground
-            </Link>
-            <a className="btn" href="https://docs.aiand.com/" target="_blank" rel="noreferrer">
+            </Button>
+            <Button render={<a href="https://docs.aiand.com/" target="_blank" rel="noreferrer" />} nativeButton={false} variant="outline" className="h-10">
               Docs
-            </a>
-            <a className="btn btn-primary" href="#run-inference">
+            </Button>
+            <Button render={<a href="#run-inference" />} nativeButton={false} className="h-10 px-16">
               Integrate
-            </a>
+            </Button>
           </div>
-        </div>
-        <div className="hero-side">
-          <div className="card card-pad">
-            <div className="field-head">
-              <span className="left">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                  <circle cx="8" cy="15" r="4" />
-                  <path d="M11 12l9-9M17 4l3 3M14 7l3 3" />
-                </svg>
+        </Card>
+        <div className="flex flex-col gap-6">
+          <Card className="gap-0 py-0">
+            <CardHeader className="flex flex-row items-center justify-between pt-[22px] pb-3.5">
+              <CardTitle className="flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
+                <KeyRoundIcon />
                 API Key
-              </span>
-              <Link href="/keys">View all</Link>
-            </div>
-            <KeyPill masked={maskKey()} />
-          </div>
-          <div className="card card-pad" style={{ flex: 1 }}>
-            <div className="field-head">
-              <span className="left">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                  <path d="M4 20V10M10 20V4M16 20v-8M22 20H2" />
-                </svg>
+              </CardTitle>
+              <CardAction>
+                <Button render={<Link href="/keys" />} nativeButton={false} variant="link" size="sm" className="h-auto px-0">
+                  View all
+                </Button>
+              </CardAction>
+            </CardHeader>
+            <CardContent className="pb-[22px]">
+              <KeyPill masked={maskKey()} />
+            </CardContent>
+          </Card>
+          <Card className="flex flex-1 flex-col gap-0 py-0">
+            <CardHeader className="flex flex-row items-center justify-between pt-[22px] pb-3.5">
+              <CardTitle className="flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
+                <BarChart3Icon />
                 Usage
-              </span>
-              <span className="seg">
-                <Link className={range === "24h" ? "on" : ""} href={qs("24h")}>
-                  24h
-                </Link>
-                <Link className={range === "30d" ? "on" : ""} href={qs("30d")}>
-                  30d
-                </Link>
-              </span>
-            </div>
-            <UsageChart buckets={o.usage_buckets} candidates={o.candidates} />
-          </div>
+              </CardTitle>
+              <CardAction>
+                <LinkToggle
+                  value={range === "24h" ? "24h" : "30d"}
+                  items={[
+                    { value: "24h", label: "24h", href: qs("24h") },
+                    { value: "30d", label: "30d", href: qs("30d") },
+                  ]}
+                />
+              </CardAction>
+            </CardHeader>
+            <CardContent className="pb-[22px]">
+              <UsageChart buckets={o.usage_buckets} candidates={o.candidates} />
+            </CardContent>
+          </Card>
         </div>
       </section>
 
-      <div className="section-head">
-        <h2>Overview</h2>
-        <details className="menu-wrap">
-          <summary className="btn btn-sm">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <rect x="3" y="5" width="18" height="16" rx="2" />
-              <path d="M3 10h18M8 3v4M16 3v4" />
-            </svg>
-            <span>{RANGE_LABEL[range]}</span>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M6 9l6 6 6-6" />
-            </svg>
-          </summary>
-          <div className="menu">
-            {(Object.keys(RANGE_LABEL) as Range[]).map((r) => (
-              <Link key={r} className={r === range ? "on" : ""} href={qs(r)}>
-                {RANGE_LABEL[r]}
-              </Link>
-            ))}
-          </div>
-        </details>
+      <div className="mt-[42px] mb-[18px] flex items-center justify-between">
+        <h2 className="text-base font-semibold">Overview</h2>
+        <RangeMenu range={range} hrefs={hrefs} />
       </div>
 
-      {overviewRes.error && !overviewRes.ok ? (
-        <div className="empty" style={{ height: 48, marginBottom: 16 }}>
-          Console overview unavailable ({overviewRes.error}). Empty zeros below.
-        </div>
+      {overviewRes.error && !overviewRes.ok && !useOrg ? (
+        <Alert className="mb-4">
+          <AlertTitle>Console overview unavailable</AlertTitle>
+          <AlertDescription>{overviewRes.error}. Empty zeros below.</AlertDescription>
+        </Alert>
       ) : null}
 
-      <div className="stats">
-        <StatCard label="Routed requests" value={String(o.routed_requests)} />
-        <StatCard label="Savings" value={usd(o.savings_usd)} sub={pct(o.savings_pct)} green />
+      {useOrg ? (
+        <Alert className="mb-4">
+          <AlertTitle>AIand org traffic — not routed</AlertTitle>
+          <AlertDescription>
+            Inference is down, so this dashboard is showing existing org usage from{" "}
+            <a href="https://docs.aiand.com/analytics/metrics/" className="underline">
+              AIand analytics
+            </a>
+            , not hops through this router. Spend is estimated from recent logs × token volume. You
+            saved {usd(0)}; you have not saved {usd(o.unsaved_usd)} versus Flash.
+          </AlertDescription>
+        </Alert>
+      ) : !orgRes.ok && local.routed_requests === 0 ? (
+        <Alert className="mb-4">
+          <AlertTitle>AIand org usage unavailable</AlertTitle>
+          <AlertDescription>{orgRes.error}. Set DATA_AIAND_API_KEY in web/.env.local.</AlertDescription>
+        </Alert>
+      ) : null}
+
+      <div className="grid gap-[18px] sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
-          label="Fallback rate"
-          value={pct(o.fallback_rate * 100)}
-          sub={`${o.fallback_count} of ${o.routed_requests}`}
+          label={useOrg ? "Org requests" : "Routed requests"}
+          value={String(o.routed_requests)}
+          sub={useOrg ? `${compact(o.org_input_tokens)} in · ${compact(o.org_output_tokens)} out` : undefined}
         />
-        <StatCard label="Candidates" value={String(n)} sub="configured models" />
-      </div>
-
-      <div className="card card-pad" style={{ marginTop: 18 }}>
-        <RouterSavingsChart buckets={o.usage_buckets} />
-      </div>
-
-      <div className="card card-pad" style={{ marginTop: 18 }}>
-        <div className="card-title">Candidate mix</div>
-        <div className="card-sub">Which models the router picked across the last {o.routed_requests} routed requests.</div>
-        {!hasMix ? (
-          <div className="empty" style={{ height: 150, marginTop: 18 }}>
-            No routed requests yet.
-          </div>
+        {useOrg ? (
+          <StatCard
+            label="Not saved"
+            value={usd(o.unsaved_usd)}
+            sub={`${usd(o.cost_routed_usd)} with router · est.`}
+          />
         ) : (
-          rows
-            .filter((r) => r.count > 0)
-            .map((r) => (
-              <div className="meter-row" key={r.id}>
-                <div className="row-head">
-                  <span>{r.display_name}</span>
-                  <span className="v">
-                    {r.count} · {pct(r.pct)}
-                  </span>
-                </div>
-                <div className="track">
-                  <div className="fill" style={{ width: `${Math.min(100, r.pct)}%` }} />
-                </div>
-              </div>
-            ))
+          <StatCard label="Savings" value={usd(o.savings_usd)} sub={pct(o.savings_pct)} green />
         )}
+        <StatCard
+          label={useOrg ? "Error rate" : "Fallback rate"}
+          value={pct(o.fallback_rate * 100)}
+          sub={
+            useOrg
+              ? `${o.fallback_count} of last ${o.org_sample_n} logs`
+              : `${o.fallback_count} of ${o.routed_requests}`
+          }
+        />
+        <StatCard
+          label={useOrg ? "Your spend" : "Candidates"}
+          value={useOrg ? usd(o.spend_usd) : String(n)}
+          sub={useOrg ? "est. from recent mix" : "configured models"}
+        />
       </div>
 
-      <div className="section-head">
-        <div>
-          <h2>Routing pipeline</h2>
-          <div className="card-sub">How the last {o.routed_requests} routed requests flowed to each candidate model.</div>
-        </div>
+      {/* Pioneer-style duo grid: Cost vs baseline + Candidate mix */}
+      <div className="mt-[18px] grid gap-[18px] lg:grid-cols-2">
+        <CostVsBaseline
+          buckets={o.usage_buckets}
+          savingsUsd={o.savings_usd}
+          savingsPct={o.savings_pct}
+          unrealized={useOrg}
+        />
+        <CandidateMixPioneer
+          rows={rows}
+          total={o.routed_requests}
+          emptyLabel="No routed requests yet."
+          useOrg={useOrg}
+          orgSampleN={o.org_sample_n}
+        />
       </div>
-      <RoutingPipeline requests={o.routed_requests} rows={rows} />
 
-      <div className="card card-pad" style={{ marginTop: 18 }}>
-        <div className="field-head" style={{ marginBottom: 18 }}>
-          <span>
-            <div className="card-title">Quality over time</div>
-            <div className="card-sub">
-              {judged.length ? "Flashlight test outcome" : "No judge data yet"}
-            </div>
-          </span>
-          <span className="ranges">
-            {QUALITY_RANGES.map((r) => (
-              <Link key={r.id} className={range === r.id ? "on" : ""} href={qs(r.id)}>
-                {r.label}
-              </Link>
-            ))}
-          </span>
-        </div>
-        {judged.length === 0 ? (
-          <div className="empty" style={{ height: 200 }}>
-            No judge data yet
-          </div>
-        ) : (
+      {/* Detailed savings step chart (beyond Pioneer's simple meter) */}
+      <div className="mt-[18px]">
+        <RouterSavingsChart buckets={o.usage_buckets} unrealized={useOrg} />
+      </div>
+
+      <div className="mt-[42px] mb-[18px]">
+        <h2 className="text-base font-semibold">Routing pipeline</h2>
+        <p className="mt-1 text-[13px] text-muted-foreground">
+          {useOrg
+            ? `How the last ${o.org_sample_n} org requests were sent directly to models, skipping the router.`
+            : `How the last ${o.routed_requests} routed requests flowed to each candidate model.`}
+        </p>
+      </div>
+      <RoutingPipeline requests={useOrg ? o.org_sample_n : o.routed_requests} rows={rows} />
+
+      <Card className="mt-[18px] gap-0 py-0">
+        <CardHeader className="flex flex-row items-start justify-between pt-[22px]">
           <div>
-            <div className="stats" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>
-              <StatCard label="Flashlight tests" value={`${passed} / ${judged.length}`} />
-              <StatCard label="Pass rate" value={pct((passed / judged.length) * 100)} />
-            </div>
-            <p className="hint">This is the logged flashlight tests_passed flag, not an LLMaJ score.</p>
+            <CardTitle>Quality over time</CardTitle>
+            <CardDescription>{judged.length ? "Flashlight test outcome" : "No judge data yet"}</CardDescription>
           </div>
-        )}
-        <div className="legend" style={{ marginTop: 14 }}>
-          <span className="swatch" />
-          {judged.length ? "Flashlight pass rate" : "Judge pass rate"}
-        </div>
-      </div>
+          <CardAction>
+            <LinkToggle
+              value={range}
+              items={QUALITY_RANGES.map((r) => ({ value: r.id, label: r.label, href: qs(r.id) }))}
+            />
+          </CardAction>
+        </CardHeader>
+        <CardContent className="pb-[22px]">
+          {judged.length === 0 ? (
+            <Empty className="min-h-[200px] border border-dashed">
+              <EmptyHeader>
+                <EmptyTitle>No judge data yet</EmptyTitle>
+                <EmptyDescription>Flashlight tests have not been recorded for this range.</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <div className="grid gap-[18px] sm:grid-cols-2">
+                <StatCard label="Flashlight tests" value={`${passed} / ${judged.length}`} />
+                <StatCard label="Pass rate" value={pct((passed / judged.length) * 100)} />
+              </div>
+              <p className="text-[13px] text-muted-foreground">
+                This is the logged flashlight tests_passed flag, not an LLMaJ score.
+              </p>
+            </div>
+          )}
+          <div className="mt-3.5 flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="h-0.5 w-[18px] rounded-sm bg-success" />
+            {judged.length ? "Flashlight pass rate" : "Judge pass rate"}
+          </div>
+        </CardContent>
+      </Card>
 
-      <div className="section-head">
-        <h2 className="big">Run an inference</h2>
+      <div className="mt-[42px] mb-[18px]">
+        <h2 className="text-xl font-semibold">Run an inference</h2>
       </div>
       <InferenceSnippet />
 
-      <div className="section-head">
-        <h2 className="big">Inferences</h2>
+      <div className="mt-[42px] mb-[18px]">
+        <h2 className="text-xl font-semibold">Inferences</h2>
       </div>
       <InferencesTable
         rows={inferences}
@@ -247,7 +297,7 @@ export default async function RouterDetailPage({
         q={q}
         model={model}
         candidates={o.candidates}
-        error={inferencesRes.ok ? null : inferencesRes.error}
+        error={useOrg ? (orgRes.ok ? null : orgRes.error) : inferencesRes.ok ? null : inferencesRes.error}
       />
     </div>
   );

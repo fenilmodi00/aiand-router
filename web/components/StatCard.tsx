@@ -1,3 +1,6 @@
+import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
+
 export function StatCard({
   label,
   value,
@@ -10,10 +13,16 @@ export function StatCard({
   green?: boolean;
 }) {
   return (
-    <div className="card stat">
-      <div className="label">{label}</div>
-      <div className={`value${green ? " green" : ""}`}>{value}</div>
-      {sub ? <div className="sub">{sub}</div> : null}
-    </div>
+    <Card className="gap-0 py-5">
+      <CardContent className="px-[22px]">
+        <div className="mb-4 text-[11px] font-medium tracking-[0.08em] text-muted-foreground uppercase">
+          {label}
+        </div>
+        <div className={cn("text-[26px] font-medium tracking-tight", green && "text-success")}>
+          {value}
+        </div>
+        {sub ? <div className="mt-2 font-mono text-xs text-muted-foreground">{sub}</div> : null}
+      </CardContent>
+    </Card>
   );
 }

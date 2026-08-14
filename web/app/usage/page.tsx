@@ -1,43 +1,13 @@
-import Link from "next/link";
-import { getHealth, getOverview, getUpstream } from "@/lib/api";
-import { parseRange, pct, RANGE_LABEL, usd } from "@/lib/format";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { RangeMenu } from "@/components/RangeMenu";
+import { RouterSavingsChart } from "@/components/RouterSavingsChart";
 import { StatCard } from "@/components/StatCard";
+import { UsageChart } from "@/components/UsageChart";
+import { getHealth, getOrgUsage, getOverview } from "@/lib/api";
+import { compact, parseRange, pct, RANGE_LABEL, shortTs, usd } from "@/lib/format";
 import type { Range } from "@/lib/types";
-
-function headlines(data: unknown): { label: string; value: string }[] {
-  if (!data || typeof data !== "object") return [];
-  const obj = data as Record<string, unknown>;
-  const nested =
-    obj.summary && typeof obj.summary === "object"
-      ? (obj.summary as Record<string, unknown>)
-      : obj.data && typeof obj.data === "object" && !Array.isArray(obj.data)
-        ? (obj.data as Record<string, unknown>)
-        : obj;
-  const out: { label: string; value: string }[] = [];
-  for (const [k, v] of Object.entries(nested)) {
-    if (v == null || Array.isArray(v) || (typeof v === "object" && v !== null)) continue;
-    out.push({ label: k.replace(/_/g, " "), value: String(v) });
-    if (out.length >= 12) break;
-  }
-  return out;
-}
-
-function series(data: unknown): { ts: string; n: number }[] {
-  if (!data) return [];
-  const arr = Array.isArray(data)
-    ? data
-    : data && typeof data === "object" && Array.isArray((data as { data?: unknown }).data)
-      ? ((data as { data: unknown[] }).data)
-      : data && typeof data === "object" && Array.isArray((data as { metrics?: unknown }).metrics)
-        ? ((data as { metrics: unknown[] }).metrics)
-        : [];
-  return arr.slice(0, 48).map((row, i) => {
-    const r = row as Record<string, unknown>;
-    const ts = String(r.ts ?? r.timestamp ?? r.t ?? i);
-    const n = Number(r.requests ?? r.count ?? r.tokens ?? r.spend_usd ?? r.value ?? 0);
-    return { ts, n: Number.isFinite(n) ? n : 0 };
-  });
-}
 
 export default async function UsagePage({
   searchParams,
@@ -45,132 +15,152 @@ export default async function UsagePage({
   searchParams: Promise<{ range?: string }>;
 }) {
   const range = parseRange((await searchParams).range);
-  const [overviewRes, healthRes, summaryRes, metricsRes, logsRes] = await Promise.all([
+  const [overviewRes, healthRes, orgRes] = await Promise.all([
     getOverview(range),
     getHealth(),
-    getUpstream("summary", range),
-    getUpstream("metrics", range),
-    getUpstream("logs", range),
+    getOrgUsage(range),
   ]);
   const o = overviewRes.data!;
   const h = healthRes.data!;
-  const summaryLines = headlines(summaryRes.data);
-  const metricRows = series(metricsRes.data);
-  const maxM = Math.max(1, ...metricRows.map((r) => r.n));
-  const qs = (r: Range) => `/usage?range=${r}`;
+  const org = orgRes.data?.overview;
+  const errors = orgRes.data?.errors ?? [];
+  const hrefs = Object.fromEntries(
+    (Object.keys(RANGE_LABEL) as Range[]).map((r) => [r, `/usage?range=${r}`]),
+  ) as Record<Range, string>;
 
   return (
-    <div className="content">
-      <div className="section-head" style={{ marginTop: 0 }}>
+    <div className="mx-auto max-w-[1360px] px-11 pt-[26px] pb-[120px]">
+      <div className="mb-[18px] flex items-end justify-between">
         <div>
-          <h2 className="big">Usage</h2>
-          <div className="card-sub">Local router hops vs AIand org analytics. These layers are not the same traffic.</div>
+          <h2 className="text-xl font-semibold">Usage</h2>
+          <p className="mt-1 text-[13px] text-muted-foreground">
+            Local router hops vs AIand org analytics. These layers are not the same traffic.
+          </p>
         </div>
-        <details className="menu-wrap">
-          <summary className="btn btn-sm">{RANGE_LABEL[range]}</summary>
-          <div className="menu">
-            {(Object.keys(RANGE_LABEL) as Range[]).map((r) => (
-              <Link key={r} className={r === range ? "on" : ""} href={qs(r)}>
-                {RANGE_LABEL[r]}
-              </Link>
-            ))}
-          </div>
-        </details>
+        <RangeMenu range={range} hrefs={hrefs} />
       </div>
 
       {overviewRes.error && !overviewRes.ok ? (
-        <div className="empty" style={{ height: 48, marginBottom: 16 }}>
-          Console overview unavailable ({overviewRes.error}). Empty zeros below.
-        </div>
+        <Alert className="mb-4">
+          <AlertTitle>Console overview unavailable</AlertTitle>
+          <AlertDescription>{overviewRes.error}. Empty zeros below.</AlertDescription>
+        </Alert>
       ) : null}
 
-      <div className="section-head" style={{ marginTop: 12 }}>
-        <h2>This router</h2>
+      <div className="mt-3 mb-[18px]">
+        <h2 className="text-base font-semibold">This router</h2>
       </div>
-      <div className="stats">
+      <div className="grid gap-[18px] sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Routed requests" value={String(o.routed_requests)} />
-        <StatCard label="Spend" value={usd(h.spend_usd || o.spend_usd)} sub={`budget ${usd(h.budget_usd || o.budget_usd)}`} />
+        <StatCard
+          label="Spend"
+          value={usd(h.spend_usd || o.spend_usd)}
+          sub={`budget ${usd(h.budget_usd || o.budget_usd)}`}
+        />
         <StatCard label="Savings" value={usd(o.savings_usd)} sub={pct(o.savings_pct)} green />
         <StatCard label="Cache hits" value={String(o.cache_hits)} />
       </div>
 
-      <div className="section-head">
-        <h2>AIand org</h2>
-      </div>
-      <div className="duo">
-        <div className="card card-pad">
-          <div className="card-title">Summary</div>
-          <div className="card-sub">GET /v1/console/upstream/summary</div>
-          {!summaryRes.ok ? (
-            <div className="empty" style={{ height: 150, marginTop: 18 }}>
-              AIand analytics unavailable ({summaryRes.error || summaryRes.status || "error"}).
-            </div>
-          ) : summaryLines.length === 0 ? (
-            <div className="empty" style={{ height: 150, marginTop: 18 }}>
-              No summary fields.
-            </div>
-          ) : (
-            summaryLines.map((s) => (
-              <div className="meter-row" key={s.label}>
-                <div className="row-head">
-                  <span>{s.label}</span>
-                  <span className="v">{s.value}</span>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-        <div className="card card-pad">
-          <div className="card-title">Metrics</div>
-          <div className="card-sub">GET /v1/console/upstream/metrics</div>
-          {!metricsRes.ok ? (
-            <div className="empty" style={{ height: 150, marginTop: 18 }}>
-              AIand metrics unavailable ({metricsRes.error || metricsRes.status || "error"}).
-            </div>
-          ) : metricRows.length === 0 ? (
-            <div className="empty" style={{ height: 150, marginTop: 18 }}>
-              No metrics series.
-            </div>
-          ) : (
-            <svg viewBox="0 0 560 180" width="100%" role="img" aria-label="AIand metrics" style={{ marginTop: 12 }}>
-              <g stroke="#26262b" strokeDasharray="4 5">
-                <line x1="20" y1="160" x2="540" y2="160" />
-                <line x1="20" y1="80" x2="540" y2="80" />
-                <line x1="20" y1="10" x2="540" y2="10" />
-              </g>
-              {metricRows.map((row, i) => {
-                const slot = 520 / metricRows.length;
-                const hgt = (row.n / maxM) * 140;
-                return (
-                  <rect
-                    key={`${row.ts}-${i}`}
-                    x={20 + i * slot + 2}
-                    y={160 - hgt}
-                    width={Math.max(4, slot - 4)}
-                    height={hgt}
-                    fill="#2dd4bf"
-                    rx="2"
-                  />
-                );
-              })}
-            </svg>
-          )}
-        </div>
+      <div className="mt-[42px] mb-[18px]">
+        <h2 className="text-base font-semibold">AIand org</h2>
+        <p className="mt-1 text-[13px] text-muted-foreground">
+          Direct traffic that did not use this router. Not-saved is actual spend versus Flash.
+        </p>
       </div>
 
-      <div className="card card-pad" style={{ marginTop: 18 }}>
-        <div className="card-title">Logs</div>
-        <div className="card-sub">GET /v1/console/upstream/logs — cached_tokens / ttft when the proxy returns them.</div>
-        {!logsRes.ok ? (
-          <div className="empty" style={{ height: 120, marginTop: 18 }}>
-            AIand logs unavailable ({logsRes.error || logsRes.status || "error"}).
+      {!orgRes.ok || !org ? (
+        <Alert className="mb-4">
+          <AlertTitle>AIand org usage unavailable</AlertTitle>
+          <AlertDescription>{orgRes.error}. Set DATA_AIAND_API_KEY in web/.env.local.</AlertDescription>
+        </Alert>
+      ) : (
+        <>
+          <div className="grid gap-[18px] sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard
+              label="Org requests"
+              value={String(org.routed_requests)}
+              sub={`${compact(org.org_input_tokens)} in · ${compact(org.org_output_tokens)} out`}
+            />
+            <StatCard label="Your spend" value={usd(org.spend_usd)} sub="est. from recent mix" />
+            <StatCard
+              label="Could save"
+              value={usd(org.unsaved_usd)}
+              sub={`${usd(org.cost_routed_usd)} with router · est.`}
+            />
+            <StatCard
+              label="Not saved"
+              value={usd(org.unsaved_usd)}
+              sub="router was not used"
+            />
           </div>
-        ) : (
-          <pre className="pg-out" style={{ marginTop: 16, maxHeight: 280, overflow: "auto" }}>
-            {JSON.stringify(logsRes.data, null, 2) || "[]"}
-          </pre>
-        )}
-      </div>
+
+          <div className="mt-[18px] grid gap-[18px] lg:grid-cols-2">
+            <Card className="gap-0 py-0">
+              <CardHeader className="pt-[22px]">
+                <CardTitle className="text-[15px]">Requests</CardTitle>
+                <CardDescription>GET /analytics/metrics · {RANGE_LABEL[range]}</CardDescription>
+              </CardHeader>
+              <CardContent className="pb-[22px]">
+                {org.usage_buckets.length === 0 ? (
+                  <Empty className="mt-[18px] min-h-[150px] border border-dashed">
+                    <EmptyHeader>
+                      <EmptyTitle>No metrics series</EmptyTitle>
+                      <EmptyDescription>The upstream metrics payload was empty.</EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
+                ) : (
+                  <UsageChart buckets={org.usage_buckets} candidates={org.candidates} />
+                )}
+              </CardContent>
+            </Card>
+            <RouterSavingsChart buckets={org.usage_buckets} unrealized />
+          </div>
+
+          <Card className="mt-[18px] gap-0 py-0">
+            <CardHeader className="pt-[22px]">
+              <CardTitle className="text-[15px]">Error logs</CardTitle>
+              <CardDescription>
+                GET /logs?errors=true — last {errors.length} non-2xx org requests.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pb-[22px]">
+              {errors.length === 0 ? (
+                <Empty className="mt-[18px] min-h-[120px] border border-dashed">
+                  <EmptyHeader>
+                    <EmptyTitle>No error logs</EmptyTitle>
+                    <EmptyDescription>No non-2xx rows in this range (or logs unavailable).</EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              ) : (
+                <div className="mt-4 overflow-auto">
+                  <table className="w-full text-left text-[13px]">
+                    <thead className="font-mono text-[11px] tracking-[0.06em] text-muted-foreground uppercase">
+                      <tr>
+                        <th className="pb-2 font-medium">Time</th>
+                        <th className="pb-2 font-medium">Model</th>
+                        <th className="pb-2 font-medium">Status</th>
+                        <th className="pb-2 text-right font-medium">Latency</th>
+                        <th className="pb-2 text-right font-medium">Cost</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {errors.map((row, i) => (
+                        <tr key={`${row.ts}-${i}`} className="border-t border-border">
+                          <td className="py-2">{shortTs(row.ts)}</td>
+                          <td className="py-2 font-mono text-[12.5px]">{row.selected || "—"}</td>
+                          <td className="py-2">{row.status}</td>
+                          <td className="py-2 text-right">{row.latency_ms} ms</td>
+                          <td className="py-2 text-right font-mono text-[12.5px]">{usd(row.cost_usd)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
     </div>
   );
 }

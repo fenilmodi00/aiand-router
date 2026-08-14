@@ -29,6 +29,7 @@ export type Overview = {
   budget_usd: number;
   savings_usd: number;
   savings_pct: number;
+  unsaved_usd: number;
   fallback_count: number;
   fallback_rate: number;
   cache_hits: number;
@@ -38,6 +39,11 @@ export type Overview = {
   usage_buckets: UsageBucket[];
   cost_routed_usd: number;
   cost_baseline_usd: number;
+  /** True when charts are AIand org traffic that did not hit this router. */
+  org_overlay: boolean;
+  org_sample_n: number;
+  org_input_tokens: number;
+  org_output_tokens: number;
 };
 
 export type Inference = {
@@ -106,6 +112,7 @@ export const EMPTY_OVERVIEW: Overview = {
   budget_usd: 0,
   savings_usd: 0,
   savings_pct: 0,
+  unsaved_usd: 0,
   fallback_count: 0,
   fallback_rate: 0,
   cache_hits: 0,
@@ -115,6 +122,10 @@ export const EMPTY_OVERVIEW: Overview = {
   usage_buckets: [],
   cost_routed_usd: 0,
   cost_baseline_usd: 0,
+  org_overlay: false,
+  org_sample_n: 0,
+  org_input_tokens: 0,
+  org_output_tokens: 0,
 };
 
 export const EMPTY_HEALTH: Health = {
