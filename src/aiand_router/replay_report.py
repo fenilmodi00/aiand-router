@@ -196,6 +196,7 @@ def replay_report(
     strong_picks: list[tuple[Model | None, dict[str, Any]]] = []
     oracle_picks: list[tuple[Model | None, dict[str, Any]]] = []
     disagree = 0
+    rules_ne_cheapest = 0
     auc_pairs: list[tuple[float, int]] = []
     spreads: list[float] = []
     selected: list[tuple[float, float]] = []
@@ -213,14 +214,17 @@ def replay_report(
         )
         rules = select_model(cfg, models, **kw)
         trained = trained_select(cfg, models, artifact, **kw)
+        cheapest = _pick_cheapest(eligible)
         rules_picks.append((rules.model, item))
         trained_picks.append((trained.model, item))
         flash_picks.append((_pick_flash(cfg, eligible), item))
-        cheapest_picks.append((_pick_cheapest(eligible), item))
+        cheapest_picks.append((cheapest, item))
         strong_picks.append((_pick_strong(eligible), item))
         oracle_picks.append((_pick_oracle(eligible, success, item["prompt"]), item))
         if rules.model.id != trained.model.id:
             disagree += 1
+        if rules.model and cheapest and rules.model.id != cheapest.id:
+            rules_ne_cheapest += 1
 
         ids = [m.id for m in eligible if (item["prompt"], m.id) in success]
         _, ps = score_eligible(
@@ -262,6 +266,7 @@ def replay_report(
         "ece_equal_mass": _ece_equal_mass(selected),
         "rules_cost_delta": policies["trained"]["list_price_cost"]
         - policies["rules"]["list_price_cost"],
+        "rules_ne_cheapest_rate": (rules_ne_cheapest / n) if n else 0.0,
     }
     return apply_replay_gate(out)
 
@@ -299,8 +304,15 @@ def main(argv: list[str] | None = None) -> int:
         "--gold",
         required=True,
         help=(
-            "Holdout gold JSONL (the evaluation set). Assumed unused for train/cal; "
+            "Eval-only holdout gold JSONL (typically frozen verified). Unused for train/cal; "
             "passing mixed gold contaminates the gate. No hash split."
+        ),
+    )
+    parser.add_argument(
+        "--cost-gold",
+        help=(
+            "Disjoint bootstrap holdout where rules may disagree with cheapest-eligible. "
+            "Judge cost_delta here; do not rewrite verified bars. Unused for fit."
         ),
     )
     parser.add_argument("--artifact", required=True)
@@ -311,10 +323,24 @@ def main(argv: list[str] | None = None) -> int:
     if artifact is None:
         return 2
     report = replay_report(Path(args.gold), artifact, load_models(cfg), cfg)
+    if args.cost_gold:
+        report["cost_slice"] = replay_report(
+            Path(args.cost_gold), artifact, load_models(cfg), cfg
+        )
     print(json.dumps(report, indent=2))
     print("replay_gate_pass", report["replay_gate_pass"])
     print(f"path={report['path']}")
     print("not_spec_floors", report["not_spec_floors"])
+    if args.cost_gold:
+        print(
+            "cost_slice rules_ne_cheapest_rate",
+            report["cost_slice"]["rules_ne_cheapest_rate"],
+        )
+    if artifact.get("gbdt"):
+        print(
+            "prefer_logistic=true use --artifact data/scorer-logistic.json "
+            "until train-eval spearman > 0"
+        )
     return 0
 
 

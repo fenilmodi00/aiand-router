@@ -1455,3 +1455,15 @@ def test_fit_gbdt_platt_on_cal_gold_only(tmp_path, monkeypatch):
     assert data["platt"]["a"] == a
     assert data["platt"]["b"] == b
     assert data["not_spec_floors"] is True
+
+
+def test_fit_gbdt_help_prefers_logistic_until_transfer(monkeypatch, capsys):
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    try:
+        main(["fit", "-h"])
+    except SystemExit as e:
+        assert e.code == 0
+    text = capsys.readouterr().out.lower()
+    assert "--gbdt" in text
+    assert "logistic" in text
+    assert "short" in text or "length" in text or "transfer" in text

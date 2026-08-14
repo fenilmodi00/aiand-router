@@ -349,3 +349,112 @@ def test_replay_report_includes_always_cheapest_policy():
     row = _report()["policies"]["always_cheapest"]
     assert 0.0 <= row["success_rate"] <= 1.0
     assert row["list_price_cost"] >= 0.0
+
+
+def test_replay_report_rules_ne_cheapest_rate_on_toy_fixture():
+    """Toy catalog: strong wins pioneer_score while Flash is cheapest eligible."""
+    assert_not_production_floors(GOLD, _artifact())
+    report = _report()
+    assert report["rules_ne_cheapest_rate"] == 1.0
+
+
+def _dual_cfg() -> dict:
+    cfg = _toy_cfg()
+    cfg["phase_threshold"] = {
+        "summarize": 0,
+        "plan": 0,
+        "edit": 0,
+        "tool": 0,
+        "debug": 54,
+        "discover": 0,
+    }
+    return cfg
+
+
+def _gold_rows(prompt: str, phase: str, tokens: int = 20) -> list[dict]:
+    return [
+        {
+            "prompt": prompt,
+            "model_id": "cheap/flash",
+            "success": True,
+            "tokens": tokens,
+            "needs_tools": False,
+            "phase": phase,
+        },
+        {
+            "prompt": prompt,
+            "model_id": "dear/strong",
+            "success": True,
+            "tokens": tokens,
+            "needs_tools": False,
+            "phase": phase,
+        },
+    ]
+
+
+def test_dual_eval_cost_gold_where_rules_disagree_with_cheapest(tmp_path, capsys, monkeypatch):
+    import os
+
+    import yaml
+
+    monkeypatch.delenv("TRAINED_PATH", raising=False)
+    eval_gold = tmp_path / "gold-eval.jsonl"
+    eval_gold.write_text(
+        "".join(json.dumps(r) + "\n" for r in _gold_rows("eval-q", "debug")),
+        encoding="utf-8",
+    )
+    cost_gold = tmp_path / "gold-cost.jsonl"
+    cost_gold.write_text(
+        "".join(json.dumps(r) + "\n" for r in _gold_rows("cost-q", "summarize")),
+        encoding="utf-8",
+    )
+    models = tmp_path / "models.yaml"
+    models.write_text(yaml.safe_dump(_dual_cfg()), encoding="utf-8")
+    assert_not_production_floors(eval_gold, _artifact())
+    assert_not_production_floors(cost_gold, _artifact())
+    assert (
+        main(
+            [
+                "--gold",
+                str(eval_gold),
+                "--cost-gold",
+                str(cost_gold),
+                "--artifact",
+                str(SCORER),
+                "--models",
+                str(models),
+            ]
+        )
+        == 0
+    )
+    out = capsys.readouterr().out
+    report = json.loads(out[out.index("{") : out.rindex("}") + 1])
+    assert report["rules_ne_cheapest_rate"] == 0.0
+    assert report["cost_slice"]["rules_ne_cheapest_rate"] == 1.0
+    assert report["cost_slice"]["rules_cost_delta"] < 0
+    assert report["path"] == "shadow"
+    assert report["not_spec_floors"] is True
+    assert report["replay_gate_pass"] is False
+    assert "path=shadow" in out
+    assert os.getenv("TRAINED_PATH") != "trained"
+
+
+def test_replay_gbdt_artifact_prints_prefer_logistic(tmp_path, capsys, monkeypatch):
+    import yaml
+
+    monkeypatch.delenv("TRAINED_PATH", raising=False)
+    artifact = dict(_artifact())
+    artifact["gbdt"] = {
+        "cheap/flash": {
+            "intercept": 0.0,
+            "trees": [{"feature": 2, "threshold": 4.8, "left": 0.0, "right": 1.0}],
+        }
+    }
+    path = tmp_path / "scorer-gbdt.json"
+    path.write_text(json.dumps(artifact), encoding="utf-8")
+    models = tmp_path / "models.yaml"
+    models.write_text(yaml.safe_dump(_toy_cfg()), encoding="utf-8")
+    assert main(["--gold", str(GOLD), "--artifact", str(path), "--models", str(models)]) == 0
+    out = capsys.readouterr().out.lower()
+    assert "prefer_logistic" in out
+    assert "scorer-logistic" in out or "logistic" in out

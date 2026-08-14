@@ -969,6 +969,11 @@ def main(
     p.add_argument("--out", required=True)
     p.add_argument("--n", type=int, default=4000)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument(
+        "--verified-like",
+        action="store_true",
+        help="Short hard/JSON train pool with expected/schema checks; not Verified eval",
+    )
     t = sub.add_parser("teacher")
     t.add_argument("--queries", required=True)
     t.add_argument("--out", required=True)
@@ -984,7 +989,14 @@ def main(
     f.add_argument("--cal")
     f.add_argument("--silver")
     f.add_argument("--out", required=True)
-    f.add_argument("--gbdt", action="store_true")
+    f.add_argument(
+        "--gbdt",
+        action="store_true",
+        help=(
+            "One stump GBDT after logistic fails transfer; length stumps collapse on short "
+            "prompts. Prefer logistic until Spearman(train, eval) > 0."
+        ),
+    )
     r = sub.add_parser("relabel")
     r.add_argument("--gold", required=True)
     r.add_argument("--queries", required=True)

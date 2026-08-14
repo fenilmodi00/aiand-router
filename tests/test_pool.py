@@ -477,3 +477,92 @@ def test_pool_refuses_when_smith_all_collide_even_if_gym_present(tmp_path, monke
     )
     assert code != 0
     assert not out.exists()
+
+
+def test_pool_short_hard_checks_drops_long_easy(tmp_path, monkeypatch):
+    monkeypatch.delenv(OPT_IN_ENV, raising=False)
+    long_easy = "Rename tmp to tmp2. " + ("padding token text " * 80)
+    smith = _write_jsonl(
+        tmp_path / "smith-tool.jsonl",
+        [
+            _smith("easy-long", long_easy, "str_replace"),
+            _smith(
+                "hard-json",
+                "Refactor the spend log deadlock. Reply with JSON only.",
+                "str_replace",
+            ),
+            {
+                "instance_id": "hard-expected",
+                "resolved": True,
+                "expected": "ok-token",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Fix the traceback. Reply must contain ok-token.",
+                    }
+                ],
+            },
+            _smith(
+                "django__django-999",
+                "Refactor ORM deadlock. Reply with JSON only.",
+                "str_replace",
+            ),
+        ],
+    )
+    verified = _write_jsonl(
+        tmp_path / "eval.jsonl",
+        [{"instance_id": "django__django-999", "problem_statement": "leak me"}],
+    )
+    out = tmp_path / "pool.jsonl"
+    code = main(
+        [
+            "pool",
+            "--smith",
+            str(smith),
+            "--eval",
+            str(verified),
+            "--out",
+            str(out),
+            "--n",
+            "10",
+            "--verified-like",
+        ]
+    )
+    assert code == 0
+    rows = _load(out)
+    ids = {r.get("instance_id") for r in rows}
+    assert "easy-long" not in ids
+    assert "django__django-999" not in ids
+    assert "hard-json" in ids
+    assert "hard-expected" in ids
+    by_id = {r["instance_id"]: r for r in rows}
+    assert by_id["hard-json"].get("json_schema")
+    assert by_id["hard-expected"].get("expected") == "ok-token"
+    assert all("resolved" not in r for r in rows)
+    assert all("success" not in r for r in rows)
+    assert all(r.get("source") == "swe-smith" for r in rows)
+
+
+def test_pool_short_hard_empty_mix_writes_nothing(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv(OPT_IN_ENV, raising=False)
+    long_easy = "Rename tmp to tmp2. " + ("padding token text " * 80)
+    smith = _write_jsonl(
+        tmp_path / "smith-tool.jsonl",
+        [_smith("easy-long", long_easy)],
+    )
+    out = tmp_path / "pool.jsonl"
+    code = main(
+        [
+            "pool",
+            "--smith",
+            str(smith),
+            "--eval",
+            str(_empty_eval(tmp_path)),
+            "--out",
+            str(out),
+            "--verified-like",
+        ]
+    )
+    assert code != 0
+    assert not out.exists()
+    assert "verified-like" in capsys.readouterr().out.lower()

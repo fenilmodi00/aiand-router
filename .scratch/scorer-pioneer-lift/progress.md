@@ -44,6 +44,11 @@ Spec: `.scratch/scorer-pioneer-lift/spec.md`
   **Post-lift diagnosis (NEEDS_CONTEXT):** `gate-fail-diagnosis.md` — gate cannot pass on verified holdout (AUC ceiling ≤0.60 without verified leak; cost_delta&lt;0 impossible). GBDT collapse: length stumps dead on short verified prompts.
   Minors (defer): duplicated `score_eligible` GBDT/logistic branches; fit imports private `_gbdt_z`; GBDT artifacts still write empty `weights: {}`; `load_scorer` does not treat `gbdt` as a load key
 - Issue 07: needs-info — **still not taken** after gate-fail diagnosis. Operator gate cannot pass on `data/gold-verified.jsonl` with current sparse/dense labels (AUC ceiling without verified leak ≤0.60; `rules_cost_delta < 0` impossible because rules≡Flash≡cheapest on 89/89). Report: `gate-fail-diagnosis.md`. Hypotheses: `gate-fail-hypotheses.md`.
+- Issue 08: complete — unpaid geometry lock. Report: `task-08-plus-report.md`.
+- Issue 09: complete — verified-like train/cal pool (`--verified-like`). Same report.
+- Issue 10: complete — dual shadow eval (`--cost-gold`). Same report.
+- Issue 11: complete — prefer logistic until Spearman > 0. Same report.
+- Issue 12: needs-info — paid hard-y probe; recipe in ticket. No invented gold cells.
 
 ## Whole-branch (issues 01–06)
 
@@ -52,3 +57,15 @@ Spec: `.scratch/scorer-pioneer-lift/spec.md`
 - Issue 07 correctly not taken (operator gate still fails after GBDT)
 - Out of scope: 7 `test_gateway.py` `x-router-reason` failures
 - Deferred minors: all can stay (operator footguns / quality nits; see review triage)
+
+## Next path
+
+- Decision: `.scratch/scorer-pioneer-lift/next-path-decision.md` — **Option A** (verified-like train/cal gold + dual shadow eval). Not bar-rewrite, not more easy n, not leak/flip.
+- Goal is transfer ranking + hard-cal P(success) + a slice where rules ≠ Flash so cost_delta is real; frozen `gold-verified.jsonl` stays eval-only. Restore logistic until labels transfer; do not serve length-stump GBDT.
+- Issue 07 still not taken. Legitimate only after AUC ≥ 0.65 / BSS>0 / ECE on an unused hard holdout **and** a real cost comparison (or an explicit H3 waiver). No `TRAINED_PATH` flip, no fake pass.
+- Issue 08: complete — unpaid geometry lock (`python -m aiand_router.geometry`). Spearman/kill/prefer_logistic. Eval not fit y.
+- Issue 09: complete — `pool --verified-like` short hard-check train/cal pool, collision-filter vs `--eval`. Not Verified as fit.
+- Issue 10: complete — `replay_report --cost-gold` dual eval; `rules_ne_cheapest_rate`; gate still from `--gold`; no fake pass.
+- Issue 11: complete — logistic default; GBDT replay note + `--gbdt` help; operator recipe uses `data/scorer-logistic.json` until Spearman > 0.
+- Issue 12: needs-info — paid hard-y probe. Recipe in the ticket. Do not invent gold cells. Kill if Spearman still < 0.
+- Report: `.scratch/scorer-pioneer-lift/task-08-plus-report.md`
