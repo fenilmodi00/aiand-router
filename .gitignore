@@ -1,7 +1,25 @@
+# secrets — never push keys
 .env
+.env.*
+!.env.example
+
+# local dumps / logs
+.opencode/
+.scratch/*.js
+.scratch/*.py
+.scratch/*.json
+*.log
+
+# python
 .venv/
 __pycache__/
 *.pyc
-data/
 .pytest_cache/
 .mypy_cache/
+
+# runtime / cache
+data/
+
+# OS
+.DS_Store
+Thumbs.db
