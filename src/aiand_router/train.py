@@ -385,13 +385,14 @@ def _gold_label(
 ) -> tuple[bool, str]:
     """Return (success, tier). verified > proxy > weak."""
     meta = meta or {}
-    if meta.get("tests_passed") is not None:
-        return bool(meta["tests_passed"]), "verified"
     content = message.get("content")
     text = content.strip() if isinstance(content, str) else ""
     pytest_ok = _pytest_verify(text, meta)
     if pytest_ok is not None:
         return pytest_ok, "verified"
+    expected = meta.get("expected")
+    if expected is not None:
+        return str(expected) in text, "verified"
     if message.get("tool_calls"):
         return True, "proxy"
     finish = str(choice.get("finish_reason") or "")
@@ -399,10 +400,6 @@ def _gold_label(
         return False, "weak"
     if not text:
         return False, "weak"
-    expected = meta.get("expected")
-    if expected is not None:
-        ok = str(expected) in text
-        return ok, "verified"
     pl = prompt.lower()
     body = _strip_fences(text)
     used_proxy = False
@@ -489,9 +486,19 @@ async def run_gold(
             result = await _complete(
                 provider, body, cache=cache, spend=spend, models_by_id=models_by_id
             )
-            if result.get("status", 200) < 400 and result.get("json"):
-                cache.put(request_cache_key(body, model_id), result["json"])
             status = result.get("status", 200)
+            if status == 429:
+                return {
+                    "prompt": _prompt_of(messages),
+                    "model_id": model_id,
+                    "unobserved": True,
+                    "tokens": estimate_tokens(messages),
+                    "needs_tools": bool(q.get("needs_tools")),
+                    "phase": str(q.get("phase") or "plan"),
+                    "hint_bin": str(q.get("hint_bin") or "standard"),
+                }
+            if status < 400 and result.get("json"):
+                cache.put(request_cache_key(body, model_id), result["json"])
             choice = ((result.get("json") or {}).get("choices") or [{}])[0]
             message = choice.get("message") or {}
             success, tier = _gold_label(message, _prompt_of(messages), choice, meta=q)
@@ -571,9 +578,9 @@ def _fit_binary_intercept(
             z = intercept + sum(w[i] * x[i] for i in range(dim))
             z = max(-30.0, min(30.0, z))
             err = (1.0 / (1.0 + math.exp(-z))) - y
-            for i in range(dim):
+            for i in range(1, dim):
                 grad[i] += err * x[i]
-        for i in range(dim):
+        for i in range(1, dim):
             w[i] -= lr * grad[i] / n
     return w
 

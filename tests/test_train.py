@@ -7,7 +7,18 @@ from pathlib import Path
 
 import httpx
 from aiand_router.router import SpendLog
-from aiand_router.train import OPT_IN_ENV, _gold_label, _gold_success, main
+from aiand_router.train import (
+    OPT_IN_ENV,
+    SPARSE_ANCHORS,
+    _fit_binary_intercept,
+    _fit_platt,
+    _gold_label,
+    _gold_success,
+    _logit,
+    _row_x,
+    _split_cal_prompts,
+    main,
+)
 from tests.test_gateway import FakeProvider, _ok
 
 MOTIF = "motif-technologies/motif-3"
@@ -307,7 +318,8 @@ def test_gold_success_json_and_one_word():
     assert _gold_success({"content": "receive"}, "Fix the typo 'recieve' to 'receive'.", {}) is True
     assert _gold_success({"content": "recieve"}, "Fix the typo 'recieve' to 'receive'.", {}) is False
     assert _gold_success({"content": '```json\n{"a":1}\n```'}, "Reply with JSON only.", {}) is True
-    assert _gold_success({"content": "ok"}, "hello", {}, meta={"tests_passed": False}) is False
+    # Query-level tests_passed is dump metadata, not this candidate's y.
+    assert _gold_success({"content": "ok"}, "hello", {}, meta={"tests_passed": False}) is True
 
 
 def test_gold_success_tiers():
@@ -385,6 +397,20 @@ def test_fit_calibrates_on_held_out_gold_cal_slice_only(tmp_path, monkeypatch):
     assert data["n_cal"] >= 1
     assert data["n_cal"] < n_prompts
     assert data["n_cal"] < data["n_gold"]
+    # Pin Platt to cal-gold only: would fail if silver (y=1) or train-gold leaked in.
+    _, cal_prompts = _split_cal_prompts([r["prompt"] for r in gold_rows])
+    cal_gold = [r for r in gold_rows if r["prompt"] in cal_prompts]
+    assert cal_gold and all(r["success"] is False for r in cal_gold)
+    w = data["weights"][mid]
+    ic = data["intercepts"][mid]
+    zs, ys = [], []
+    for r in cal_gold:
+        x = _row_x(r)
+        zs.append(ic + sum(w[i] * x[i] for i in range(len(w))))
+        ys.append(1.0 if r["success"] else 0.0)
+    a, b = _fit_platt(zs, ys)
+    assert data["platt"]["a"] == a
+    assert data["platt"]["b"] == b
 
 
 def test_fit_silver_only_regularizes_unobserved_not_observed_gold(tmp_path, monkeypatch):
@@ -430,13 +456,6 @@ def test_fit_silver_only_regularizes_unobserved_not_observed_gold(tmp_path, monk
 def test_gold_y_verified_beats_nonempty_content():
     """Verified metadata wins over nonempty reply; length+empty is failure."""
     ok, tier = _gold_label(
-        {"content": "looks fine"},
-        "implement foo",
-        {},
-        meta={"tests_passed": False},
-    )
-    assert ok is False and tier == "verified"
-    ok, tier = _gold_label(
         {"content": "4"},
         "What is 2+2?",
         {},
@@ -444,3 +463,64 @@ def test_gold_y_verified_beats_nonempty_content():
     )
     assert ok is False and tier == "verified"
     assert _gold_success({"content": ""}, "x", {"finish_reason": "length"}) is False
+
+
+def test_gold_expected_beats_tool_calls_proxy():
+    """Verified expected must win before gateway tool_calls proxy."""
+    ok, tier = _gold_label(
+        {"content": "wrong", "tool_calls": [{"id": "1"}]},
+        "What is 2+2?",
+        {},
+        meta={"expected": "4"},
+    )
+    assert ok is False and tier == "verified"
+
+
+def test_gold_query_level_tests_passed_is_not_y():
+    """Dump/query tests_passed must not stamp the same y on every model."""
+    ok, tier = _gold_label(
+        {"content": "looks fine"},
+        "implement foo",
+        {},
+        meta={"tests_passed": False},
+    )
+    assert ok is True and tier == "weak"
+
+
+def test_gold_budget_skip_is_unobserved_not_failure(tmp_path, monkeypatch):
+    """429 / pre-call budget skip stays missing — unobserved ≠ 0."""
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    provider = FakeProvider()
+    spend = SpendLog(tmp_path / "spend.txt", 15)
+    spend.add(15.0)
+    queries = tmp_path / "q.jsonl"
+    queries.write_text(json.dumps({"prompt": "add a docstring"}) + "\n", encoding="utf-8")
+    gold = tmp_path / "gold.jsonl"
+    assert (
+        main(
+            ["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1"],
+            provider=provider,
+            spend=spend,
+            cache_dir=tmp_path / "cache",
+            models_path=Path("config/models.yaml"),
+        )
+        == 0
+    )
+    assert provider.calls == []
+    rows = [json.loads(line) for line in gold.read_text(encoding="utf-8").splitlines() if line.strip()]
+    observed_fails = [r for r in rows if not r.get("unobserved") and r.get("success") is False]
+    assert observed_fails == []
+    skipped = {mid for mid in SPARSE_ANCHORS}
+    observed_ids = {r["model_id"] for r in rows if not r.get("unobserved") and "model_id" in r}
+    assert skipped.isdisjoint(observed_ids)
+    for r in rows:
+        if r.get("unobserved"):
+            assert "success" not in r
+
+
+def test_fit_binary_intercept_freezes_bias_column():
+    """Per-model intercept already locks the marginal; do not also learn w[0]."""
+    xs = [[1.0, 2.0], [1.0, -1.0], [1.0, 0.5], [1.0, 3.0]]
+    ys = [1.0, 0.0, 1.0, 0.0]
+    w = _fit_binary_intercept(xs, ys, intercept=_logit(0.5))
+    assert w[0] == 0.0
