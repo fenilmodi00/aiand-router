@@ -26,7 +26,7 @@ DRAFT_PHASES = (
     "final_summary",
 )
 PHASES = SHORT_PHASES + DRAFT_PHASES
-VIRTUAL_MODELS = {"router/auto", "aiand-router", "auto"}
+VIRTUAL_MODELS = {"aiand/auto", "ai&/auto", "router/auto", "aiand-router", "pioneer/auto", "auto"}
 PHASE_FAMILY = {
     "discover": "discover",
     "repository_discovery": "discover",
@@ -252,6 +252,8 @@ def eligible_models(
         threshold = 0
     elif effort == "high":
         threshold = max(threshold, 50)
+    elif effort == "xhigh":
+        threshold = max(threshold, 53)
     elif effort == "max":
         threshold = max(threshold, float(cfg.get("premium_aa_floor") or 58))
 

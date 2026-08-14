@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from .cache import RequestCache, request_cache_key
 from .provider import HttpAiandProvider
 from .router import (
@@ -130,7 +132,10 @@ async def _complete(
         return {"status": 200, "json": hit, "cache_hit": True}
     if spend.total() >= spend.limit_usd:
         return {"status": 429, "json": {"error": {"message": "budget"}}}
-    result = await provider.complete(body)
+    try:
+        result = await provider.complete(body)
+    except httpx.TimeoutException:
+        return {"status": 408, "json": {"error": {"message": "upstream timeout"}}}
     payload = result.get("json") or {}
     usage = payload.get("usage") or {}
     model = models_by_id.get(body["model"])
@@ -196,17 +201,20 @@ async def run_teacher(
         label = await _teacher_call(
             provider, CHEAP_TEACHER, messages, cache=cache, spend=spend, models_by_id=models_by_id
         )
+        parse_fail = label is None
         needs_esc = True
         if label is not None:
             needs_esc = (
                 label["complexity_bin"] in {"hard", "frontier"}
                 or float(label["label_confidence"]) < 0.60
             )
-        if needs_esc and escalated < cap:
+        # parse-fail always escalates; 25% cap is quality-only (hard/frontier / low confidence)
+        if needs_esc and (parse_fail or escalated < cap):
             esc = await _teacher_call(
                 provider, ESCALATE_TEACHER, messages, cache=cache, spend=spend, models_by_id=models_by_id
             )
-            escalated += 1
+            if not parse_fail:
+                escalated += 1
             if esc:
                 label = esc
         if not label:
@@ -262,7 +270,7 @@ async def run_gold(
         for model_id in ids:
             if model_id not in models_by_id or model_id == K3:
                 continue
-            body = {"model": model_id, "messages": messages, "max_tokens": 64, "temperature": 0}
+            body = {"model": model_id, "messages": messages, "max_tokens": 512, "temperature": 0}
             result = await _complete(
                 provider, body, cache=cache, spend=spend, models_by_id=models_by_id
             )

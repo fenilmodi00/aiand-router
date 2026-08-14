@@ -10,6 +10,9 @@ type ChatBody = {
   system?: string;
   messages?: ChatMessage[];
   effort?: string;
+  phase?: string;
+  latencyLimit?: number;
+  trainedPath?: string;
   allowedModels?: string[];
   stream?: boolean;
   jsonMode?: boolean;
@@ -21,8 +24,14 @@ type ChatBody = {
 function routerHeaders(src: Headers): Record<string, string> {
   const out: Record<string, string> = {};
   src.forEach((v, k) => {
-    if (k.toLowerCase().startsWith("x-router-") || k.toLowerCase() === "content-type") {
-      out[k.toLowerCase()] = v;
+    const lk = k.toLowerCase();
+    if (
+      lk.startsWith("x-router-") ||
+      lk.startsWith("pioneer_") ||
+      lk === "content-type" ||
+      lk.includes("tip")
+    ) {
+      out[lk] = v;
     }
   });
   return out;
@@ -61,6 +70,11 @@ export async function POST(req: Request) {
     "Content-Type": "application/json",
   };
   if (body.effort) headers["x-routing-effort"] = body.effort;
+  if (body.phase && body.phase !== "auto") headers["x-agent-phase"] = body.phase;
+  if (typeof body.latencyLimit === "number" && body.latencyLimit > 0) {
+    headers["x-latency-limit"] = String(body.latencyLimit);
+  }
+  if (body.trainedPath) headers["x-routing-path"] = body.trainedPath;
   if (body.allowedModels?.length) headers["x-allowed-models"] = body.allowedModels.join(",");
 
   const payload: Record<string, unknown> = {

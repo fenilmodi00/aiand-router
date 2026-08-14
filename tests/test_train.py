@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 
+import httpx
 from aiand_router.router import SpendLog
 from aiand_router.train import OPT_IN_ENV, main
 from tests.test_gateway import FakeProvider, _ok
@@ -85,6 +86,35 @@ def test_teacher_writes_silver_and_uses_motif_then_cache(tmp_path, monkeypatch):
     assert provider.calls[0]["model"] != "qwen/qwen3.6-27b"
 
 
+def test_parse_fail_still_escalates_after_quality_cap(tmp_path, monkeypatch):
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    script = []
+    for _ in range(5):
+        script.extend([_ok("not json"), _ok("not json"), _label(confidence=0.9)])
+    provider = FakeProvider(script)
+    spend = SpendLog(tmp_path / "spend.txt", 15)
+    queries = tmp_path / "q.jsonl"
+    queries.write_text(
+        "".join(json.dumps({"prompt": f"rename {i}"}) + "\n" for i in range(5)),
+        encoding="utf-8",
+    )
+    out = tmp_path / "silver.jsonl"
+    assert (
+        main(
+            ["teacher", "--queries", str(queries), "--out", str(out), "--limit", "5"],
+            provider=provider,
+            spend=spend,
+            cache_dir=tmp_path / "cache",
+            models_path=Path("config/models.yaml"),
+        )
+        == 0
+    )
+    rows = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(rows) == 5
+    assert all(not r.get("unlabeled") for r in rows)
+    assert sum(1 for c in provider.calls if c["model"] == GLM) == 5
+
+
 def test_invalid_teacher_output_is_unlabeled_not_fake(tmp_path, monkeypatch):
     monkeypatch.setenv(OPT_IN_ENV, "1")
     bad = _ok("not json")
@@ -120,6 +150,7 @@ def test_gold_sparse_skips_k3_and_fit_writes_not_spec_floors(tmp_path, monkeypat
         models_path=Path("config/models.yaml"),
     )
     assert main(["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1"], **kwargs) == 0
+    assert all(c.get("max_tokens") == 512 for c in provider.calls)
     rows = [json.loads(line) for line in gold.read_text(encoding="utf-8").splitlines() if line.strip()]
     models = {r["model_id"] for r in rows}
     assert "moonshotai/kimi-k3" not in models
@@ -148,6 +179,39 @@ def test_gold_sparse_skips_k3_and_fit_writes_not_spec_floors(tmp_path, monkeypat
     assert "deepseek-ai/deepseek-v4-flash" in data["weights"]
     assert "google/gemma-4-31b-it" not in data["weights"]
     assert "platt" in data
+
+
+def test_gold_timeout_is_unsuccessful_cell_not_crash(tmp_path, monkeypatch):
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+
+    class TimeoutThenOk:
+        def __init__(self):
+            self.calls = []
+
+        async def complete(self, body):
+            self.calls.append(dict(body))
+            if len(self.calls) == 1:
+                raise httpx.ReadTimeout("slow")
+            return _ok("pong")
+
+    provider = TimeoutThenOk()
+    spend = SpendLog(tmp_path / "spend.txt", 15)
+    queries = tmp_path / "q.jsonl"
+    queries.write_text(json.dumps({"prompt": "add a docstring"}) + "\n", encoding="utf-8")
+    gold = tmp_path / "gold.jsonl"
+    assert (
+        main(
+            ["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1"],
+            provider=provider,
+            spend=spend,
+            cache_dir=tmp_path / "cache",
+            models_path=Path("config/models.yaml"),
+        )
+        == 0
+    )
+    rows = [json.loads(line) for line in gold.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert any(r["success"] is False for r in rows)
+    assert any(r["success"] is True for r in rows)
 
 
 def test_gold_refuses_without_opt_in(tmp_path, monkeypatch):

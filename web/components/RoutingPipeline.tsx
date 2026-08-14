@@ -53,7 +53,7 @@ export function mixRows(candidates: Candidate[], mix: CandidateMix[]): MixRow[] 
   return rows;
 }
 
-export function accentFor(id: string, i: number): string {
+export function accentFor(id: string, index?: number): string {
   const info = resolveModelInfo(id);
   if (info && info.color && info.color !== "#6B7280") return info.color;
   const s = id.toLowerCase();
@@ -73,7 +73,7 @@ export function RoutingPipeline({
   rows = [],
   savingsUsd = 0.03,
   savingsPct = 52.1,
-  routerName = "pioneer/auto",
+  routerName = "aiand/auto",
 }: {
   requests?: number;
   rows?: MixRow[];

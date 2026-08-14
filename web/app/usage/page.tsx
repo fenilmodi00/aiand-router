@@ -51,14 +51,27 @@ export default async function UsagePage({
         <h2 className="text-base font-semibold">This router</h2>
       </div>
       <div className="grid gap-[18px] sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Routed requests" value={String(o.routed_requests)} />
         <StatCard
-          label="Spend"
+          label="ROUTED REQUESTS"
+          value={String(o.routed_requests)}
+          sub={`${compact(o.input_tokens || 0)} in · ${compact(o.output_tokens || 0)} out`}
+        />
+        <StatCard
+          label="SAVINGS"
+          value={usd(o.savings_usd)}
+          sub={`${pct(o.savings_pct)} with router · est.`}
+          green={o.savings_usd > 0}
+        />
+        <StatCard
+          label="YOUR SPEND"
           value={usd(h.spend_usd || o.spend_usd)}
           sub={`budget ${usd(h.budget_usd || o.budget_usd)}`}
         />
-        <StatCard label="Savings" value={usd(o.savings_usd)} sub={pct(o.savings_pct)} green />
-        <StatCard label="Cache hits" value={String(o.cache_hits)} />
+        <StatCard
+          label="CACHE HITS"
+          value={String(o.cache_hits)}
+          sub={`${o.routed_requests ? Math.round((o.cache_hits / o.routed_requests) * 100) : 0}% hit rate`}
+        />
       </div>
 
       <div className="mt-[42px] mb-[18px]">

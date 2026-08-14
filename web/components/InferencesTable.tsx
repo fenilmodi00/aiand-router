@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { LayoutGridIcon, ListIcon, SearchIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -68,12 +68,37 @@ export function InferencesTable({
   const start = (safePage - 1) * PAGE_SIZE;
   const pageRows = rows.slice(start, start + PAGE_SIZE);
 
-  useEffect(() => {
-    setPage(1);
-  }, [rows, q, model, range]);
+
+
+  const totalTokens = rows.reduce((s, r) => s + (r.tokens_in || 0) + (r.tokens_out || 0), 0);
+  const totalSpend = rows.reduce((s, r) => s + (r.cost_usd || 0), 0);
+  const totalSavings = rows.reduce((s, r) => s + (r.savings_usd || 0), 0);
+  const savingsPct = totalSpend + totalSavings > 0 ? (totalSavings / (totalSpend + totalSavings)) * 100 : 0;
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Overview Summary Banner */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-xl border border-[#222] bg-[#0c0c0e] p-3.5 text-[12.5px]">
+        <div className="flex flex-col">
+          <span className="text-[11px] text-muted-foreground uppercase font-medium">Routed Requests</span>
+          <span className="text-base font-semibold text-white font-mono">{total.toLocaleString("en-US")}</span>
+        </div>
+        <div className="flex flex-col">
+          <span className="text-[11px] text-muted-foreground uppercase font-medium">Token Volume</span>
+          <span className="text-base font-semibold text-white font-mono">{totalTokens.toLocaleString("en-US")}</span>
+        </div>
+        <div className="flex flex-col">
+          <span className="text-[11px] text-muted-foreground uppercase font-medium">Total Cost</span>
+          <span className="text-base font-semibold text-white font-mono">${totalSpend.toFixed(4)}</span>
+        </div>
+        <div className="flex flex-col">
+          <span className="text-[11px] text-emerald-400 uppercase font-medium">Total Saved</span>
+          <span className="text-base font-semibold text-[#4ade80] font-mono">
+            +${totalSavings.toFixed(4)} {savingsPct > 0 ? `(${Math.round(savingsPct)}%)` : ""}
+          </span>
+        </div>
+      </div>
+
       <form className="flex flex-wrap gap-3" action="/routers/auto" method="get">
         <input type="hidden" name="range" value={range} />
         <input type="hidden" name="model" value={modelValue ?? ""} />
@@ -146,6 +171,12 @@ export function InferencesTable({
                     {row.selected || "—"}
                     <div className="font-mono text-[11px] text-muted-foreground">{row.path}</div>
                   </div>
+                  <div className="flex justify-between text-[11.5px]">
+                    <span className="text-muted-foreground">Cost: ${row.cost_usd.toFixed(4)}</span>
+                    {row.savings_usd != null && row.savings_usd > 0 && (
+                      <span className="text-[#4ade80] font-mono">Saved: +${row.savings_usd.toFixed(4)}</span>
+                    )}
+                  </div>
                   <div className="text-[11px] tracking-[0.06em] text-muted-foreground uppercase">
                     Status / cache
                   </div>
@@ -165,18 +196,20 @@ export function InferencesTable({
                 <TableHead>Time</TableHead>
                 <TableHead>Model</TableHead>
                 <TableHead>Input</TableHead>
+                <TableHead className="text-right">Tokens</TableHead>
                 <TableHead className="text-right">E2E latency</TableHead>
                 <TableHead className="text-right">TTFT</TableHead>
-                <TableHead className="text-right">Tokens</TableHead>
+                <TableHead className="text-right">Cost</TableHead>
+                <TableHead className="text-right text-[#4ade80]">Savings</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Cache</TableHead>
-                <TableHead className="text-right">LLMaJ Score</TableHead>
+                <TableHead className="text-right">LLMaJ</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {rows.length === 0 ? (
                 <TableRow>
-                    <TableCell colSpan={9} className="py-12 text-center text-muted-foreground">
+                    <TableCell colSpan={11} className="py-12 text-center text-muted-foreground">
                     {emptyMsg}
                   </TableCell>
                 </TableRow>
@@ -185,16 +218,28 @@ export function InferencesTable({
                   <TableRow key={`${row.ts}-${row.selected}-${i}`}>
                     <TableCell>{shortTs(row.ts)}</TableCell>
                     <TableCell>
-                      {row.selected || "—"}
-                      <div className="font-mono text-[11px] text-muted-foreground">
-                        {row.path}
-                        {row.phase ? ` · ${row.phase}` : ""}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-medium text-white">{row.selected || "—"}</span>
+                        {row.escalated_from && (
+                          <span className="rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.2 text-[9.5px] font-semibold text-amber-300">
+                            Escalated from {row.escalated_from}
+                          </span>
+                        )}
+                      </div>
+                      <div className="font-mono text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5">
+                        <span>{row.path}</span>
+                        {row.phase ? <span>· {row.phase}</span> : null}
+                        {row.rule ? <span className="text-neutral-400">({row.rule})</span> : null}
                       </div>
                     </TableCell>
                     <TableCell>{row.tokens_in}</TableCell>
+                    <TableCell className="text-right">{row.tokens_out}</TableCell>
                     <TableCell className="text-right">{row.latency_ms} ms</TableCell>
                     <TableCell className="text-right">{row.ttft_ms == null ? "—" : `${row.ttft_ms} ms`}</TableCell>
-                    <TableCell className="text-right">{row.tokens_out}</TableCell>
+                    <TableCell className="text-right font-mono text-neutral-300">${row.cost_usd.toFixed(4)}</TableCell>
+                    <TableCell className="text-right font-mono text-[#4ade80] font-medium">
+                      {row.savings_usd != null && row.savings_usd > 0 ? `+$${row.savings_usd.toFixed(4)}` : "—"}
+                    </TableCell>
                     <TableCell>{row.status}</TableCell>
                     <TableCell className="text-right">{row.cache_hit ? "hit" : "—"}</TableCell>
                     <TableCell className="text-right">{qualityCell(row)}</TableCell>

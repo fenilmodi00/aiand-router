@@ -39,7 +39,7 @@ export function UsageChart({
     for (const k of Object.keys(b.by_model || {})) extra.add(k);
   }
   const models = [...ids, ...[...extra].filter((id) => !ids.includes(id))];
-  const partsFor = (b: UsageBucket, i: number) => {
+  const partsFor = (b: UsageBucket, _index?: number) => {
     const mix = b.by_model || {};
     if (models.length && Object.keys(mix).length) {
       return models
@@ -49,7 +49,7 @@ export function UsageChart({
     const n = b.requests || 0;
     return n > 0 ? [{ id: "requests", n, color: MIX_COLORS[2]! }] : [];
   };
-  const totals = buckets.map((b, i) => partsFor(b, i).reduce((s, p) => s + p.n, 0));
+  const totals = buckets.map((b) => partsFor(b).reduce((s, p) => s + p.n, 0));
   const max = Math.max(0, ...totals);
   const ticks = niceTicks(max);
   const topTick = ticks[ticks.length - 1] || 1;

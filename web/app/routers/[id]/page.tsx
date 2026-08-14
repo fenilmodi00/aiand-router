@@ -21,17 +21,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { getInferences, getOrgUsage, getOverview, maskKey } from "@/lib/api";
 import { compact, parseRange, pct, RANGE_LABEL, usd } from "@/lib/format";
 import type { Range } from "@/lib/types";
-
-const QUALITY_RANGES: { id: Range; label: string }[] = [
-  { id: "24h", label: "24hr" },
-  { id: "7d", label: "7d" },
-  { id: "30d", label: "30d" },
-  { id: "all", label: "All" },
-];
 
 export default async function RouterDetailPage({
   params,
@@ -61,11 +53,7 @@ export default async function RouterDetailPage({
   const o = useOrg && org ? org : local;
   const inferences = useOrg ? (orgRes.data?.inferences ?? []) : (inferencesRes.data?.data ?? []);
   const n = o.candidates.filter((c) => c.enabled).length || o.candidates.length;
-  const meta = n ? `Router · Auto · ${n} candidates` : "Router · Auto";
   const rows = mixRows(o.candidates, o.candidate_mix);
-  const hasMix = o.routed_requests > 0 && rows.some((r) => r.count > 0);
-  const judged = inferences.filter((r) => r.tests_passed !== null);
-  const passed = judged.filter((r) => r.tests_passed).length;
   const qs = (next: Range) => {
     const p = new URLSearchParams();
     p.set("range", next);
@@ -79,61 +67,64 @@ export default async function RouterDetailPage({
   >;
 
   return (
-    <div className="mx-auto max-w-[1360px] px-11 pt-[26px] pb-[120px]">
-      {/* Pioneer-style breadcrumb: back arrow + breadcrumb path */}
-      <nav className="mb-[22px] flex items-center gap-2 text-[13px] text-muted-foreground" aria-label="Breadcrumb">
-        <Link href="/routers" className="inline-flex size-[22px] items-center justify-center rounded-md hover:bg-[#17171a] hover:text-foreground" aria-label="Back to routers">
-          <ChevronLeftIcon />
+    <div className="mx-auto max-w-[1360px] px-6 md:px-11 pt-[26px] pb-[120px] bg-black text-white">
+      {/* Top Breadcrumb */}
+      <nav className="mb-6 flex items-center gap-2 text-[13px] text-[#71717a]" aria-label="Breadcrumb">
+        <Link href="/routers" className="inline-flex size-[22px] items-center justify-center rounded-md text-[#71717a] hover:bg-[#141417] hover:text-white" aria-label="Back to routers">
+          <ChevronLeftIcon className="size-3.5" />
         </Link>
-        <Link href="/routers" className="hover:text-foreground">Routers</Link>
-        <span className="text-muted-foreground/50">/</span>
-        <span className="text-[#d4d4d8]">router/auto</span>
+        <Link href="/routers" className="hover:text-white">Routers</Link>
+        <span className="text-[#3f3f46]">/</span>
+        <span className="font-semibold text-white">aiand/auto</span>
       </nav>
 
+      {/* 1. TOP HERO DUO GRID */}
       <section className="mb-10 grid gap-6 lg:grid-cols-[1.22fr_1fr]">
-        <Card className="flex flex-col gap-0 px-9 py-[34px]">
+        <Card className="flex flex-col gap-0 rounded-2xl border border-[#1a1a1e] bg-[#08080a] p-8 shadow-xs">
           <CardHeader className="p-0">
-            <CardTitle className="text-[29px] font-semibold tracking-tight">Inference router/auto</CardTitle>
-            <CardDescription className="mt-3 font-mono text-[11px] tracking-[0.08em] uppercase">
-              {meta}
+            <CardTitle className="text-[28px] font-semibold tracking-tight text-white">Inference aiand/auto</CardTitle>
+            <CardDescription className="mt-2 font-mono text-[11px] tracking-[0.08em] uppercase text-[#71717a]">
+              ROUTER · AUTO · {n} CANDIDATES
             </CardDescription>
           </CardHeader>
-          <CardContent className="mt-4 p-0 text-[13.5px] text-muted-foreground">
-            Integrate <strong className="font-semibold text-foreground">router/auto</strong> into your stack
+          <CardContent className="mt-3 p-0 text-[13.5px] text-[#8e8e96]">
+            Integrate <strong className="font-semibold text-white">aiand/auto</strong> into your stack
           </CardContent>
-          <div className="mt-auto flex gap-3 pt-12">
-            <Button render={<Link href="/playground" />} nativeButton={false} variant="outline" className="h-10">
+          <div className="mt-auto flex flex-wrap items-center gap-3 pt-12">
+            <Button render={<Link href="/playground" />} nativeButton={false} variant="outline" className="h-9 rounded-lg border border-[#27272a] bg-[#0c0c0e] px-4 text-xs font-medium text-white hover:bg-[#17171a]">
               Try in playground
             </Button>
-            <Button render={<a href="https://docs.aiand.com/" target="_blank" rel="noreferrer" />} nativeButton={false} variant="outline" className="h-10">
+            <Button render={<a href="https://docs.aiand.com/" target="_blank" rel="noreferrer" />} nativeButton={false} variant="outline" className="h-9 rounded-lg border border-[#27272a] bg-[#0c0c0e] px-4 text-xs font-medium text-white hover:bg-[#17171a]">
               Docs
             </Button>
-            <Button render={<a href="#run-inference" />} nativeButton={false} className="h-10 px-16">
+            <Button render={<a href="#run-inference" />} nativeButton={false} className="h-9 rounded-lg bg-white px-12 text-xs font-semibold text-black hover:bg-neutral-200">
               Integrate
             </Button>
           </div>
         </Card>
-        <div className="flex flex-col gap-6">
-          <Card className="gap-0 py-0">
-            <CardHeader className="flex flex-row items-center justify-between pt-[22px] pb-3.5">
-              <CardTitle className="flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
-                <KeyRoundIcon />
+
+        <div className="flex flex-col gap-4">
+          <Card className="rounded-2xl border border-[#1a1a1e] bg-[#08080a] gap-0 py-0 shadow-xs">
+            <CardHeader className="flex flex-row items-center justify-between pt-4 pb-2 px-5">
+              <CardTitle className="flex items-center gap-2 text-[12.5px] font-medium text-[#8e8e96]">
+                <KeyRoundIcon className="size-3.5" />
                 API Key
               </CardTitle>
               <CardAction>
-                <Button render={<Link href="/keys" />} nativeButton={false} variant="link" size="sm" className="h-auto px-0">
+                <Link href="/keys" className="text-[12px] text-[#71717a] hover:text-white transition">
                   View all
-                </Button>
+                </Link>
               </CardAction>
             </CardHeader>
-            <CardContent className="pb-[22px]">
+            <CardContent className="pb-4 px-5">
               <KeyPill masked={maskKey()} />
             </CardContent>
           </Card>
-          <Card className="flex flex-1 flex-col gap-0 py-0">
-            <CardHeader className="flex flex-row items-center justify-between pt-[22px] pb-3.5">
-              <CardTitle className="flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
-                <BarChart3Icon />
+
+          <Card className="flex flex-1 flex-col rounded-2xl border border-[#1a1a1e] bg-[#08080a] gap-0 py-0 shadow-xs">
+            <CardHeader className="flex flex-row items-center justify-between pt-4 pb-2 px-5">
+              <CardTitle className="flex items-center gap-2 text-[12.5px] font-medium text-[#8e8e96]">
+                <BarChart3Icon className="size-3.5" />
                 Usage
               </CardTitle>
               <CardAction>
@@ -146,15 +137,16 @@ export default async function RouterDetailPage({
                 />
               </CardAction>
             </CardHeader>
-            <CardContent className="pb-[22px]">
+            <CardContent className="pb-4 px-5">
               <UsageChart buckets={o.usage_buckets} candidates={o.candidates} />
             </CardContent>
           </Card>
         </div>
       </section>
 
-      <div className="mt-[42px] mb-[18px] flex items-center justify-between">
-        <h2 className="text-base font-semibold">Overview</h2>
+      {/* 2. OVERVIEW HEADER + TIME RANGE MENU */}
+      <div className="mt-10 mb-4 flex items-center justify-between">
+        <h2 className="text-[17px] font-semibold text-white">Overview</h2>
         <RangeMenu range={range} hrefs={hrefs} />
       </div>
 
@@ -187,23 +179,29 @@ export default async function RouterDetailPage({
         </Alert>
       ) : null}
 
-      <div className="grid gap-[18px] sm:grid-cols-2 lg:grid-cols-4">
+      {/* 3. 4 STATCARDS (PIONEER-STYLE) */}
+      <div className="grid gap-[18px] sm:grid-cols-2 lg:grid-cols-4 mb-6">
         <StatCard
-          label={useOrg ? "Org requests" : "Routed requests"}
+          label={useOrg ? "ORG REQUESTS" : "ROUTED REQUESTS"}
           value={String(o.routed_requests)}
-          sub={useOrg ? `${compact(o.org_input_tokens)} in · ${compact(o.org_output_tokens)} out` : undefined}
+          sub={
+            useOrg
+              ? `${compact(o.org_input_tokens)} in · ${compact(o.org_output_tokens)} out`
+              : (o.routed_requests > 0 && o.input_tokens ? `${compact(o.input_tokens)} in · ${compact(o.output_tokens || 0)} out` : undefined)
+          }
         />
-        {useOrg ? (
-          <StatCard
-            label="Not saved"
-            value={usd(o.unsaved_usd)}
-            sub={`${usd(o.cost_routed_usd)} with router · est.`}
-          />
-        ) : (
-          <StatCard label="Savings" value={usd(o.savings_usd)} sub={pct(o.savings_pct)} green />
-        )}
         <StatCard
-          label={useOrg ? "Error rate" : "Fallback rate"}
+          label={useOrg ? "NOT SAVED" : "SAVINGS"}
+          value={usd(useOrg ? o.unsaved_usd : o.savings_usd)}
+          sub={
+            useOrg
+              ? `${usd(o.cost_routed_usd)} with router · est.`
+              : `${usd(o.spend_usd + o.savings_usd)}`
+          }
+          green={!useOrg && o.savings_usd > 0}
+        />
+        <StatCard
+          label={useOrg ? "ERROR RATE" : "FALLBACK RATE"}
           value={pct(o.fallback_rate * 100)}
           sub={
             useOrg
@@ -212,14 +210,18 @@ export default async function RouterDetailPage({
           }
         />
         <StatCard
-          label={useOrg ? "Your spend" : "Candidates"}
+          label={useOrg ? "YOUR SPEND" : "CANDIDATES"}
           value={useOrg ? usd(o.spend_usd) : String(n)}
-          sub={useOrg ? (o.org_sample_n ? `from ${o.org_sample_n} billed logs` : "from AIand logs") : "configured models"}
+          sub={
+            useOrg
+              ? (o.org_sample_n ? `from ${o.org_sample_n} billed logs` : "from AIand logs")
+              : "configured models"
+          }
         />
       </div>
 
-      {/* Pioneer-style duo grid: Cost vs baseline + Candidate mix */}
-      <div className="mt-[18px] grid gap-[18px] lg:grid-cols-2">
+      {/* 4. COST VS BASELINE + CANDIDATE MIX DUO GRID */}
+      <div className="grid gap-[18px] lg:grid-cols-2 mb-6">
         <CostVsBaseline
           buckets={o.usage_buckets}
           savingsUsd={useOrg ? o.unsaved_usd : o.savings_usd}
@@ -235,67 +237,31 @@ export default async function RouterDetailPage({
         />
       </div>
 
-      {/* Detailed savings step chart (beyond Pioneer's simple meter) */}
-      <div className="mt-[18px]">
+      {/* 5. ROUTER SAVINGS STEP CHART */}
+      <div className="mb-6">
         <RouterSavingsChart buckets={o.usage_buckets} unrealized={useOrg} />
       </div>
 
-      <div className="mt-[36px]">
+      {/* 6. ROUTING PIPELINE DIAGNOSTICS */}
+      <div className="mb-8">
         <RoutingPipeline
           requests={useOrg ? o.org_sample_n : o.routed_requests}
           rows={rows}
           savingsUsd={useOrg ? o.unsaved_usd : o.savings_usd}
           savingsPct={o.savings_pct}
-          routerName="pioneer/auto"
+          routerName="aiand/auto"
         />
       </div>
 
-      <Card className="mt-[18px] gap-0 py-0">
-        <CardHeader className="flex flex-row items-start justify-between pt-[22px]">
-          <div>
-            <CardTitle>Quality over time</CardTitle>
-            <CardDescription>{judged.length ? "Flashlight test outcome" : "No judge data yet"}</CardDescription>
-          </div>
-          <CardAction>
-            <LinkToggle
-              value={range}
-              items={QUALITY_RANGES.map((r) => ({ value: r.id, label: r.label, href: qs(r.id) }))}
-            />
-          </CardAction>
-        </CardHeader>
-        <CardContent className="pb-[22px]">
-          {judged.length === 0 ? (
-            <Empty className="min-h-[200px] border border-dashed">
-              <EmptyHeader>
-                <EmptyTitle>No judge data yet</EmptyTitle>
-                <EmptyDescription>Flashlight tests have not been recorded for this range.</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ) : (
-            <div className="flex flex-col gap-3">
-              <div className="grid gap-[18px] sm:grid-cols-2">
-                <StatCard label="Flashlight tests" value={`${passed} / ${judged.length}`} />
-                <StatCard label="Pass rate" value={pct((passed / judged.length) * 100)} />
-              </div>
-              <p className="text-[13px] text-muted-foreground">
-                This is the logged flashlight tests_passed flag, not an LLMaJ score.
-              </p>
-            </div>
-          )}
-          <div className="mt-3.5 flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="h-0.5 w-[18px] rounded-sm bg-success" />
-            {judged.length ? "Flashlight pass rate" : "Judge pass rate"}
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="mt-[42px] mb-[18px]">
-        <h2 className="text-xl font-semibold">Run an inference</h2>
+      {/* 6. RUN AN INFERENCE QUICKSTART */}
+      <div id="run-inference" className="mt-10 mb-4">
+        <h2 className="text-[17px] font-semibold text-white">Run an inference</h2>
       </div>
       <InferenceSnippet />
 
-      <div className="mt-[42px] mb-[18px]">
-        <h2 className="text-xl font-semibold">Inferences</h2>
+      {/* 7. INFERENCES LOGS TABLE */}
+      <div className="mt-10 mb-4">
+        <h2 className="text-[17px] font-semibold text-white">Inferences</h2>
       </div>
       <InferencesTable
         rows={inferences}

@@ -14,6 +14,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 import httpx
 
+from .anthropic_adapter import (
+    SessionTracker,
+    anthropic_to_openai,
+    openai_to_anthropic_response,
+    stream_openai_to_anthropic_sse,
+)
 from .cache import RequestCache, request_cache_key
 from .console import (
     LOG_QUERY_KEYS,
@@ -149,6 +155,8 @@ def create_app(
     scorer_file = scorer_path or Path(os.getenv("SCORER_PATH") or ROOT / "data" / "scorer.json")
     scorer_artifact = load_scorer(scorer_file)
 
+    session_tracker = SessionTracker()
+
     app = FastAPI(title="AIand Coding Router", version="0.1.0")
     app.add_middleware(
         CORSMiddleware,
@@ -157,10 +165,15 @@ def create_app(
         allow_headers=["*"],
     )
 
-    def _check_auth(authorization: str | None) -> None:
-        if not authorization or not authorization.startswith("Bearer "):
-            raise HTTPException(401, "missing bearer token")
-        if authorization.removeprefix("Bearer ").strip() != token:
+    def _check_auth(authorization: str | None = None, x_api_key: str | None = None) -> None:
+        sent = ""
+        if authorization and authorization.startswith("Bearer "):
+            sent = authorization.removeprefix("Bearer ").strip()
+        elif x_api_key:
+            sent = x_api_key.strip()
+        if not sent:
+            raise HTTPException(401, "missing bearer token or x-api-key")
+        if sent != token:
             raise HTTPException(401, "invalid router key")
 
     @app.get("/health")
@@ -307,11 +320,23 @@ def create_app(
             rows.append(_redact(json.loads(line), redact_keys))
         return rows
 
+    @app.get("/codex/session-savings/{session_id}")
+    @app.get("/v1/session-savings/{session_id}")
+    def get_session_savings(
+        session_id: str,
+        authorization: str | None = Header(default=None),
+        x_api_key: str | None = Header(default=None, alias="x-api-key"),
+    ) -> dict[str, Any]:
+        _check_auth(authorization, x_api_key)
+        return session_tracker.get(session_id)
+
     @app.post("/v1/chat/completions")
     async def chat_completions(
-        request: Request, authorization: str | None = Header(default=None)
+        request: Request,
+        authorization: str | None = Header(default=None),
+        x_api_key: str | None = Header(default=None, alias="x-api-key"),
     ):
-        _check_auth(authorization)
+        _check_auth(authorization, x_api_key)
 
         body = await request.json()
         headers = {k.lower(): v for k, v in request.headers.items()}
@@ -329,6 +354,29 @@ def create_app(
         if token_cap and req_max_i is not None and req_max_i > token_cap:
             raise HTTPException(400, f"max_tokens {req_max_i} exceeds limit {token_cap}")
 
+        select_cfg = cfg
+        if phase in DEBUG_PHASES and last_outcome.get("tests_passed") is False:
+            select_cfg = dict(cfg)
+            thresholds = dict(cfg.get("phase_threshold") or {})
+            bump = float(cfg.get("debug_fail_threshold") or 53)
+            for name in DEBUG_PHASES:
+                thresholds[name] = bump
+            select_cfg["phase_threshold"] = thresholds
+        pick_kwargs = dict(
+            phase=phase,
+            needs_tools=needs_tools,
+            tokens=tokens,
+            effort=effort,
+            allowed=allowed,
+            spend_usd=spend_log.total(),
+            budget_usd=limit,
+            needs_json=needs_json,
+            streaming=bool(body.get("stream")),
+            max_tokens=req_max_i,
+            latency_limit_ms=_latency_limit(cfg, headers),
+        )
+
+        tip_msg: str | None = None
         if requested not in VIRTUAL_MODELS and requested in by_id:
             decision_model = by_id[requested]
             decision = Decision(
@@ -338,28 +386,16 @@ def create_app(
                 reason=f"client pinned {requested}",
                 candidates=[requested],
             )
+            # Calculate what auto-routing would have chosen
+            auto_dec = select_model(select_cfg, models, **pick_kwargs)
+            if auto_dec.model.unit_cost < decision_model.unit_cost:
+                pot_savings = max(
+                    0.0,
+                    estimate_cost(decision_model, tokens, 800)
+                    - estimate_cost(auto_dec.model, tokens, 800),
+                )
+                tip_msg = f"Using router/auto would have saved ${pot_savings:.4f} (routed to {auto_dec.model.id})"
         else:
-            select_cfg = cfg
-            if phase in DEBUG_PHASES and last_outcome.get("tests_passed") is False:
-                select_cfg = dict(cfg)
-                thresholds = dict(cfg.get("phase_threshold") or {})
-                bump = float(cfg.get("debug_fail_threshold") or 53)
-                for name in DEBUG_PHASES:
-                    thresholds[name] = bump
-                select_cfg["phase_threshold"] = thresholds
-            pick_kwargs = dict(
-                phase=phase,
-                needs_tools=needs_tools,
-                tokens=tokens,
-                effort=effort,
-                allowed=allowed,
-                spend_usd=spend_log.total(),
-                budget_usd=limit,
-                needs_json=needs_json,
-                streaming=bool(body.get("stream")),
-                max_tokens=req_max_i,
-                latency_limit_ms=_latency_limit(cfg, headers),
-            )
             use_learned = hop_path == "off" and learned_enabled(flag_path)
             picker = learned_select if use_learned else select_model
             decision = picker(select_cfg, models, **pick_kwargs)
@@ -373,12 +409,32 @@ def create_app(
                 )
 
         meta = _router_headers(decision)
+        if tip_msg:
+            meta["X-Router-Tip"] = tip_msg
+            meta["X-Pioneer-Router-Tip"] = tip_msg
 
         streaming = bool(body.get("stream"))
+        session_id = (
+            headers.get("x-session-id")
+            or headers.get("session_id")
+            or headers.get("prompt-cache-key")
+            or headers.get("prompt_cache_key")
+            or ""
+        )
         ck = request_cache_key(body, decision.model.id, key_fp)
         if not streaming:
             cached = cache.get(ck)
             if cached is not None:
+                if session_id:
+                    session_tracker.record(
+                        session_id,
+                        model_id=decision.model.id,
+                        baseline_id=decision.baseline_model_id or "",
+                        tokens_in=tokens,
+                        tokens_out=0,
+                        cost_usd=0.0,
+                        savings_usd=decision.savings_usd or 0.0,
+                    )
                 append_jsonl(
                     log,
                     _jsonl_row(
@@ -437,6 +493,19 @@ def create_app(
                 max(0.0, estimate_cost(by_id[decision.baseline_model_id], tok_in, tok_out) - cost),
                 6,
             )
+
+        # Track session savings if session ID provided
+        if session_id:
+            session_tracker.record(
+                session_id,
+                model_id=decision.model.id,
+                baseline_id=decision.baseline_model_id or "",
+                tokens_in=tok_in,
+                tokens_out=tok_out,
+                cost_usd=cost,
+                savings_usd=decision.savings_usd or 0.0,
+            )
+
         row = _jsonl_row(
             decision,
             requested=requested,
@@ -469,6 +538,182 @@ def create_app(
         payload["model"] = requested
         cache.put(ck, payload)
         return JSONResponse(payload, headers=meta)
+
+    @app.post("/v1/messages")
+    async def anthropic_messages(
+        request: Request,
+        authorization: str | None = Header(default=None),
+        x_api_key: str | None = Header(default=None, alias="x-api-key"),
+    ):
+        """Anthropic Messages API wire compatibility (for Claude Code & Claude Desktop)."""
+        _check_auth(authorization, x_api_key)
+
+        anthropic_body = await request.json()
+        headers = {k.lower(): v for k, v in request.headers.items()}
+        openai_body = anthropic_to_openai(anthropic_body)
+
+        requested = anthropic_body.get("model") or "router/auto"
+        effort = (headers.get("x-routing-effort") or "medium").lower()
+        allowed_raw = headers.get("x-allowed-models") or ""
+        allowed = {x.strip() for x in allowed_raw.split(",") if x.strip()} or None
+
+        phase = detect_phase(headers, openai_body, last_outcome)
+        tokens = estimate_tokens(openai_body.get("messages") or [])
+        needs_tools = bool(openai_body.get("tools"))
+        needs_json = wants_json(openai_body)
+        req_max = openai_body.get("max_tokens")
+        req_max_i = int(req_max) if req_max is not None else None
+
+        select_cfg = cfg
+        if phase in DEBUG_PHASES and last_outcome.get("tests_passed") is False:
+            select_cfg = dict(cfg)
+            thresholds = dict(cfg.get("phase_threshold") or {})
+            bump = float(cfg.get("debug_fail_threshold") or 53)
+            for name in DEBUG_PHASES:
+                thresholds[name] = bump
+            select_cfg["phase_threshold"] = thresholds
+        pick_kwargs = dict(
+            phase=phase,
+            needs_tools=needs_tools,
+            tokens=tokens,
+            effort=effort,
+            allowed=allowed,
+            spend_usd=spend_log.total(),
+            budget_usd=limit,
+            needs_json=needs_json,
+            streaming=bool(openai_body.get("stream")),
+            max_tokens=req_max_i,
+            latency_limit_ms=_latency_limit(cfg, headers),
+        )
+
+        if requested not in VIRTUAL_MODELS and requested in by_id:
+            decision = Decision(
+                model=by_id[requested],
+                phase=phase,
+                threshold=0,
+                reason=f"client pinned {requested}",
+                candidates=[requested],
+            )
+        else:
+            use_learned = hop_path == "off" and learned_enabled(flag_path)
+            picker = learned_select if use_learned else select_model
+            decision = picker(select_cfg, models, **pick_kwargs)
+            decision.effort = effort
+            if hop_path != "off":
+                trained = None
+                if scorer_artifact is not None:
+                    trained = trained_select(select_cfg, models, scorer_artifact, **pick_kwargs)
+                decision = apply_trained_path(
+                    hop_path, decision, trained, tokens=tokens, by_id=by_id
+                )
+
+        meta = _router_headers(decision)
+        meta["pioneer_routed_model"] = decision.model.id
+        meta["pioneer_savings"] = str(decision.savings_usd or 0.0)
+
+        if provider is None and not key:
+            raise HTTPException(500, "AIAND_API_KEY is not set")
+        if spend_log.total() >= limit:
+            raise HTTPException(429, f"budget limit ${limit} reached")
+
+        upstream_body = {k: v for k, v in openai_body.items() if k != "model"}
+        upstream_body["model"] = decision.model.id
+        streaming = bool(openai_body.get("stream"))
+        if streaming:
+            upstream_body.setdefault("stream_options", {})
+            if isinstance(upstream_body["stream_options"], dict):
+                upstream_body["stream_options"].setdefault("include_usage", True)
+
+        t0 = time.perf_counter()
+        result = await _call_provider(upstream, upstream_body)
+        latency_ms = int((time.perf_counter() - t0) * 1000)
+        usage = _usage(result)
+        cost = estimate_cost(
+            decision.model,
+            usage.get("prompt_tokens", tokens),
+            usage.get("completion_tokens", 0),
+        )
+        spend_log.add(cost)
+        tok_in = usage.get("prompt_tokens", tokens)
+        tok_out = usage.get("completion_tokens", 0)
+        if decision.baseline_model_id and decision.baseline_model_id in by_id:
+            decision.savings_usd = round(
+                max(0.0, estimate_cost(by_id[decision.baseline_model_id], tok_in, tok_out) - cost),
+                6,
+            )
+
+        session_id = (
+            headers.get("x-session-id")
+            or headers.get("session_id")
+            or headers.get("prompt-cache-key")
+            or headers.get("prompt_cache_key")
+            or ""
+        )
+        if session_id:
+            session_tracker.record(
+                session_id,
+                model_id=decision.model.id,
+                baseline_id=decision.baseline_model_id or "",
+                tokens_in=tok_in,
+                tokens_out=tok_out,
+                cost_usd=cost,
+                savings_usd=decision.savings_usd or 0.0,
+            )
+
+        row = _jsonl_row(
+            decision,
+            requested=requested,
+            stream=streaming,
+            tokens_in=tok_in,
+            tokens_out=tok_out,
+            cost_usd=round(cost, 6),
+            latency_ms=latency_ms,
+            status=result.get("status"),
+            cache_hit=False,
+            wire="anthropic_messages",
+        )
+        append_jsonl(log, row)
+
+        if streaming and result.get("stream"):
+            return StreamingResponse(
+                stream_openai_to_anthropic_sse(result["stream"], requested, decision, tok_in),
+                media_type="text/event-stream",
+                headers=meta,
+            )
+
+        anthropic_resp = openai_to_anthropic_response(
+            result.get("json") or {}, requested, decision, tok_in, tok_out
+        )
+        return JSONResponse(anthropic_resp, headers=meta)
+
+    @app.post("/v1/responses")
+    async def responses_api(
+        request: Request,
+        authorization: str | None = Header(default=None),
+        x_api_key: str | None = Header(default=None, alias="x-api-key"),
+    ):
+        """OpenAI Responses API wire compatibility (for Codex CLI)."""
+        _check_auth(authorization, x_api_key)
+        body = await request.json()
+        
+        # Convert Responses format prompt/input to chat messages if needed
+        chat_body = dict(body)
+        if "input" in body and "messages" not in body:
+            inp = body["input"]
+            msgs = [{"role": "user", "content": inp if isinstance(inp, str) else json.dumps(inp)}]
+            chat_body["messages"] = msgs
+            chat_body.pop("input", None)
+
+        req_mock = Request(
+            scope={
+                "type": "http",
+                "method": "POST",
+                "headers": request.headers.raw,
+            }
+        )
+        # Call chat completions logic internally
+        resp = await chat_completions(request, authorization, x_api_key)
+        return resp
 
     return app
 

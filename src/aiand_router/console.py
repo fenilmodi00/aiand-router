@@ -152,6 +152,9 @@ def overview_payload(
             }
         )
 
+    input_tokens = sum(int(h.get("tokens_in") or 0) for h in hops)
+    output_tokens = sum(int(h.get("tokens_out") or 0) for h in hops)
+
     return {
         "range": range_key,
         "virtual_model": virtual_model,
@@ -164,6 +167,8 @@ def overview_payload(
         "fallback_rate": (fallback_count / routed) if routed else 0.0,
         "cache_hits": cache_hits,
         "aiand_key_set": bool(aiand_key_set),
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
         "candidates": [
             {"id": m.id, "display_name": m.display_name, "enabled": True} for m in enabled
         ],
@@ -213,6 +218,10 @@ def _inference_row(h: dict[str, Any]) -> dict[str, Any]:
         "cache_hit": bool(h.get("cache_hit")),
         "path": h.get("path") or "rules",
         "cost_usd": float(h.get("cost_usd") or 0),
+        "savings_usd": float(h.get("savings_usd") or 0) if h.get("savings_usd") is not None else None,
+        "baseline_model_id": h.get("baseline_model_id"),
+        "rule": h.get("rule"),
+        "escalated_from": h.get("escalated_from"),
         "ttft_ms": h["ttft_ms"] if h.get("ttft_ms") is not None else None,
         "llmaj_score": h["llmaj_score"] if h.get("llmaj_score") is not None else None,
         "tests_passed": h.get("tests_passed"),

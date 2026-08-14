@@ -42,11 +42,21 @@ export default async function RoutersPage() {
         >
           <div className="flex items-start justify-between">
             <div>
-              <div className="text-[16px] font-semibold text-white group-hover:text-white">
-                pioneer/auto
+              <div className="flex items-center gap-3">
+                <span className="text-[16px] font-semibold text-white group-hover:text-white">
+                  aiand/auto
+                </span>
+                {overview.data?.routed_requests ? (
+                  <span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-mono text-[#4ade80]">
+                    +{overview.data.savings_usd ? `$${overview.data.savings_usd.toFixed(2)}` : "$0.00"} saved
+                  </span>
+                ) : null}
               </div>
-              <div className="mt-1 font-mono text-[11px] tracking-[0.06em] text-[#8e8e96] uppercase">
-                {meta}
+              <div className="mt-1 font-mono text-[11px] tracking-[0.06em] text-[#8e8e96] uppercase flex items-center gap-2">
+                <span>{meta}</span>
+                {overview.data?.routed_requests ? (
+                  <span>· {overview.data.routed_requests} requests routed</span>
+                ) : null}
               </div>
               <p className="mt-2.5 max-w-2xl text-[13px] text-[#8e8e96] leading-relaxed">
                 Routes each request to the cheapest candidate that still meets the quality bar.

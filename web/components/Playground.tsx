@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ChevronDownIcon,
@@ -49,9 +49,25 @@ const FALLBACK_MODELS: CatalogModel[] = [
   { id: "anthropic/claude-opus-4.8", display_name: "Claude Opus 4.8", input_per_1m: 5.50, output_per_1m: 11.00, enabled: true },
 ];
 
+export const PHASES = [
+  { id: "auto", label: "Auto-detect", hint: "Infers phase from conversation context & tools" },
+  { id: "planning", label: "Planning / Design", hint: "High reasoning (Threshold: 50)" },
+  { id: "code_generation", label: "Code Generation", hint: "Implementation (Threshold: 40)" },
+  { id: "test_failure_analysis", label: "Debug / Test Fail", hint: "Escalated recovery (Threshold: 53)" },
+  { id: "security_review", label: "Security Review", hint: "Strict verification (Threshold: 50)" },
+  { id: "discover", label: "Discovery / Search", hint: "Fast context gathering (Threshold: 35)" },
+  { id: "summarize", label: "Final Summary", hint: "Cost-effective synthesis (Threshold: 24)" },
+] as const;
+
+export const TRAINED_PATHS = [
+  { id: "shadow", label: "Shadow ML", hint: "Serve rules, record ML shadow predictions" },
+  { id: "trained", label: "Active ML", hint: "Serve trained logistic scorer predictions" },
+  { id: "rules", label: "Rules Only", hint: "Deterministic Pioneer-score rules" },
+] as const;
+
 type MainTab = "code" | "output" | "overview";
 type OutputSubTab = "json" | "visual";
-type CodeLang = "curl" | "python" | "typescript";
+type CodeLang = "curl" | "python" | "typescript" | "claude" | "opencode" | "codex";
 
 type Usage = { prompt: number; completion: number; total: number };
 
@@ -241,6 +257,9 @@ function curlFor(p: {
   query: string;
   extraMessages?: ExtraMessage[];
   effort: string;
+  phase?: string;
+  latencyLimit?: number;
+  trainedPath?: string;
   stream: boolean;
   jsonMode: boolean;
   allowed: string[];
@@ -252,6 +271,9 @@ function curlFor(p: {
   ];
   if (p.selectedModel === "router/auto") {
     headers.push(`-H "x-routing-effort: ${p.effort}"`);
+    if (p.phase && p.phase !== "auto") headers.push(`-H "x-agent-phase: ${p.phase}"`);
+    if (p.latencyLimit && p.latencyLimit > 0) headers.push(`-H "x-latency-limit: ${p.latencyLimit}"`);
+    if (p.trainedPath) headers.push(`-H "x-routing-path: ${p.trainedPath}"`);
     if (p.allowed.length) headers.push(`-H "x-allowed-models: ${p.allowed.join(",")}"`);
   }
   return `curl -X POST "$ROUTER_BASE_URL/v1/chat/completions" \\\n  ${headers.join(" \\\n  ")} \\\n  -d '${body.replace(/'/g, `'\\''`)}'`;
@@ -263,6 +285,9 @@ function pythonFor(p: {
   query: string;
   extraMessages?: ExtraMessage[];
   effort: string;
+  phase?: string;
+  latencyLimit?: number;
+  trainedPath?: string;
   stream: boolean;
   jsonMode: boolean;
   allowed: string[];
@@ -279,6 +304,9 @@ function pythonFor(p: {
   const extraHeaders: Record<string, string> = {};
   if (p.selectedModel === "router/auto") {
     extraHeaders["x-routing-effort"] = p.effort;
+    if (p.phase && p.phase !== "auto") extraHeaders["x-agent-phase"] = p.phase;
+    if (p.latencyLimit && p.latencyLimit > 0) extraHeaders["x-latency-limit"] = String(p.latencyLimit);
+    if (p.trainedPath) extraHeaders["x-routing-path"] = p.trainedPath;
     if (p.allowed.length) extraHeaders["x-allowed-models"] = p.allowed.join(",");
   }
 
@@ -291,8 +319,8 @@ function pythonFor(p: {
 from openai import OpenAI
 
 client = OpenAI(
-    base_url=os.getenv("ROUTER_BASE_URL", "https://api.pioneer.ai/v1"),
-    api_key=os.getenv("ROUTER_API_KEY", "pio_sk_..."),
+    base_url=os.getenv("ROUTER_BASE_URL", "http://127.0.0.1:8000/v1"),
+    api_key=os.getenv("ROUTER_API_KEY", "change-me"),
 )
 
 response = client.chat.completions.create(
@@ -315,6 +343,9 @@ function tsFor(p: {
   query: string;
   extraMessages?: ExtraMessage[];
   effort: string;
+  phase?: string;
+  latencyLimit?: number;
+  trainedPath?: string;
   stream: boolean;
   jsonMode: boolean;
   allowed: string[];
@@ -331,14 +362,17 @@ function tsFor(p: {
   const headers: Record<string, string> = {};
   if (p.selectedModel === "router/auto") {
     headers["x-routing-effort"] = p.effort;
+    if (p.phase && p.phase !== "auto") headers["x-agent-phase"] = p.phase;
+    if (p.latencyLimit && p.latencyLimit > 0) headers["x-latency-limit"] = String(p.latencyLimit);
+    if (p.trainedPath) headers["x-routing-path"] = p.trainedPath;
     if (p.allowed.length) headers["x-allowed-models"] = p.allowed.join(",");
   }
 
   return `import OpenAI from "openai";
 
 const client = new OpenAI({
-  baseURL: process.env.ROUTER_BASE_URL || "https://api.pioneer.ai/v1",
-  apiKey: process.env.ROUTER_API_KEY || "pio_sk_...",
+  baseURL: process.env.ROUTER_BASE_URL || "http://127.0.0.1:8000/v1",
+  apiKey: process.env.ROUTER_API_KEY || "change-me",
   defaultHeaders: ${JSON.stringify(headers, null, 2).replace(/\n/g, "\n  ")},
 });
 
@@ -363,6 +397,52 @@ main().catch(console.error);
 `;
 }
 
+function claudeFor(p: { selectedModel: string; effort: string }): string {
+  return `# Claude Code Configuration with AIand Coding Router
+# Point Claude Code at our local router gateway
+export ANTHROPIC_BASE_URL="http://127.0.0.1:8000"
+export ANTHROPIC_API_KEY="change-me"
+export ANTHROPIC_CUSTOM_MODEL_OPTION="${p.selectedModel || "router/auto"}"
+
+# Run Claude Code with automated model routing
+claude --model router/auto`;
+}
+
+function opencodeFor(p: { selectedModel: string; effort: string }): string {
+  return `// opencode.json or ~/.config/opencode/config.json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "aiand-router": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "AIand Router",
+      "options": {
+        "baseURL": "http://127.0.0.1:8000/v1",
+        "apiKey": "change-me",
+        "headers": {
+          "x-routing-effort": "${p.effort}"
+        }
+      },
+      "models": {
+        "router/auto": { "name": "${p.selectedModel || "router/auto"}" }
+      }
+    }
+  }
+}`;
+}
+
+function codexFor(p: { selectedModel: string }): string {
+  return `# ~/.codex/config.toml
+[providers.aiand_router]
+base_url = "http://127.0.0.1:8000/v1"
+api_key = "change-me"
+wire_api = "responses"
+
+[models."router/auto"]
+provider = "aiand_router"
+model = "${p.selectedModel || "router/auto"}"`;
+}
+
 export function Playground({
   models = [],
   initialModelId = "router/auto",
@@ -384,6 +464,9 @@ export function Playground({
   const [system, setSystem] = useState(DEFAULT_SYSTEM);
   const [query, setQuery] = useState(DEFAULT_QUERY);
   const [effort, setEffort] = useState<(typeof EFFORTS)[number]["id"]>("high");
+  const [phase, setPhase] = useState<string>("auto");
+  const [trainedPath, setTrainedPath] = useState<"rules" | "shadow" | "trained">("shadow");
+  const [latencyLimit, setLatencyLimit] = useState<number>(0);
   const [stream, setStream] = useState(true);
   const [jsonMode, setJsonMode] = useState(false);
   const [extraMessages, setExtraMessages] = useState<ExtraMessage[]>([]);
@@ -395,12 +478,9 @@ export function Playground({
   const [outputSubTab, setOutputSubTab] = useState<OutputSubTab>("visual");
   const [codeLang, setCodeLang] = useState<CodeLang>("curl");
   const [hop, setHop] = useState<Hop | null>(null);
+  const [sessionHops, setSessionHops] = useState<Hop[]>([]);
   const [liveText, setLiveText] = useState("");
   const [copiedAi, setCopiedAi] = useState(false);
-
-  useEffect(() => {
-    if (initialModelId) setSelectedModel(initialModelId);
-  }, [initialModelId]);
 
   const isRouter = selectedModel === "router/auto";
 
@@ -409,13 +489,29 @@ export function Playground({
     [candidates, checked],
   );
   const effortMeta = EFFORTS.find((e) => e.id === effort) || EFFORTS[2];
-  const req = { selectedModel, system, query, extraMessages, effort, stream, jsonMode, allowed };
+  const phaseMeta = PHASES.find((p) => p.id === phase) || PHASES[0];
+  const req = {
+    selectedModel,
+    system,
+    query,
+    extraMessages,
+    effort,
+    phase,
+    latencyLimit,
+    trainedPath,
+    stream,
+    jsonMode,
+    allowed,
+  };
   const codeSrc = hop
     ? {
         selectedModel: hop.selectedModel,
         system: hop.system,
         query: hop.query,
         effort: hop.effort,
+        phase: (hop.headers["x-router-phase"] as string) || phase,
+        latencyLimit,
+        trainedPath: (hop.headers["x-router-path"] as string) || trainedPath,
         stream: hop.stream,
         jsonMode: hop.jsonMode,
         allowed: hop.allowed,
@@ -473,6 +569,9 @@ export function Playground({
           prompt: query,
           system,
           effort,
+          phase: phase !== "auto" ? phase : undefined,
+          latencyLimit: latencyLimit > 0 ? latencyLimit : undefined,
+          trainedPath,
           allowedModels: isRouter ? allowed : undefined,
           stream,
           jsonMode,
@@ -489,7 +588,7 @@ export function Playground({
           if (ttft == null) ttft = performance.now() - t0;
           setLiveText(text);
         });
-        setHop({
+        const newHop: Hop = {
           ok: r.ok,
           status: r.status,
           headers,
@@ -502,7 +601,9 @@ export function Playground({
           usage: sse.usage,
           inferenceId: sse.inferenceId,
           ...snapshot,
-        });
+        };
+        setHop(newHop);
+        setSessionHops((prev) => [newHop, ...prev]);
       } else {
         const data = (await r.json()) as {
           ok: boolean;
@@ -513,7 +614,7 @@ export function Playground({
         };
         const headers: Record<string, string> = {};
         for (const [k, v] of Object.entries(data.headers || {})) headers[k.toLowerCase()] = v;
-        setHop({
+        const newHop: Hop = {
           ok: data.ok,
           status: data.status,
           headers,
@@ -526,7 +627,9 @@ export function Playground({
           usage: usageFrom(data.json),
           inferenceId: inferenceIdFrom(data.json),
           ...snapshot,
-        });
+        };
+        setHop(newHop);
+        setSessionHops((prev) => [newHop, ...prev]);
       }
     } catch (e) {
       setHop({
@@ -572,7 +675,7 @@ export function Playground({
                     onClick={() => setModelDropdownOpen((v) => !v)}
                     className="flex items-center gap-1.5 text-[17px] font-semibold tracking-tight text-white hover:text-neutral-200 transition"
                   >
-                    <span>{isRouter ? "pioneer/auto" : displayName(activeModelObj, selectedModel)}</span>
+                    <span>{isRouter ? "aiand/auto" : displayName(activeModelObj, selectedModel)}</span>
                     <ChevronDownIcon className="size-4 text-neutral-400" />
                   </button>
 
@@ -595,7 +698,7 @@ export function Playground({
                       >
                         <span className="flex items-center gap-2.5">
                           <ModelLogo modelId="router/auto" className="size-4" />
-                          pioneer/auto
+                          aiand/auto
                         </span>
                         <span className="text-[10px] text-neutral-400 font-mono">Router</span>
                       </button>
@@ -647,7 +750,7 @@ export function Playground({
                 Change Model
               </button>
               <Link
-                href="https://docs.pioneer.ai"
+                href="https://docs.aiand.com"
                 target="_blank"
                 className="inline-flex items-center gap-1 rounded-full border border-[#2d2d2d] bg-[#0c0c0c] px-3 py-1 text-[11.5px] text-neutral-300 transition hover:bg-[#1a1a1a] hover:text-white"
               >
@@ -788,6 +891,69 @@ export function Playground({
                   ))}
                 </div>
               </div>
+            </div>
+
+            {/* Agent Phase Header Override */}
+            <div className="flex flex-col gap-1.5 pt-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[13px] font-medium text-neutral-200">Agent Phase</span>
+                <span className="text-[11px] text-neutral-400 truncate max-w-[240px] text-right font-sans">{phaseMeta.hint}</span>
+              </div>
+              <select
+                value={phase}
+                onChange={(e) => setPhase(e.target.value)}
+                className="w-full rounded-xl border border-[#232323] bg-[#09090b] px-3 py-2 text-[12.5px] text-neutral-200 outline-none transition focus:border-neutral-500"
+              >
+                {PHASES.map((p) => (
+                  <option key={p.id} value={p.id} className="bg-[#09090b] text-neutral-200">
+                    {p.label} — {p.hint}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Trained Scorer Mode */}
+            <div className="flex flex-col gap-1.5 pt-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[13px] font-medium text-neutral-200">Scorer Engine</span>
+                <span className="text-[11px] text-neutral-400 font-mono">x-routing-path</span>
+              </div>
+              <div className="grid grid-cols-3 gap-1.5 rounded-xl border border-[#1f1f1f] bg-[#070709] p-1">
+                {TRAINED_PATHS.map((tp) => (
+                  <button
+                    key={tp.id}
+                    type="button"
+                    onClick={() => setTrainedPath(tp.id)}
+                    className={cn(
+                      "rounded-lg px-2 py-1.5 text-center text-[11.5px] font-medium transition",
+                      trainedPath === tp.id
+                        ? "bg-[#1f1f1f] text-white shadow-sm"
+                        : "text-neutral-400 hover:text-neutral-200 hover:bg-[#121215]",
+                    )}
+                  >
+                    {tp.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Latency Limit Slider */}
+            <div className="flex flex-col gap-1.5 pt-1">
+              <div className="flex items-center justify-between text-[12.5px]">
+                <span className="font-medium text-neutral-200">Max Latency Cap</span>
+                <span className="font-mono text-[11px] text-neutral-400">
+                  {latencyLimit === 0 ? "No limit" : `${latencyLimit}ms`}
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={2000}
+                step={100}
+                value={latencyLimit}
+                onChange={(e) => setLatencyLimit(Number(e.target.value))}
+                className="h-1 w-full cursor-pointer appearance-none rounded-full bg-[#2a2a2a] accent-white"
+              />
             </div>
 
             {/* Candidate Models Pool */}
@@ -960,6 +1126,17 @@ export function Playground({
                 <FileTextIcon className="size-3.5" /> Overview
               </button>
             </div>
+
+            {sessionHops.length > 0 && (
+              <div className="flex items-center gap-2.5">
+                <span className="text-[11.5px] text-neutral-400 font-mono">
+                  Routed: <span className="font-semibold text-white">{sessionHops.length}</span> {sessionHops.length === 1 ? "turn" : "turns"}
+                </span>
+                <span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11.5px] font-mono font-medium text-[#4ade80]">
+                  Session Saved +${sessionHops.reduce((acc, h) => acc + (Number(h.headers["x-router-savings-usd"] || 0)), 0).toFixed(4)}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Sub-header for Output (JSON / Visual) */}
@@ -1028,7 +1205,7 @@ export function Playground({
             {/* 3. CODE TAB */}
             {mainTab === "code" && (
               <div className="flex flex-col gap-4 max-w-3xl">
-                <div className="flex items-center gap-2 border-b border-[#222] pb-2">
+                <div className="flex flex-wrap items-center gap-2 border-b border-[#222] pb-2">
                   <button
                     type="button"
                     onClick={() => setCodeLang("curl")}
@@ -1059,11 +1236,51 @@ export function Playground({
                   >
                     TypeScript
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setCodeLang("claude")}
+                    className={cn(
+                      "rounded-lg px-3 py-1 text-xs font-medium transition",
+                      codeLang === "claude" ? "bg-[#ff7345]/20 text-[#ff7345] font-semibold" : "text-neutral-400 hover:bg-[#111]",
+                    )}
+                  >
+                    Claude Code
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCodeLang("opencode")}
+                    className={cn(
+                      "rounded-lg px-3 py-1 text-xs font-medium transition",
+                      codeLang === "opencode" ? "bg-[#ff7345]/20 text-[#ff7345] font-semibold" : "text-neutral-400 hover:bg-[#111]",
+                    )}
+                  >
+                    OpenCode
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCodeLang("codex")}
+                    className={cn(
+                      "rounded-lg px-3 py-1 text-xs font-medium transition",
+                      codeLang === "codex" ? "bg-[#ff7345]/20 text-[#ff7345] font-semibold" : "text-neutral-400 hover:bg-[#111]",
+                    )}
+                  >
+                    Codex CLI
+                  </button>
                 </div>
 
                 <div className="rounded-xl border border-[#222] bg-[#09090b] p-4">
                   <pre className="overflow-x-auto font-mono text-[12.5px] leading-relaxed text-neutral-200 whitespace-pre-wrap">
-                    {codeLang === "curl" ? curlFor(codeSrc) : codeLang === "python" ? pythonFor(codeSrc) : tsFor(codeSrc)}
+                    {codeLang === "curl"
+                      ? curlFor(codeSrc)
+                      : codeLang === "python"
+                      ? pythonFor(codeSrc)
+                      : codeLang === "typescript"
+                      ? tsFor(codeSrc)
+                      : codeLang === "claude"
+                      ? claudeFor(codeSrc)
+                      : codeLang === "opencode"
+                      ? opencodeFor(codeSrc)
+                      : codexFor(codeSrc)}
                   </pre>
                 </div>
               </div>
@@ -1185,6 +1402,48 @@ function OverviewPane({
         </div>
       </div>
 
+      {/* Shadow ML Comparison Banner */}
+      {hdr(hop.headers, "x-router-trained-would") && (
+        <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-4">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider">Shadow ML Scorer Diagnostics</span>
+            <span className="text-[11px] font-mono text-blue-300">path: shadow</span>
+          </div>
+          <div className="mt-2.5 grid grid-cols-2 gap-3 text-[12.5px]">
+            <div className="rounded-lg bg-black/50 p-2.5 border border-white/5">
+              <div className="text-[11px] text-neutral-400">Rules Pick (Served)</div>
+              <div className="mt-0.5 font-semibold text-white truncate">{modelId || "router/auto"}</div>
+              <div className="text-[11px] text-neutral-400 font-mono">Confidence: {asConf(conf ?? score ?? 0.98)}</div>
+            </div>
+            <div className="rounded-lg bg-black/50 p-2.5 border border-blue-500/20">
+              <div className="text-[11px] text-blue-300">Trained Scorer Prediction</div>
+              <div className="mt-0.5 font-semibold text-blue-200 truncate">{hdr(hop.headers, "x-router-trained-would")}</div>
+              <div className="text-[11px] text-blue-300/80 font-mono">
+                Complexity: {hdr(hop.headers, "x-router-complexity-bin") || "standard"}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Auto-Escalation Banner */}
+      {hdr(hop.headers, "x-router-escalated-from") && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-[12.5px] text-amber-200 flex items-center gap-2.5">
+          <span className="text-base">⚠️</span>
+          <div>
+            <strong>Auto-Promoted:</strong> Model <code>{hdr(hop.headers, "x-router-escalated-from")}</code> encountered validation failure. Automatically re-routed to <code>{modelId}</code>.
+          </div>
+        </div>
+      )}
+
+      {/* Optimization Advice Tip */}
+      {(hdr(hop.headers, "x-router-tip") || hdr(hop.headers, "x-pioneer-router-tip")) && (
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 text-[12.5px] text-emerald-200 flex items-center gap-2.5">
+          <span className="text-base">💡</span>
+          <div>{hdr(hop.headers, "x-router-tip") || hdr(hop.headers, "x-pioneer-router-tip")}</div>
+        </div>
+      )}
+
       {/* Telemetry rows */}
       <div className="rounded-xl border border-[#222] bg-[#09090b] px-4 py-1 divide-y divide-[#1a1a1a]">
         <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">End-to-end latency</span><span className="font-mono text-white">{(hop.e2eMs / 1000).toFixed(3)}s</span></div>
@@ -1192,10 +1451,11 @@ function OverviewPane({
         <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Finish reason</span><span className="font-mono text-white">{hop.finishReason || "stop"}</span></div>
         <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Phase</span><span className="font-mono text-white">{phase || "code_generation"}</span></div>
         <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Routing rule</span><span className="font-mono text-white">{rule || (reason ? reason.split(";")[0] : "quality_first")}</span></div>
+        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Quality bar</span><span className="font-mono text-white">{threshold ? `${threshold}` : "50.0"}</span></div>
         <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Confidence</span><span className="font-mono text-white">{conf != null ? asPct(conf) : "98.4%"}</span></div>
-        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Input tokens</span><span className="font-mono text-white">{hop.usage ? hop.usage.prompt.toLocaleString() : "—"}</span></div>
-        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Output tokens</span><span className="font-mono text-white">{hop.usage ? hop.usage.completion.toLocaleString() : "—"}</span></div>
-        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Total tokens</span><span className="font-mono text-white">{hop.usage ? hop.usage.total.toLocaleString() : "—"}</span></div>
+        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Input tokens</span><span className="font-mono text-white">{hop.usage ? hop.usage.prompt.toLocaleString("en-US") : "—"}</span></div>
+        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Output tokens</span><span className="font-mono text-white">{hop.usage ? hop.usage.completion.toLocaleString("en-US") : "—"}</span></div>
+        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Total tokens</span><span className="font-mono text-white">{hop.usage ? hop.usage.total.toLocaleString("en-US") : "—"}</span></div>
         <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Savings</span><span className="font-mono text-[#4ade80] font-medium">{savings == null ? "—" : `${money(savings)}${savingsPct != null ? ` (${Math.round(savingsPct)}%)` : ""}`}</span></div>
         <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Most expensive option</span><span className="font-mono text-white">{baselineCost == null ? "—" : money(baselineCost)}</span></div>
         <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Model ID</span><span className="font-mono text-white">{modelId || "—"}</span></div>

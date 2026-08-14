@@ -44,6 +44,8 @@ export type Overview = {
   org_sample_n: number;
   org_input_tokens: number;
   org_output_tokens: number;
+  input_tokens?: number;
+  output_tokens?: number;
 };
 
 export type Inference = {
@@ -57,6 +59,10 @@ export type Inference = {
   cache_hit: boolean;
   path: string;
   cost_usd: number;
+  savings_usd?: number | null;
+  baseline_model_id?: string | null;
+  rule?: string | null;
+  escalated_from?: string | null;
   ttft_ms: number | null;
   llmaj_score: number | null;
   tests_passed: boolean | null;
