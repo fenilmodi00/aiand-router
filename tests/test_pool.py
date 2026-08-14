@@ -543,6 +543,49 @@ def test_pool_short_hard_checks_drops_long_easy(tmp_path, monkeypatch):
     assert all(r.get("source") == "swe-smith" for r in rows)
 
 
+def test_verified_like_json_word_does_not_invent_status_required():
+    from aiand_router.pool import attach_hard_checks
+
+    row = attach_hard_checks({"prompt": "Please emit json for this coding agent reply."})
+    required = (row.get("json_schema") or {}).get("required") or []
+    assert required != ["status"]
+    assert "status" not in required
+
+
+def test_pool_short_hard_not_majority_trivial(tmp_path, monkeypatch):
+    monkeypatch.delenv(OPT_IN_ENV, raising=False)
+    smith = _write_jsonl(
+        tmp_path / "smith-tool.jsonl",
+        [
+            _smith(
+                f"short-check-{i}",
+                f"Rename tmp{i} to tmp{i}b. Reply with JSON only.",
+            )
+            for i in range(20)
+        ],
+    )
+    out = tmp_path / "pool.jsonl"
+    code = main(
+        [
+            "pool",
+            "--smith",
+            str(smith),
+            "--eval",
+            str(_empty_eval(tmp_path)),
+            "--out",
+            str(out),
+            "--n",
+            "10",
+            "--verified-like",
+        ]
+    )
+    assert code == 0
+    rows = _load(out)
+    assert rows
+    trivial = sum(1 for r in rows if r.get("hint_bin") == "trivial")
+    assert trivial * 2 < len(rows)
+
+
 def test_pool_short_hard_empty_mix_writes_nothing(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv(OPT_IN_ENV, raising=False)
     long_easy = "Rename tmp to tmp2. " + ("padding token text " * 80)

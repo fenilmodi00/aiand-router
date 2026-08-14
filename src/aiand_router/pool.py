@@ -126,7 +126,7 @@ def attach_hard_checks(row: dict[str, Any]) -> dict[str, Any]:
         return out
     prompt = str(out.get("prompt") or "")
     if _JSON_CHECK_RE.search(prompt):
-        out["json_schema"] = {"type": "object", "required": ["status"]}
+        out["json_schema"] = {"type": "object", "required": []}
         return out
     m = re.search(
         r"(?:must contain|include the (?:string|substring)) [`'\"]?([^`'\".\n]+)",
@@ -152,6 +152,8 @@ def verified_like_rows(
         checked = attach_hard_checks(r)
         if not any(checked.get(k) is not None for k in _HARD_CHECK_KEYS):
             continue
+        if checked.get("hint_bin") == "trivial":
+            checked["hint_bin"] = "hard"
         kept.append(checked)
     return kept
 

@@ -71,6 +71,52 @@ def test_geometry_cli_prints_spearman_and_kill_without_opt_in(tmp_path, capsys, 
     assert os.getenv("TRAINED_PATH") != "trained"
 
 
+def test_geometry_zero_spearman_prefers_logistic(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("AIAND_TRAIN", raising=False)
+    same = {"cheap/flash": True, "mid/kimi": True, "dear/pro": True}
+    train = _write_jsonl(tmp_path / "gold-sparse.jsonl", _cells("a", 20, same) + _cells("b", 20, same))
+    eval_gold = _write_jsonl(tmp_path / "gold-verified.jsonl", _cells("c", 20, same) + _cells("d", 20, same))
+    assert main(["--train", str(train), "--eval", str(eval_gold)]) == 0
+    out = capsys.readouterr().out
+    report = json.loads(out[out.index("{") : out.rindex("}") + 1])
+    assert report["spearman_train_eval"] == 0.0
+    assert report["kill_spearman"] is False
+    assert report["prefer_logistic"] is True
+    assert report["recommended_artifact"] == "data/scorer-logistic.json"
+
+
+def test_geometry_undefined_spearman_prefers_logistic(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("AIAND_TRAIN", raising=False)
+    train = _write_jsonl(
+        tmp_path / "gold-sparse.jsonl",
+        _cells("a", 20, {"cheap/flash": True, "mid/kimi": False}),
+    )
+    eval_gold = _write_jsonl(
+        tmp_path / "gold-verified.jsonl",
+        _cells("c", 20, {"dear/pro": False, "other/qwen": True}),
+    )
+    assert main(["--train", str(train), "--eval", str(eval_gold)]) == 0
+    out = capsys.readouterr().out
+    report = json.loads(out[out.index("{") : out.rindex("}") + 1])
+    assert report["spearman_train_eval"] == 0.0
+    assert report["prefer_logistic"] is True
+    assert report["recommended_artifact"] == "data/scorer-logistic.json"
+
+
+def test_geometry_positive_spearman_allows_scorer_json(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("AIAND_TRAIN", raising=False)
+    order = {"cheap/flash": False, "mid/kimi": True, "dear/pro": False}
+    train = _write_jsonl(tmp_path / "gold-sparse.jsonl", _cells("a", 20, order) + _cells("b", 20, order))
+    eval_gold = _write_jsonl(tmp_path / "gold-verified.jsonl", _cells("c", 20, order) + _cells("d", 20, order))
+    assert main(["--train", str(train), "--eval", str(eval_gold)]) == 0
+    out = capsys.readouterr().out
+    report = json.loads(out[out.index("{") : out.rindex("}") + 1])
+    assert report["spearman_train_eval"] > 0
+    assert report["kill_spearman"] is False
+    assert report["prefer_logistic"] is False
+    assert report["recommended_artifact"] == "data/scorer.json"
+
+
 def test_geometry_cli_help_says_eval_only(capsys):
     try:
         main(["-h"])

@@ -111,14 +111,17 @@ def geometry_report(
     ids = sorted(set(train["per_id"]) & set(ev["per_id"]))
     rho = spearman([train["per_id"][i] for i in ids], [ev["per_id"][i] for i in ids])
     kill = rho < 0
+    prefer_logistic = not (rho > 0)
     out: dict[str, Any] = {
         "train": train,
         "eval": ev,
         "spearman_train_eval": rho,
         "kill_spearman": kill,
-        "prefer_logistic": kill,
+        "prefer_logistic": prefer_logistic,
         "eval_is_fit_gold": False,
-        "recommended_artifact": "data/scorer-logistic.json" if kill else "data/scorer.json",
+        "recommended_artifact": (
+            "data/scorer-logistic.json" if prefer_logistic else "data/scorer.json"
+        ),
     }
     if cal_path is not None:
         out["cal"] = slice_stats(_load_gold(cal_path))
@@ -129,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Unpaid geometry lock: per-id rates, Spearman(train, eval), token histograms. "
-            "--eval is eval-only (not fit y). Prefer logistic while Spearman < 0."
+            "--eval is eval-only (not fit y). Prefer logistic until Spearman > 0."
         )
     )
     parser.add_argument("--train", required=True, help="Train/sparse gold JSONL")

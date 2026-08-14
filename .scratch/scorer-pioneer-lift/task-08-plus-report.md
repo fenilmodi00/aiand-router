@@ -40,3 +40,28 @@ Issue **12** — operator must run `AIAND_TRAIN=1` gold on the verified-like poo
 ## Constraints held
 
 Verified/Lite/TB eval-only; dump `resolved` not y; silver not Platt y; shadow default; `not_spec_floors`; budget default 15; no Rec B / live embed / GBDT zoo; no fake `replay_gate_pass`.
+
+## Fix (Important 08–11 review)
+
+Date: 2026-08-14. TDD: failing test first, then one-line code. No issue 12 / 07; bars unchanged.
+
+### RED
+
+1. **prefer_logistic until rho > 0** — `test_geometry_zero_spearman_prefers_logistic` / `test_geometry_undefined_spearman_prefers_logistic`: `assert report["prefer_logistic"] is True` failed (`False` when rho=0 / no overlap). `test_geometry_positive_spearman_allows_scorer_json` already passed (kill path).
+2. **no fake status schema** — `test_verified_like_json_word_does_not_invent_status_required`: `assert required != ["status"]` failed (`['status']`).
+3. **verified-like not majority-trivial** — `test_pool_short_hard_not_majority_trivial`: `assert trivial * 2 < len(rows)` failed (`10 * 2 < 10`; all `hint_bin=trivial`).
+
+### GREEN
+
+- `prefer_logistic = not (rho > 0)`; `kill_spearman` still `rho < 0`; recommend logistic unless transfer.
+- Inferred JSON-bearing schema uses `required: []` (parseable JSON ok).
+- `--verified-like` remaps `hint_bin=trivial` → `hard` after the short+check filter.
+
+### Covering
+
+```
+python -m pytest tests/test_geometry.py tests/test_pool.py tests/test_replay_report.py -q --tb=short
+```
+
+Output: `...............................................                          [100%]`  
+Result: **47 passed** in 1.69s.
