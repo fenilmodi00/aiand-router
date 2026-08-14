@@ -193,7 +193,7 @@ def test_console_overview_range_filters_timestamped_rows(tmp_path):
     assert sum(b["requests"] for b in day["usage_buckets"]) == 1
 
 
-def test_usage_buckets_spend_and_baseline_omit_hops_without_estimate(tmp_path):
+def test_usage_buckets_include_hops_without_baseline_estimate(tmp_path):
     now = datetime.now(timezone.utc)
     _write_jsonl(
         tmp_path / "requests.jsonl",
@@ -228,8 +228,9 @@ def test_usage_buckets_spend_and_baseline_omit_hops_without_estimate(tmp_path):
     active = [b for b in buckets if b["requests"]]
     assert len(active) == 1
     assert active[0]["requests"] == 3
-    assert active[0]["spend_usd"] == 0.03
-    assert active[0]["baseline_usd"] == 0.19
+    # Actual spend always counted; hop without estimate contributes cost as its own baseline.
+    assert active[0]["spend_usd"] == 0.08
+    assert active[0]["baseline_usd"] == 0.24
     empty = next(b for b in buckets if b["requests"] == 0)
     assert empty["spend_usd"] == 0.0
     assert empty["baseline_usd"] == 0.0

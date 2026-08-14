@@ -228,14 +228,14 @@ def _hop_baseline(h: dict[str, Any]) -> float | None:
 
 
 def _bucket_spend(rows: list[dict[str, Any]]) -> tuple[float, float]:
+    """Always count actual hop cost; baseline falls back to cost when unknown (0 savings)."""
     spend = 0.0
     baseline = 0.0
     for h in rows:
+        cost = float(h.get("cost_usd") or 0)
+        spend += cost
         b = _hop_baseline(h)
-        if b is None:
-            continue
-        spend += float(h.get("cost_usd") or 0)
-        baseline += b
+        baseline += b if b is not None else cost
     return round(spend, 6), round(baseline, 6)
 
 

@@ -98,8 +98,22 @@ export function RouterSavingsChart({
   const ysSpend = points.map((p) => yOf(p.spend));
   const hi = hover == null ? null : Math.max(0, Math.min(n - 1, hover));
   const p = hi == null ? null : points[hi]!;
-  const save = p && p.baseline > 0 ? p.baseline - p.spend : null;
-  const savePct = p && p.baseline > 0 ? (100 * (p.baseline - p.spend)) / p.baseline : null;
+  const save = p
+    ? unrealized
+      ? Math.max(0, p.spend - p.baseline)
+      : p.baseline > 0
+        ? p.baseline - p.spend
+        : null
+    : null;
+  const savePct = p
+    ? unrealized
+      ? p.spend > 0
+        ? (100 * Math.max(0, p.spend - p.baseline)) / p.spend
+        : null
+      : p.baseline > 0
+        ? (100 * (p.baseline - p.spend)) / p.baseline
+        : null
+    : null;
 
   function onMove(e: { currentTarget: SVGSVGElement; clientX: number }) {
     const svg = e.currentTarget;

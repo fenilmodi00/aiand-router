@@ -1,10 +1,16 @@
 import type { Range } from "./types";
 
 export function usd(n: number): string {
+  const v = Number.isFinite(n) ? n : 0;
+  const abs = Math.abs(v);
+  // LLM hop costs are often << $0.01; 2-dp currency would lie as $0.00.
+  const digits = abs > 0 && abs < 0.01 ? 6 : abs < 1 ? 4 : 2;
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-  }).format(Number.isFinite(n) ? n : 0);
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(v);
 }
 
 export function compact(n: number): string {

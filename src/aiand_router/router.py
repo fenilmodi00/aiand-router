@@ -335,7 +335,9 @@ def select_model(
         latency_limit_ms=latency_limit_ms,
     )
     if not eligible:
-        return fallback_decision(cfg, models, phase, threshold)
+        decision = fallback_decision(cfg, models, phase, threshold)
+        stamp_baseline(decision, [decision.model], tokens)
+        return decision
     max_regret = 0.0 if effort == "low" else float(cfg.get("max_regret") or 0)
     best = max(eligible, key=lambda m: m.quality)
     if max_regret > 0 and threshold >= 50:
@@ -354,7 +356,7 @@ def select_model(
     chosen = eligible[0]
     score = scores[chosen.id]
     regret = best.quality - chosen.quality
-    return Decision(
+    decision = Decision(
         model=chosen,
         phase=phase,
         threshold=threshold,
@@ -365,6 +367,19 @@ def select_model(
         ),
         candidates=[m.id for m in eligible],
     )
+    stamp_baseline(decision, eligible, tokens)
+    return decision
+
+
+def stamp_baseline(decision: Decision, eligible: list[Model], tokens: int) -> None:
+    """Named savings baseline = most expensive eligible model (list unit cost)."""
+    if not eligible:
+        return
+    baseline = max(eligible, key=lambda m: m.unit_cost)
+    decision.baseline_model_id = baseline.id
+    est_sel = estimate_cost(decision.model, tokens, 800)
+    est_base = estimate_cost(baseline, tokens, 800)
+    decision.savings_usd = round(max(0.0, est_base - est_sel), 6)
 
 
 def _phase_bar(cfg: dict[str, Any], phase: str) -> float:

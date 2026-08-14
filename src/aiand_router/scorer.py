@@ -14,6 +14,7 @@ from .router import (
     eligible_models,
     estimate_cost,
     fallback_decision,
+    stamp_baseline,
 )
 
 SHIP_EFFORT = {
@@ -179,7 +180,7 @@ def trained_select(
         fb.max_regret = regret
         fb.reason_codes = [f"bin:{bin_}", f"decline:{rule}"]
         fb.candidates = [m.id for m in eligible]
-        _stamp_baseline(fb, eligible, tokens)
+        stamp_baseline(fb, eligible, tokens)
         return fb
     conf = p_success.get(chosen.id)
     codes = [f"bin:{bin_}", "pick:cheapest_above_bar"]
@@ -200,7 +201,7 @@ def trained_select(
         max_regret=regret,
         reason_codes=codes,
     )
-    _stamp_baseline(decision, eligible, tokens)
+    stamp_baseline(decision, eligible, tokens)
     return decision
 
 
@@ -254,11 +255,3 @@ def apply_trained_path(
     return rules
 
 
-def _stamp_baseline(decision: Decision, eligible: list[Model], tokens: int) -> None:
-    if not eligible:
-        return
-    baseline = max(eligible, key=lambda m: m.unit_cost)
-    decision.baseline_model_id = baseline.id
-    est_sel = estimate_cost(decision.model, tokens, 800)
-    est_base = estimate_cost(baseline, tokens, 800)
-    decision.savings_usd = round(max(0.0, est_base - est_sel), 6)

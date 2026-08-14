@@ -280,6 +280,28 @@ def test_second_identical_call_is_served_from_cache(tmp_path):
     assert rows[1]["cache_hit"] is True
 
 
+def test_rules_hop_logs_baseline_and_savings(tmp_path):
+    client, _ = _client(tmp_path)
+    response = client.post("/v1/chat/completions", json=CHAT, headers={**AUTH, "x-agent-phase": "edit"})
+    assert response.status_code == 200
+    row = json.loads((tmp_path / "requests.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert row.get("baseline_model_id")
+    assert "savings_usd" in row
+    assert row["savings_usd"] >= 0
+    assert row["cost_usd"] > 0
+
+
+def test_request_cache_key_includes_api_key_fingerprint():
+    from aiand_router.cache import request_cache_key
+
+    body = {"messages": [{"role": "user", "content": "hi"}], "temperature": 0}
+    a = request_cache_key(body, "m", "aaa")
+    b = request_cache_key(body, "m", "bbb")
+    c = request_cache_key(body, "m", "aaa")
+    assert a != b
+    assert a == c
+
+
 def test_cache_misses_when_prompt_changes(tmp_path):
     client, provider = _client(tmp_path)
     headers = {**AUTH, "x-agent-phase": "summarize"}

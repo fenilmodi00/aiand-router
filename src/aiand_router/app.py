@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -47,6 +49,46 @@ load_dotenv()
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def _key_fingerprint(api_key: str) -> str:
+    if not api_key:
+        return "nokey"
+    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16]
+
+
+def rotate_local_data_if_key_changed(
+    *,
+    data_dir: Path,
+    api_key: str,
+    log_path: Path,
+    spend_path: Path,
+    cache_dir: Path,
+) -> str:
+    """When AIAND_API_KEY changes, archive prior hop log/spend/cache so the UI is not stale."""
+    fp = _key_fingerprint(api_key)
+    marker = data_dir / ".aiand_key_fp"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    prev = marker.read_text(encoding="utf-8").strip() if marker.exists() else ""
+    if prev == fp:
+        return fp
+    if prev:
+        stamp = prev
+        archive = data_dir / "archive" / stamp
+        archive.mkdir(parents=True, exist_ok=True)
+        for src in (log_path, spend_path):
+            if src.exists() and src.resolve().is_relative_to(data_dir.resolve()):
+                dest = archive / src.name
+                if dest.exists():
+                    dest.unlink()
+                shutil.move(str(src), str(dest))
+        if cache_dir.exists() and cache_dir.resolve().is_relative_to(data_dir.resolve()):
+            dest_cache = archive / "cache"
+            if dest_cache.exists():
+                shutil.rmtree(dest_cache)
+            shutil.move(str(cache_dir), str(dest_cache))
+    marker.write_text(fp + "\n", encoding="utf-8")
+    return fp
+
+
 def create_app(
     *,
     provider: Any | None = None,
@@ -70,9 +112,24 @@ def create_app(
     base = (aiand_base or os.getenv("AIAND_BASE_URL", "https://api.aiand.com/v1")).rstrip("/")
     token = router_key if router_key is not None else os.getenv("ROUTER_API_KEY", "change-me")
     limit = float(budget if budget is not None else os.getenv("BUDGET_LIMIT_USD", "15"))
-    spend_log = spend or SpendLog(ROOT / "data" / "spend.txt", limit)
-    log = log_path or ROOT / "data" / "requests.jsonl"
-    cache = RequestCache(cache_dir or ROOT / "data" / "cache")
+    data_dir = ROOT / "data"
+    default_log = data_dir / "requests.jsonl"
+    default_spend = data_dir / "spend.txt"
+    default_cache = data_dir / "cache"
+    # Only rotate default local paths — tests pass explicit tmp paths and must not archive.
+    if log_path is None and spend is None and cache_dir is None:
+        key_fp = rotate_local_data_if_key_changed(
+            data_dir=data_dir,
+            api_key=key,
+            log_path=default_log,
+            spend_path=default_spend,
+            cache_dir=default_cache,
+        )
+    else:
+        key_fp = _key_fingerprint(key)
+    spend_log = spend or SpendLog(default_spend, limit)
+    log = log_path or default_log
+    cache = RequestCache(cache_dir or default_cache)
     timeout_s = float(cfg.get("upstream_timeout_s") or os.getenv("UPSTREAM_TIMEOUT_S") or 120)
     token_cap = int(cfg.get("max_tokens_limit") or os.getenv("MAX_TOKENS_LIMIT") or 0)
     redact_keys = [
@@ -318,7 +375,7 @@ def create_app(
         meta = _router_headers(decision)
 
         streaming = bool(body.get("stream"))
-        ck = request_cache_key(body, decision.model.id)
+        ck = request_cache_key(body, decision.model.id, key_fp)
         if not streaming:
             cached = cache.get(ck)
             if cached is not None:

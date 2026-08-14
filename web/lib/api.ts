@@ -178,7 +178,7 @@ type LogsPage = {
   next_after_id?: string;
 };
 
-async function fetchLogPages(range: string, pages = 2): Promise<unknown[]> {
+async function fetchLogPages(range: string, pages = 20): Promise<unknown[]> {
   const rows: unknown[] = [];
   let after = "";
   let afterId = "";

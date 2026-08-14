@@ -32,9 +32,10 @@ export function PipelineDots({
       .filter((i) => i >= 0)
       .sort((a, b) => counts[b]! - counts[a]!);
     const roster = live.length ? live : colors.map((_, i) => i);
-    const hop = live.length ? 1800 : 2600;
+    // Speed up animations by 75% (snappy, fast particle flow)
+    const hop = live.length ? 450 : 650;
     const period = hop * 2;
-    const stagger = live.length ? hop * 0.55 : hop;
+    const stagger = live.length ? hop * 0.5 : hop * 0.6;
     const inLen = inbound.getTotalLength();
     const outLen = outs.map((p) => p!.getTotalLength());
     const dots = [...root.querySelectorAll("circle")];

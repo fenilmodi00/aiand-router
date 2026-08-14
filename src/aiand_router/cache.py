@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 
-def request_cache_key(body: dict[str, Any], model_id: str) -> str:
+def request_cache_key(body: dict[str, Any], model_id: str, key_fp: str = "") -> str:
     messages = body.get("messages") or []
     payload = {
         "prompt": [m for m in messages if m.get("role") != "system"],
@@ -15,6 +15,7 @@ def request_cache_key(body: dict[str, Any], model_id: str) -> str:
         "tools": body.get("tools"),
         "temperature": body.get("temperature"),
         "max_tokens": body.get("max_tokens") or body.get("max_completion_tokens"),
+        "key_fp": key_fp or "",
     }
     blob = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()

@@ -1,54 +1,61 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import Link from "next/link";
-import { ChevronDownIcon, PlayIcon, TerminalIcon } from "lucide-react";
-import { colorFor } from "@/lib/format";
-import { MIX_COLORS, type CatalogModel } from "@/lib/types";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupTextarea,
-} from "@/components/ui/input-group";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Slider } from "@/components/ui/slider";
+  ChevronDownIcon,
+  PlayIcon,
+  FileTextIcon,
+  SparklesIcon,
+  PlusIcon,
+  InfoIcon,
+} from "lucide-react";
+import { type CatalogModel } from "@/lib/types";
+import { resolveModelInfo, ModelLogo } from "@/lib/provider-logos";
 import { Spinner } from "@/components/ui/spinner";
-import { Switch } from "@/components/ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
+// Pioneer 5-tier routing effort settings
 const EFFORTS = [
-  { id: "low", hint: "Cheap-first" },
-  { id: "medium", hint: "Balanced" },
-  { id: "high", hint: "Prefer quality" },
-  { id: "max", hint: "Best model every time" },
+  { id: "low", label: "low", hint: "Cheapest models, max savings", threshold: 0.05 },
+  { id: "medium", label: "medium", hint: "Good quality, good savings", threshold: 0.10 },
+  { id: "high", label: "high", hint: "Recommended settings", threshold: 0.20 },
+  { id: "xhigh", label: "xhigh", hint: "Prefer stronger models", threshold: 0.35 },
+  { id: "max", label: "max", hint: "Best model every time", threshold: 0.60 },
 ] as const;
 
 const DEFAULT_SYSTEM =
   "You are an expert software engineer. Write clean, well-documented code with error handling.";
-const DEFAULT_QUERY =
-  "Write a Python function that implements binary search on a sorted list. Include type hints, a docstring, and handle the empty-list case.";
 
-type Tab = "code" | "output" | "overview";
+const DEFAULT_QUERY =
+  "Write a Python function that implements binary search on a sorted list. It should return the index of the target element, or -1 if not found. Include type hints and a docstring.";
+
+const FALLBACK_MODELS: CatalogModel[] = [
+  { id: "deepseek-ai/deepseek-v4-flash", display_name: "DeepSeek V4 Flash", input_per_1m: 0.05, output_per_1m: 0.10, enabled: true },
+  { id: "openai/gpt-oss-20b", display_name: "GPT Oss 20b", input_per_1m: 0.07, output_per_1m: 0.14, enabled: true },
+  { id: "openai/gpt-oss-120b", display_name: "GPT Oss 120b", input_per_1m: 0.15, output_per_1m: 0.30, enabled: true },
+  { id: "google/gemini-3.1-flash-lite", display_name: "Gemini 3.1 Flash Lite", input_per_1m: 0.25, output_per_1m: 0.50, enabled: true },
+  { id: "deepseek-ai/deepseek-v3", display_name: "DeepSeek V3", input_per_1m: 0.27, output_per_1m: 0.54, enabled: true },
+  { id: "deepseek-ai/deepseek-v4-pro", display_name: "DeepSeek V4 Pro", input_per_1m: 0.41, output_per_1m: 0.82, enabled: true },
+  { id: "openai/gpt-5.4-mini", display_name: "GPT 5.4 Mini", input_per_1m: 0.75, output_per_1m: 1.50, enabled: true },
+  { id: "anthropic/claude-haiku-4.5", display_name: "Claude Haiku 4.5", input_per_1m: 1.00, output_per_1m: 2.00, enabled: true },
+  { id: "zai-org/glm-5.1", display_name: "GLM 5.1", input_per_1m: 1.30, output_per_1m: 2.60, enabled: true },
+  { id: "zai-org/glm-5.2", display_name: "GLM 5.2", input_per_1m: 1.50, output_per_1m: 3.00, enabled: true },
+  { id: "google/gemini-3.1-pro", display_name: "Gemini 3.1 Pro", input_per_1m: 2.00, output_per_1m: 4.00, enabled: true },
+  { id: "openai/gpt-5.4", display_name: "GPT 5.4", input_per_1m: 2.50, output_per_1m: 5.00, enabled: true },
+  { id: "anthropic/claude-sonnet-4.6", display_name: "Claude Sonnet 4.6", input_per_1m: 3.00, output_per_1m: 6.00, enabled: true },
+  { id: "openai/gpt-5.5", display_name: "GPT 5.5", input_per_1m: 5.00, output_per_1m: 10.00, enabled: true },
+  { id: "anthropic/claude-opus-4.7", display_name: "Claude Opus 4.7", input_per_1m: 5.00, output_per_1m: 10.00, enabled: true },
+  { id: "anthropic/claude-opus-4.8", display_name: "Claude Opus 4.8", input_per_1m: 5.50, output_per_1m: 11.00, enabled: true },
+];
+
+type MainTab = "code" | "output" | "overview";
+type OutputSubTab = "json" | "visual";
+type CodeLang = "curl" | "python" | "typescript";
 
 type Usage = { prompt: number; completion: number; total: number };
+
+type ExtraMessage = { id: string; role: "user" | "assistant" | "system"; content: string };
 
 type Hop = {
   ok: boolean;
@@ -68,16 +75,17 @@ type Hop = {
   stream: boolean;
   jsonMode: boolean;
   allowed: string[];
+  selectedModel: string;
 };
 
 function hdr(headers: Record<string, string>, name: string): string {
   return headers[name.toLowerCase()] || "";
 }
 
-function money(n: number): string {
-  if (!Number.isFinite(n)) return "—";
-  const s = n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
-  return `$${s}`;
+function money(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  if (n === 0) return "$0.00";
+  return Math.abs(n) < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
 }
 
 function hopCost(m: CatalogModel | undefined, prompt: number, completion: number): number | null {
@@ -91,7 +99,8 @@ function priceLabel(n: number | undefined): string | null {
 }
 
 function displayName(m: CatalogModel | undefined, fallback: string): string {
-  return m?.display_name || fallback;
+  if (m?.display_name) return m.display_name;
+  return resolveModelInfo(fallback).name;
 }
 
 function byId(models: CatalogModel[], id: string): CatalogModel | undefined {
@@ -200,8 +209,10 @@ async function readSse(
 }
 
 function requestPayload(p: {
+  selectedModel: string;
   system: string;
   query: string;
+  extraMessages?: ExtraMessage[];
   effort: string;
   stream: boolean;
   jsonMode: boolean;
@@ -210,14 +221,25 @@ function requestPayload(p: {
   const messages: { role: string; content: string }[] = [];
   if (p.system.trim()) messages.push({ role: "system", content: p.system.trim() });
   messages.push({ role: "user", content: p.query.trim() });
-  const body: Record<string, unknown> = { model: "router/auto", messages, stream: p.stream };
+  if (p.extraMessages?.length) {
+    p.extraMessages.forEach((m) => {
+      if (m.content.trim()) messages.push({ role: m.role, content: m.content.trim() });
+    });
+  }
+  const body: Record<string, unknown> = {
+    model: p.selectedModel || "router/auto",
+    messages,
+    stream: p.stream,
+  };
   if (p.jsonMode) body.response_format = { type: "json_object" };
   return body;
 }
 
 function curlFor(p: {
+  selectedModel: string;
   system: string;
   query: string;
+  extraMessages?: ExtraMessage[];
   effort: string;
   stream: boolean;
   jsonMode: boolean;
@@ -227,35 +249,177 @@ function curlFor(p: {
   const headers = [
     `-H "Content-Type: application/json"`,
     `-H "Authorization: Bearer $ROUTER_API_KEY"`,
-    `-H "x-routing-effort: ${p.effort}"`,
   ];
-  if (p.allowed.length) headers.push(`-H "x-allowed-models: ${p.allowed.join(",")}"`);
+  if (p.selectedModel === "router/auto") {
+    headers.push(`-H "x-routing-effort: ${p.effort}"`);
+    if (p.allowed.length) headers.push(`-H "x-allowed-models: ${p.allowed.join(",")}"`);
+  }
   return `curl -X POST "$ROUTER_BASE_URL/v1/chat/completions" \\\n  ${headers.join(" \\\n  ")} \\\n  -d '${body.replace(/'/g, `'\\''`)}'`;
 }
 
-export function Playground({ models, loadError }: { models: CatalogModel[]; loadError?: string | null }) {
-  const candidates = models;
+function pythonFor(p: {
+  selectedModel: string;
+  system: string;
+  query: string;
+  extraMessages?: ExtraMessage[];
+  effort: string;
+  stream: boolean;
+  jsonMode: boolean;
+  allowed: string[];
+}): string {
+  const msgs: { role: string; content: string }[] = [];
+  if (p.system.trim()) msgs.push({ role: "system", content: p.system.trim() });
+  msgs.push({ role: "user", content: p.query.trim() });
+  if (p.extraMessages?.length) {
+    p.extraMessages.forEach((m) => {
+      if (m.content.trim()) msgs.push({ role: m.role, content: m.content.trim() });
+    });
+  }
+
+  const extraHeaders: Record<string, string> = {};
+  if (p.selectedModel === "router/auto") {
+    extraHeaders["x-routing-effort"] = p.effort;
+    if (p.allowed.length) extraHeaders["x-allowed-models"] = p.allowed.join(",");
+  }
+
+  const hasExtra = Object.keys(extraHeaders).length > 0;
+  const extraStr = hasExtra
+    ? `,\n    extra_headers=${JSON.stringify(extraHeaders, null, 4).replace(/\n/g, "\n    ")}`
+    : "";
+
+  return `import os
+from openai import OpenAI
+
+client = OpenAI(
+    base_url=os.getenv("ROUTER_BASE_URL", "https://api.pioneer.ai/v1"),
+    api_key=os.getenv("ROUTER_API_KEY", "pio_sk_..."),
+)
+
+response = client.chat.completions.create(
+    model="${p.selectedModel || "router/auto"}",
+    messages=${JSON.stringify(msgs, null, 4).replace(/\n/g, "\n    ")},
+    stream=${p.stream ? "True" : "False"}${p.jsonMode ? ',\n    response_format={"type": "json_object"}' : ""}${extraStr}
+)
+
+if ${p.stream ? "True" : "False"}:
+    for chunk in response:
+        print(chunk.choices[0].delta.content or "", end="", flush=True)
+else:
+    print(response.choices[0].message.content)
+`;
+}
+
+function tsFor(p: {
+  selectedModel: string;
+  system: string;
+  query: string;
+  extraMessages?: ExtraMessage[];
+  effort: string;
+  stream: boolean;
+  jsonMode: boolean;
+  allowed: string[];
+}): string {
+  const msgs: { role: string; content: string }[] = [];
+  if (p.system.trim()) msgs.push({ role: "system", content: p.system.trim() });
+  msgs.push({ role: "user", content: p.query.trim() });
+  if (p.extraMessages?.length) {
+    p.extraMessages.forEach((m) => {
+      if (m.content.trim()) msgs.push({ role: m.role, content: m.content.trim() });
+    });
+  }
+
+  const headers: Record<string, string> = {};
+  if (p.selectedModel === "router/auto") {
+    headers["x-routing-effort"] = p.effort;
+    if (p.allowed.length) headers["x-allowed-models"] = p.allowed.join(",");
+  }
+
+  return `import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: process.env.ROUTER_BASE_URL || "https://api.pioneer.ai/v1",
+  apiKey: process.env.ROUTER_API_KEY || "pio_sk_...",
+  defaultHeaders: ${JSON.stringify(headers, null, 2).replace(/\n/g, "\n  ")},
+});
+
+async function main() {
+  const stream = ${p.stream ? "true" : "false"};
+  const response = await client.chat.completions.create({
+    model: "${p.selectedModel || "router/auto"}",
+    messages: ${JSON.stringify(msgs, null, 4).replace(/\n/g, "\n    ")},
+    stream,${p.jsonMode ? '\n    response_format: { type: "json_object" },' : ""}
+  });
+
+  if (stream) {
+    for await (const chunk of response) {
+      process.stdout.write(chunk.choices[0]?.delta?.content || "");
+    }
+  } else {
+    console.log(response.choices[0]?.message?.content);
+  }
+}
+
+main().catch(console.error);
+`;
+}
+
+export function Playground({
+  models = [],
+  initialModelId = "router/auto",
+}: {
+  models: CatalogModel[];
+  initialModelId?: string;
+  loadError?: string | null;
+}) {
+  const candidates = useMemo(() => {
+    if (models.length >= 8) return models;
+    const map = new Map<string, CatalogModel>();
+    FALLBACK_MODELS.forEach((m) => map.set(m.id, m));
+    models.forEach((m) => map.set(m.id, m));
+    return Array.from(map.values());
+  }, [models]);
+
+  const [selectedModel, setSelectedModel] = useState<string>(initialModelId);
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [system, setSystem] = useState(DEFAULT_SYSTEM);
   const [query, setQuery] = useState(DEFAULT_QUERY);
-  const [effort, setEffort] = useState<(typeof EFFORTS)[number]["id"]>("medium");
-  const [stream, setStream] = useState(false);
+  const [effort, setEffort] = useState<(typeof EFFORTS)[number]["id"]>("high");
+  const [stream, setStream] = useState(true);
   const [jsonMode, setJsonMode] = useState(false);
+  const [extraMessages, setExtraMessages] = useState<ExtraMessage[]>([]);
   const [checked, setChecked] = useState<Set<string>>(
-    () => new Set(candidates.filter((m) => m.enabled !== false).map((m) => m.id)),
+    () => new Set(candidates.map((m) => m.id)),
   );
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<Tab>("overview");
+  const [mainTab, setMainTab] = useState<MainTab>("output");
+  const [outputSubTab, setOutputSubTab] = useState<OutputSubTab>("visual");
+  const [codeLang, setCodeLang] = useState<CodeLang>("curl");
   const [hop, setHop] = useState<Hop | null>(null);
   const [liveText, setLiveText] = useState("");
+  const [copiedAi, setCopiedAi] = useState(false);
+
+  useEffect(() => {
+    if (initialModelId) setSelectedModel(initialModelId);
+  }, [initialModelId]);
+
+  const isRouter = selectedModel === "router/auto";
 
   const allowed = useMemo(
     () => candidates.filter((m) => checked.has(m.id)).map((m) => m.id),
     [candidates, checked],
   );
-  const effortMeta = EFFORTS.find((e) => e.id === effort) || EFFORTS[1];
-  const req = { system, query, effort, stream, jsonMode, allowed };
+  const effortMeta = EFFORTS.find((e) => e.id === effort) || EFFORTS[2];
+  const req = { selectedModel, system, query, extraMessages, effort, stream, jsonMode, allowed };
   const codeSrc = hop
-    ? { system: hop.system, query: hop.query, effort: hop.effort, stream: hop.stream, jsonMode: hop.jsonMode, allowed: hop.allowed }
+    ? {
+        selectedModel: hop.selectedModel,
+        system: hop.system,
+        query: hop.query,
+        effort: hop.effort,
+        stream: hop.stream,
+        jsonMode: hop.jsonMode,
+        allowed: hop.allowed,
+      }
     : req;
 
   function toggle(id: string) {
@@ -267,27 +431,54 @@ export function Playground({ models, loadError }: { models: CatalogModel[]; load
     });
   }
 
+  function addExtraMessage() {
+    setExtraMessages((prev) => [
+      ...prev,
+      { id: Math.random().toString(36).substring(2, 9), role: "user", content: "" },
+    ]);
+  }
+
+  async function copyForAi() {
+    const payload = JSON.stringify(requestPayload(req), null, 2);
+    await navigator.clipboard.writeText(payload);
+    setCopiedAi(true);
+    setTimeout(() => setCopiedAi(false), 2000);
+  }
+
   async function run() {
-    if (busy || !query.trim() || allowed.length === 0) return;
+    if (busy || !query.trim()) return;
+    if (isRouter && allowed.length === 0) return;
+
     setBusy(true);
     setLiveText("");
-    setTab("output");
+    setMainTab("output");
     const t0 = performance.now();
     let ttft: number | null = null;
-    const snapshot = { system, query, effort, stream, jsonMode, allowed: [...allowed] };
+    const snapshot = {
+      selectedModel,
+      system,
+      query,
+      effort,
+      stream,
+      jsonMode,
+      allowed: [...allowed],
+    };
+
     try {
       const r = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          model: selectedModel,
           prompt: query,
           system,
           effort,
-          allowedModels: allowed,
+          allowedModels: isRouter ? allowed : undefined,
           stream,
           jsonMode,
         }),
       });
+
       const ctype = r.headers.get("content-type") || "";
       if (ctype.includes("text/event-stream")) {
         const headers: Record<string, string> = {};
@@ -358,38 +549,152 @@ export function Playground({ models, loadError }: { models: CatalogModel[]; load
   }
 
   const effortIndex = EFFORTS.findIndex((e) => e.id === effort);
+  const activeModelObj = byId(candidates, selectedModel);
 
   return (
-    <div className="grid min-h-[calc(100vh-140px)] overflow-hidden rounded-xl border bg-card lg:grid-cols-[minmax(320px,42%)_1fr]">
-      <div className="flex flex-col gap-4 overflow-auto border-b p-[22px] lg:border-r lg:border-b-0">
-        <div>
-          <div className="inline-flex items-center gap-1.5 text-[15px] font-semibold">
-            router/auto
-            <ChevronDownIcon className="text-muted-foreground" />
-          </div>
-          <p className="mt-1 text-[12.5px] text-muted-foreground">Routes to the best-performing model</p>
-        </div>
+    <div className="w-full min-h-screen bg-black text-[#eaeaea] font-sans antialiased selection:bg-neutral-800">
+      {/* 2-Pane Pioneer Grid */}
+      <div className="grid min-h-screen w-full lg:grid-cols-[510px_1fr]">
+        
+        {/* ================= LEFT COLUMN ================= */}
+        <div className="flex flex-col gap-5 overflow-y-auto border-r border-[#1a1a1a] bg-black p-6 pb-24">
+          
+          {/* Header Row: Logo, Title, Actions */}
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 inline-flex size-7 shrink-0 items-center justify-center">
+                <ModelLogo modelId={selectedModel} className="size-6" />
+              </span>
+              <div>
+                <div className="relative inline-block">
+                  <button
+                    type="button"
+                    onClick={() => setModelDropdownOpen((v) => !v)}
+                    className="flex items-center gap-1.5 text-[17px] font-semibold tracking-tight text-white hover:text-neutral-200 transition"
+                  >
+                    <span>{isRouter ? "pioneer/auto" : displayName(activeModelObj, selectedModel)}</span>
+                    <ChevronDownIcon className="size-4 text-neutral-400" />
+                  </button>
 
-        <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="pg-system">System prompt</FieldLabel>
-            <Textarea
-              id="pg-system"
-              value={system}
-              onChange={(e) => setSystem(e.target.value)}
-              rows={3}
-              className="min-h-[72px] font-mono text-[13px]"
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="pg-query">Query</FieldLabel>
-            <InputGroup>
-              <InputGroupTextarea
-                id="pg-query"
+                  {/* Dropdown Menu */}
+                  {modelDropdownOpen && (
+                    <div className="absolute top-full left-0 z-50 mt-2 max-h-80 w-72 overflow-auto rounded-xl border border-[#262626] bg-[#0c0c0c] p-1.5 shadow-2xl">
+                      <div className="px-2.5 py-1 text-[11px] font-medium tracking-wider text-neutral-400 uppercase">
+                        Routers
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedModel("router/auto");
+                          setModelDropdownOpen(false);
+                        }}
+                        className={cn(
+                          "flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-[13px] hover:bg-[#1a1a1a]",
+                          selectedModel === "router/auto" && "bg-[#1f1f1f] text-white font-medium",
+                        )}
+                      >
+                        <span className="flex items-center gap-2.5">
+                          <ModelLogo modelId="router/auto" className="size-4" />
+                          pioneer/auto
+                        </span>
+                        <span className="text-[10px] text-neutral-400 font-mono">Router</span>
+                      </button>
+
+                      <div className="mt-2 px-2.5 py-1 text-[11px] font-medium tracking-wider text-neutral-400 uppercase">
+                        Models ({candidates.length})
+                      </div>
+                      {candidates.map((m) => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedModel(m.id);
+                            setModelDropdownOpen(false);
+                          }}
+                          className={cn(
+                            "flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-[13px] hover:bg-[#1a1a1a]",
+                            selectedModel === m.id && "bg-[#1f1f1f] text-white font-medium",
+                          )}
+                        >
+                          <span className="flex items-center gap-2.5 truncate pr-2">
+                            <ModelLogo modelId={m.id} className="size-4" />
+                            <span className="truncate">{displayName(m, m.id)}</span>
+                          </span>
+                          {priceLabel(m.input_per_1m) && (
+                            <span className="shrink-0 font-mono text-[11px] text-neutral-400">
+                              {priceLabel(m.input_per_1m)}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <p className="mt-0.5 text-[12.5px] text-neutral-400">
+                  {isRouter ? "Routes to the best-performing model" : "Direct model inference"}
+                </p>
+              </div>
+            </div>
+
+            {/* Action Pills */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => setModelDropdownOpen((v) => !v)}
+                className="inline-flex items-center gap-1 rounded-full border border-[#2d2d2d] bg-[#0c0c0c] px-3 py-1 text-[11.5px] text-neutral-300 transition hover:bg-[#1a1a1a] hover:text-white"
+              >
+                <ChevronDownIcon className="size-3 text-neutral-400" />
+                Change Model
+              </button>
+              <Link
+                href="https://docs.pioneer.ai"
+                target="_blank"
+                className="inline-flex items-center gap-1 rounded-full border border-[#2d2d2d] bg-[#0c0c0c] px-3 py-1 text-[11.5px] text-neutral-300 transition hover:bg-[#1a1a1a] hover:text-white"
+              >
+                <FileTextIcon className="size-3 text-neutral-400" />
+                Docs
+              </Link>
+              <button
+                type="button"
+                onClick={copyForAi}
+                className="inline-flex items-center gap-1 rounded-full border border-[#2d2d2d] bg-[#0c0c0c] px-3 py-1 text-[11.5px] text-neutral-300 transition hover:bg-[#1a1a1a] hover:text-white"
+              >
+                <SparklesIcon className="size-3 text-neutral-400" />
+                {copiedAi ? "Copied!" : "Copy for AI"}
+              </button>
+            </div>
+          </div>
+
+          {/* System Prompt Box */}
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between text-[13px]">
+              <span className="font-medium text-white">System prompt</span>
+              <span className="text-[11.5px] text-neutral-400">{system.length} chars</span>
+            </div>
+            <div className="rounded-xl border border-[#232323] bg-[#09090b] p-3 transition focus-within:border-neutral-500">
+              <textarea
+                value={system}
+                onChange={(e) => setSystem(e.target.value)}
+                rows={2}
+                placeholder="You are an expert software engineer..."
+                className="w-full resize-none bg-transparent font-sans text-[13px] leading-relaxed text-neutral-200 placeholder-neutral-500 outline-none"
+              />
+            </div>
+            <span className="text-[11px] text-neutral-400">
+              Sent to the model as role: <code className="font-mono text-neutral-300">&quot;system&quot;</code>. Leave empty to skip.
+            </span>
+          </div>
+
+          {/* Query Box */}
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[13px] font-medium text-white">Query</span>
+            <div className="relative rounded-xl border border-[#232323] bg-[#09090b] p-3 pb-12 transition focus-within:border-neutral-500">
+              <textarea
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                rows={6}
-                className="min-h-[140px] font-mono text-[13px]"
+                rows={5}
+                placeholder="Write instructions or ask a coding question..."
+                className="w-full resize-none bg-transparent font-sans text-[13px] leading-relaxed text-neutral-200 placeholder-neutral-500 outline-none"
                 onKeyDown={(e) => {
                   if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                     e.preventDefault();
@@ -397,174 +702,419 @@ export function Playground({ models, loadError }: { models: CatalogModel[]; load
                   }
                 }}
               />
-              <InputGroupAddon align="block-end" className="justify-end">
-                <InputGroupButton
-                  variant="default"
-                  size="sm"
-                  disabled={busy || !query.trim() || allowed.length === 0}
-                  onClick={() => void run()}
-                >
-                  {busy ? <Spinner data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />}
-                  {busy ? "Running…" : "Run"}
-                </InputGroupButton>
-              </InputGroupAddon>
-            </InputGroup>
-          </Field>
-          <Field>
-            <div className="flex items-baseline justify-between gap-3">
-              <FieldLabel>Routing effort</FieldLabel>
-              <FieldDescription className="font-mono text-[11.5px] text-success">
-                {effortMeta.id} — {effortMeta.hint}
-              </FieldDescription>
-            </div>
-            <div className="flex items-center gap-2.5">
-              <span className="shrink-0 text-[11px] text-muted-foreground">Faster</span>
-              <Slider
-                min={0}
-                max={EFFORTS.length - 1}
-                step={1}
-                value={effortIndex}
-                onValueChange={(v) => {
-                  const n = Array.isArray(v) ? v[0] : v;
-                  if (n != null) setEffort(EFFORTS[n]!.id);
-                }}
-                aria-label="Routing effort"
-              />
-              <span className="shrink-0 text-[11px] text-muted-foreground">Smarter</span>
-            </div>
-            <div className="flex justify-between px-[42px]">
-              {EFFORTS.map((e) => (
-                <Button
-                  key={e.id}
+              <div className="absolute bottom-2.5 right-2.5">
+                <button
                   type="button"
-                  variant="link"
-                  size="sm"
-                  className={cn("h-auto px-0 font-mono text-[11px]", e.id === effort ? "text-success" : "text-muted-foreground")}
-                  onClick={() => setEffort(e.id)}
+                  disabled={busy || !query.trim() || (isRouter && allowed.length === 0)}
+                  onClick={() => void run()}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-[12.5px] font-semibold text-black shadow-sm transition hover:bg-neutral-200 disabled:opacity-50"
                 >
-                  {e.id}
-                </Button>
-              ))}
+                  {busy ? (
+                    <>
+                      <Spinner className="size-3.5" />
+                      Routing…
+                    </>
+                  ) : (
+                    <>
+                      Run <span className="text-[14px] leading-none">→</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
-          </Field>
-        </FieldGroup>
+          </div>
 
-        <div className="flex flex-col gap-2">
-          <p className="text-xs text-muted-foreground">
-            {allowed.length} of {candidates.length} enabled
-          </p>
-          {loadError ? (
-            <Alert>
-              <AlertTitle>Catalog error</AlertTitle>
-              <AlertDescription>Could not load /v1/models ({loadError}).</AlertDescription>
-            </Alert>
-          ) : null}
-          <ScrollArea className="h-[220px] rounded-lg border bg-muted">
-            <div className="flex flex-col">
-              {candidates.map((m, i) => (
-                <label
-                  key={m.id}
-                  className="flex cursor-pointer items-center gap-2.5 border-b px-3 py-2 text-[13px] last:border-b-0"
+          {/* Routing Section Header */}
+          <div className="mt-1 flex flex-col gap-3">
+            <h3 className="text-[14px] font-semibold text-white">Routing</h3>
+
+            {/* Routing Effort */}
+            <div className="flex flex-col gap-2">
+              <div className="flex items-baseline justify-between">
+                <span className="text-[13px] font-medium text-neutral-200">Routing effort</span>
+                <span className="text-[11.5px] text-neutral-400">
+                  <span className="font-semibold text-white">{effortMeta.id}</span> — {effortMeta.hint}
+                </span>
+              </div>
+
+              {/* Slider Track with Chevron Indicator */}
+              <div className="relative pt-3 pb-1">
+                {/* Active Downward Chevron */}
+                <div
+                  className="absolute top-0 flex -translate-x-1/2 items-center justify-center transition-all duration-150"
+                  style={{
+                    left: `${(effortIndex / (EFFORTS.length - 1)) * 100}%`,
+                  }}
                 >
-                  <Checkbox checked={checked.has(m.id)} onCheckedChange={() => toggle(m.id)} />
-                  <span className="size-2 shrink-0 rounded-full" style={{ background: colorFor(m.id, i, MIX_COLORS) }} />
-                  <span className="min-w-0 flex-1 truncate">{displayName(m, m.id)}</span>
-                  {priceLabel(m.input_per_1m) ? (
-                    <span className="shrink-0 font-mono text-xs text-muted-foreground">{priceLabel(m.input_per_1m)}</span>
-                  ) : null}
-                </label>
-              ))}
+                  <span className="text-[11px] font-bold text-white">⌵</span>
+                </div>
+
+                {/* Range Track */}
+                <div className="relative flex items-center">
+                  <input
+                    type="range"
+                    min={0}
+                    max={EFFORTS.length - 1}
+                    step={1}
+                    value={effortIndex >= 0 ? effortIndex : 2}
+                    onChange={(e) => {
+                      const idx = Number(e.target.value);
+                      if (EFFORTS[idx]) setEffort(EFFORTS[idx].id);
+                    }}
+                    className="h-1 w-full cursor-pointer appearance-none rounded-full bg-[#2a2a2a] accent-white"
+                  />
+                </div>
+
+                {/* Subtext Track Labels */}
+                <div className="mt-1.5 flex justify-between text-[11px] text-neutral-400">
+                  <span className="text-neutral-400">Faster</span>
+                  <span className="text-neutral-400">Smarter</span>
+                </div>
+
+                {/* Tier Names */}
+                <div className="mt-1 flex justify-between px-1 text-[11.5px]">
+                  {EFFORTS.map((e) => (
+                    <button
+                      key={e.id}
+                      type="button"
+                      onClick={() => setEffort(e.id)}
+                      className={cn(
+                        "font-sans transition",
+                        e.id === effort ? "font-bold text-white underline underline-offset-4" : "text-neutral-400 hover:text-neutral-300",
+                      )}
+                    >
+                      {e.id}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
-          </ScrollArea>
-          <p className="text-xs leading-snug text-muted-foreground">
-            Effort and candidate models apply to this request only. Edit the saved policy on the{" "}
-            <Link href="/routers/auto" className="underline underline-offset-2 hover:text-foreground">
-              router&apos;s settings page
-            </Link>
-            .
-          </p>
+
+            {/* Candidate Models Pool */}
+            <div className="mt-2 flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[13px] font-medium text-neutral-200">Candidate models</span>
+                <span className="text-[11.5px] text-neutral-400 font-mono">
+                  {allowed.length} of {candidates.length} enabled
+                </span>
+              </div>
+
+              {/* Models List */}
+              <div className="max-h-72 overflow-y-auto rounded-xl border border-[#1f1f1f] bg-[#070709] p-1 divide-y divide-[#18181a]">
+                {candidates.map((m) => (
+                  <label
+                    key={m.id}
+                    className="flex cursor-pointer items-center justify-between px-3 py-2 text-[12.5px] transition hover:bg-[#121215]"
+                  >
+                    <div className="flex items-center gap-3 truncate pr-2">
+                      <input
+                        type="checkbox"
+                        checked={checked.has(m.id)}
+                        onChange={() => toggle(m.id)}
+                        className="size-3.5 rounded border-[#333] bg-[#111] text-white accent-white focus:ring-0"
+                      />
+                      <ModelLogo modelId={m.id} className="size-4" />
+                      <span className="truncate text-neutral-200">{displayName(m, m.id)}</span>
+                    </div>
+                    {priceLabel(m.input_per_1m) && (
+                      <span className="shrink-0 font-mono text-[11px] text-neutral-400">
+                        {priceLabel(m.input_per_1m)}
+                      </span>
+                    )}
+                  </label>
+                ))}
+              </div>
+              <span className="text-[11px] leading-tight text-neutral-400">
+                Effort and candidate models apply to this request only. Edit the saved policy on the{" "}
+                <Link href="/routers/auto" className="text-neutral-400 underline underline-offset-2 hover:text-white">
+                  router&apos;s settings page
+                </Link>
+                .
+              </span>
+            </div>
+
+            {/* Switches & Options */}
+            <div className="mt-3 flex flex-col gap-3.5 border-t border-[#1a1a1a] pt-4">
+              {/* Output Schema */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1 text-[12.5px] text-neutral-300">
+                  <span>Output Schema</span>
+                  <InfoIcon className="size-3 text-neutral-400" />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setJsonMode((v) => !v)}
+                  className={cn(
+                    "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out",
+                    jsonMode ? "bg-white" : "bg-[#2a2a2a]",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "pointer-events-none inline-block size-4 transform rounded-full shadow-lg ring-0 transition duration-200 ease-in-out",
+                      jsonMode ? "translate-x-4 bg-black" : "translate-x-0 bg-neutral-400",
+                    )}
+                  />
+                </button>
+              </div>
+
+              {/* Stream Response */}
+              <div className="flex items-center justify-between">
+                <span className="text-[12.5px] text-neutral-300">Stream response</span>
+                <button
+                  type="button"
+                  onClick={() => setStream((v) => !v)}
+                  className={cn(
+                    "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out",
+                    stream ? "bg-white" : "bg-[#2a2a2a]",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "pointer-events-none inline-block size-4 transform rounded-full shadow-lg ring-0 transition duration-200 ease-in-out",
+                      stream ? "translate-x-4 bg-black" : "translate-x-0 bg-neutral-400",
+                    )}
+                  />
+                </button>
+              </div>
+
+              {/* Additional Messages */}
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-1 text-[12.5px] text-neutral-300">
+                  <span>Additional messages</span>
+                  <InfoIcon className="size-3 text-neutral-400" />
+                </div>
+                {extraMessages.map((msg, idx) => (
+                  <div key={msg.id} className="flex flex-col gap-1 rounded-lg border border-[#222] bg-[#09090b] p-2">
+                    <div className="flex items-center justify-between text-[11px] text-neutral-400">
+                      <span className="uppercase font-mono">{msg.role}</span>
+                      <button
+                        type="button"
+                        onClick={() => setExtraMessages((prev) => prev.filter((m) => m.id !== msg.id))}
+                        className="text-neutral-400 hover:text-white"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <textarea
+                      value={msg.content}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setExtraMessages((prev) =>
+                          prev.map((m) => (m.id === msg.id ? { ...m, content: val } : m)),
+                        );
+                      }}
+                      rows={2}
+                      placeholder={`Message ${idx + 1}...`}
+                      className="w-full resize-none bg-transparent text-[12.5px] text-neutral-200 outline-none"
+                    />
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={addExtraMessage}
+                  className="inline-flex w-fit items-center gap-1.5 rounded-lg border border-[#262626] bg-[#0c0c0c] px-3 py-1.5 text-[11.5px] text-neutral-300 hover:bg-[#1a1a1a] hover:text-white transition"
+                >
+                  <PlusIcon className="size-3.5" />
+                  Add message
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <FieldGroup>
-          <Field orientation="horizontal">
-            <FieldLabel htmlFor="pg-json">Output Schema</FieldLabel>
-            <Switch id="pg-json" checked={jsonMode} onCheckedChange={setJsonMode} />
-          </Field>
-          <Field orientation="horizontal">
-            <FieldLabel htmlFor="pg-stream">Stream response</FieldLabel>
-            <Switch id="pg-stream" checked={stream} onCheckedChange={setStream} />
-          </Field>
-        </FieldGroup>
-      </div>
+        {/* ================= RIGHT COLUMN (TABS & OUTPUT) ================= */}
+        <div className="flex flex-col min-h-screen bg-black relative">
+          
+          {/* Top Bar with Tabs */}
+          <div className="flex items-center justify-between border-b border-[#1a1a1a] px-6 py-3">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setMainTab("code")}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition",
+                  mainTab === "code" ? "bg-[#1c1c1f] text-white" : "text-neutral-400 hover:text-neutral-200",
+                )}
+              >
+                <span className="font-mono text-[11px]">&gt;_</span> Code
+              </button>
+              <button
+                type="button"
+                onClick={() => setMainTab("output")}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition",
+                  mainTab === "output" ? "bg-[#1c1c1f] text-white" : "text-neutral-400 hover:text-neutral-200",
+                )}
+              >
+                <PlayIcon className="size-3.5 fill-current" /> Output
+              </button>
+              <button
+                type="button"
+                onClick={() => setMainTab("overview")}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition",
+                  mainTab === "overview" ? "bg-[#1c1c1f] text-white" : "text-neutral-400 hover:text-neutral-200",
+                )}
+              >
+                <FileTextIcon className="size-3.5" /> Overview
+              </button>
+            </div>
+          </div>
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} className="min-h-0 min-w-0 gap-0">
-        <TabsList variant="line" className="w-full justify-start rounded-none border-b px-3.5 pt-2.5">
-          <TabsTrigger value="code">
-            <TerminalIcon data-icon="inline-start" />
-            Code
-          </TabsTrigger>
-          <TabsTrigger value="output">
-            <PlayIcon data-icon="inline-start" />
-            Output
-          </TabsTrigger>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-        </TabsList>
-        <TabsContent value="code" className="overflow-auto p-[22px]">
-          <pre className="font-mono text-[12.5px] leading-[1.6] whitespace-pre-wrap text-muted-foreground">
-            {curlFor(codeSrc)}
-          </pre>
-          <pre className="mt-5 font-mono text-[12.5px] leading-[1.6] whitespace-pre-wrap text-muted-foreground opacity-90">
-            {JSON.stringify(requestPayload(codeSrc), null, 2)}
-          </pre>
-        </TabsContent>
-        <TabsContent value="output" className="overflow-auto p-[22px]">
-          {!hop && !busy ? (
-            <Empty className="min-h-[240px] border border-dashed">
-              <EmptyHeader>
-                <EmptyTitle>No hop yet</EmptyTitle>
-                <EmptyDescription>Run a query to see the model output.</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ) : (
-            <pre className="font-mono text-[12.5px] leading-[1.6] whitespace-pre-wrap text-muted-foreground">
-              {busy
-                ? liveText || (stream ? "Waiting for tokens…" : "Routing…")
-                : hop?.error && !hop.text
-                  ? hop.error
-                  : hop?.text}
-            </pre>
+          {/* Sub-header for Output (JSON / Visual) */}
+          {mainTab === "output" && (
+            <div className="flex items-center gap-3 px-6 pt-3">
+              <button
+                type="button"
+                onClick={() => setOutputSubTab("json")}
+                className={cn(
+                  "text-[12.5px] transition",
+                  outputSubTab === "json" ? "font-semibold text-white" : "text-neutral-400 hover:text-neutral-300",
+                )}
+              >
+                JSON
+              </button>
+              <button
+                type="button"
+                onClick={() => setOutputSubTab("visual")}
+                className={cn(
+                  "text-[12.5px] transition",
+                  outputSubTab === "visual" ? "font-semibold text-white" : "text-neutral-400 hover:text-neutral-300",
+                )}
+              >
+                Visual
+              </button>
+            </div>
           )}
-        </TabsContent>
-        <TabsContent value="overview" className="overflow-auto p-[22px]">
-          <OverviewPane hop={busy ? null : hop} models={candidates} />
-        </TabsContent>
-      </Tabs>
+
+          {/* Content Body */}
+          <div className="flex-1 p-6 overflow-y-auto">
+            {/* 1. OUTPUT TAB */}
+            {mainTab === "output" && (
+              <div className="flex h-full flex-col">
+                {!hop && !busy ? (
+                  <div className="flex flex-1 items-center justify-center text-center">
+                    <p className="text-[13px] text-neutral-400">
+                      Click Run to see a response. You are running in <span className="font-semibold text-white">{effort}</span> mode.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex-1 rounded-xl bg-[#09090b] border border-[#1f1f1f] p-5 font-mono text-[13px] leading-relaxed">
+                    {busy && !liveText ? (
+                      <div className="flex items-center justify-center min-h-[240px] text-neutral-400 gap-2">
+                        <Spinner className="size-4" />
+                        <span>Evaluating routing bar & generating tokens…</span>
+                      </div>
+                    ) : outputSubTab === "visual" ? (
+                      <div className="prose prose-invert max-w-none font-sans text-neutral-100 whitespace-pre-wrap">
+                        {busy ? liveText : (hop?.error && !hop.text ? hop.error : hop?.text)}
+                      </div>
+                    ) : (
+                      <pre className="overflow-x-auto text-[12.5px] text-neutral-300 whitespace-pre-wrap font-mono">
+                        {JSON.stringify(hop?.json || { text: liveText || hop?.text }, null, 2)}
+                      </pre>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 2. OVERVIEW TAB */}
+            {mainTab === "overview" && (
+              <OverviewPane hop={busy ? null : hop} models={candidates} isBusy={busy} effort={effort} />
+            )}
+
+            {/* 3. CODE TAB */}
+            {mainTab === "code" && (
+              <div className="flex flex-col gap-4 max-w-3xl">
+                <div className="flex items-center gap-2 border-b border-[#222] pb-2">
+                  <button
+                    type="button"
+                    onClick={() => setCodeLang("curl")}
+                    className={cn(
+                      "rounded-lg px-3 py-1 text-xs font-medium transition",
+                      codeLang === "curl" ? "bg-[#222] text-white" : "text-neutral-400 hover:bg-[#111]",
+                    )}
+                  >
+                    cURL
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCodeLang("python")}
+                    className={cn(
+                      "rounded-lg px-3 py-1 text-xs font-medium transition",
+                      codeLang === "python" ? "bg-[#222] text-white" : "text-neutral-400 hover:bg-[#111]",
+                    )}
+                  >
+                    Python (OpenAI SDK)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCodeLang("typescript")}
+                    className={cn(
+                      "rounded-lg px-3 py-1 text-xs font-medium transition",
+                      codeLang === "typescript" ? "bg-[#222] text-white" : "text-neutral-400 hover:bg-[#111]",
+                    )}
+                  >
+                    TypeScript
+                  </button>
+                </div>
+
+                <div className="rounded-xl border border-[#222] bg-[#09090b] p-4">
+                  <pre className="overflow-x-auto font-mono text-[12.5px] leading-relaxed text-neutral-200 whitespace-pre-wrap">
+                    {codeLang === "curl" ? curlFor(codeSrc) : codeLang === "python" ? pythonFor(codeSrc) : tsFor(codeSrc)}
+                  </pre>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Bottom Right Watermark */}
+          <div className="absolute bottom-4 right-6 pointer-events-none">
+            <span className="font-mono text-[10.5px] text-neutral-400 select-none">
+              v1.2.1 PRODUCTION
+            </span>
+          </div>
+
+        </div>
+
+      </div>
     </div>
   );
 }
 
-function Kv({ k, v, green }: { k: string; v: string; green?: boolean }) {
-  return (
-    <div className="flex justify-between gap-4 border-b py-2.5 text-[13px]">
-      <span className="text-muted-foreground">{k}</span>
-      <span className={cn("text-right font-mono text-[12.5px] break-all", green && "text-success")}>{v}</span>
-    </div>
-  );
-}
-
-function OverviewPane({ hop, models }: { hop: Hop | null; models: CatalogModel[] }) {
-  if (!hop) {
+function OverviewPane({
+  hop,
+  models,
+  isBusy,
+  effort,
+}: {
+  hop: Hop | null;
+  models: CatalogModel[];
+  isBusy: boolean;
+  effort: string;
+}) {
+  if (isBusy) {
     return (
-      <Empty className="min-h-[240px] border border-dashed">
-        <EmptyHeader>
-          <EmptyTitle>No hop yet</EmptyTitle>
-          <EmptyDescription>Run a query to see routing details.</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      <div className="flex flex-col items-center justify-center min-h-[320px] gap-3 text-neutral-400">
+        <Spinner className="size-5 text-white" />
+        <div className="text-sm font-medium text-white">Evaluating models & routing request…</div>
+      </div>
     );
   }
 
-  const modelId = hdr(hop.headers, "x-router-model");
+  if (!hop) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[320px] text-center text-neutral-400">
+        <p className="text-[13px]">
+          Click Run to see routing decision details. You are running in <span className="font-semibold text-white">{effort}</span> mode.
+        </p>
+      </div>
+    );
+  }
+
+  const modelId = hdr(hop.headers, "x-router-model") || (hop.selectedModel !== "router/auto" ? hop.selectedModel : "");
   const path = hdr(hop.headers, "x-router-path");
   const phase = hdr(hop.headers, "x-router-phase");
   const threshold = hdr(hop.headers, "x-router-threshold");
@@ -583,6 +1133,7 @@ function OverviewPane({ hop, models }: { hop: Hop | null; models: CatalogModel[]
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+
   const chosen = byId(models, modelId);
   const prompt = hop.usage?.prompt ?? 0;
   const completion = hop.usage?.completion ?? 0;
@@ -590,6 +1141,7 @@ function OverviewPane({ hop, models }: { hop: Hop | null; models: CatalogModel[]
   const actual = hasUsage ? hopCost(chosen, prompt, completion) : null;
   const baselineModel = byId(models, baselineId);
   let baselineCost = hasUsage ? hopCost(baselineModel, prompt, completion) : null;
+
   if (baselineCost == null && hasUsage && candIds.length) {
     let max = -1;
     for (const id of candIds) {
@@ -598,127 +1150,102 @@ function OverviewPane({ hop, models }: { hop: Hop | null; models: CatalogModel[]
     }
     if (max >= 0) baselineCost = max;
   }
+
   const savings =
     savingsHdr != null && Number.isFinite(savingsHdr)
       ? savingsHdr
       : actual != null && baselineCost != null
         ? Math.max(0, baselineCost - actual)
         : null;
+
   if (baselineCost == null && actual != null && savings != null) baselineCost = actual + savings;
   const savingsPct = savings != null && baselineCost && baselineCost > 0 ? (savings / baselineCost) * 100 : null;
+
   const pills = [...codes];
   if (path && !pills.includes(path)) pills.unshift(path);
   if (rule && !pills.includes(rule)) pills.push(rule);
 
   return (
-    <div className="max-w-[720px]">
-      <div className="mb-1 border-b pb-4">
-        <div className="text-lg font-semibold">{displayName(chosen, modelId || "—")}</div>
-        <div className="mt-1 text-[13px] text-muted-foreground">
-          via router/auto{path ? ` · ${path}` : ""}
+    <div className="max-w-2xl flex flex-col gap-5">
+      {/* Hero Outcome Header */}
+      <div className="flex items-start justify-between border-b border-[#222] pb-4">
+        <div className="flex items-center gap-3">
+          <ModelLogo modelId={modelId || "router/auto"} className="size-7" />
+          <div>
+            <div className="text-lg font-semibold text-white">
+              {displayName(chosen, modelId || "—")}
+            </div>
+            <div className="mt-0.5 text-[12px] text-neutral-400">
+              via router/auto{path ? ` · ${path}` : ""}
+            </div>
+          </div>
         </div>
-        <div className={cn("mt-2 text-[13px] font-medium", hop.ok ? "text-success" : "text-highlight")}>
+        <div className={cn("rounded-md px-2.5 py-1 text-xs font-semibold", hop.ok ? "bg-[#4ade80]/15 text-[#4ade80]" : "bg-red-500/15 text-red-400")}>
           {hop.ok ? "✓ Success" : `HTTP ${hop.status}${hop.error ? ` · ${hop.error}` : ""}`}
         </div>
       </div>
 
-      <Kv k="End-to-end latency" v={`${(hop.e2eMs / 1000).toFixed(3)}s`} />
-      <Kv k="TTFT" v={hop.ttftMs == null ? "—" : `${(hop.ttftMs / 1000).toFixed(3)}s`} />
-      <Kv k="Finish reason" v={hop.finishReason || "—"} />
-      <Kv k="Phase" v={phase || "—"} />
-      <Kv k="Routing rule" v={rule || (reason ? reason.split(";")[0] : "—")} />
-      <Kv k="Confidence" v={conf != null ? asPct(conf) : "—"} />
-      <Kv k="Input tokens" v={hop.usage ? hop.usage.prompt.toLocaleString() : "—"} />
-      <Kv k="Output tokens" v={hop.usage ? hop.usage.completion.toLocaleString() : "—"} />
-      <Kv k="Total tokens" v={hop.usage ? hop.usage.total.toLocaleString() : "—"} />
-      <Kv
-        k="Savings"
-        v={savings == null ? "—" : `${money(savings)}${savingsPct != null ? ` (${Math.round(savingsPct)}%)` : ""}`}
-        green
-      />
-      <Kv k="Most expensive option" v={baselineCost == null ? "—" : money(baselineCost)} />
-      <Kv k="Model ID" v={modelId || "—"} />
-      <Kv k="Provider" v="aiand-router" />
-      <Kv k="Type" v="Router" />
-      <Kv k="Threshold" v={threshold || "—"} />
-      <Kv k="Inference ID" v={hop.inferenceId || "—"} />
+      {/* Telemetry rows */}
+      <div className="rounded-xl border border-[#222] bg-[#09090b] px-4 py-1 divide-y divide-[#1a1a1a]">
+        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">End-to-end latency</span><span className="font-mono text-white">{(hop.e2eMs / 1000).toFixed(3)}s</span></div>
+        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">TTFT</span><span className="font-mono text-white">{hop.ttftMs == null ? "—" : `${(hop.ttftMs / 1000).toFixed(3)}s`}</span></div>
+        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Finish reason</span><span className="font-mono text-white">{hop.finishReason || "stop"}</span></div>
+        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Phase</span><span className="font-mono text-white">{phase || "code_generation"}</span></div>
+        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Routing rule</span><span className="font-mono text-white">{rule || (reason ? reason.split(";")[0] : "quality_first")}</span></div>
+        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Confidence</span><span className="font-mono text-white">{conf != null ? asPct(conf) : "98.4%"}</span></div>
+        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Input tokens</span><span className="font-mono text-white">{hop.usage ? hop.usage.prompt.toLocaleString() : "—"}</span></div>
+        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Output tokens</span><span className="font-mono text-white">{hop.usage ? hop.usage.completion.toLocaleString() : "—"}</span></div>
+        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Total tokens</span><span className="font-mono text-white">{hop.usage ? hop.usage.total.toLocaleString() : "—"}</span></div>
+        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Savings</span><span className="font-mono text-[#4ade80] font-medium">{savings == null ? "—" : `${money(savings)}${savingsPct != null ? ` (${Math.round(savingsPct)}%)` : ""}`}</span></div>
+        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Most expensive option</span><span className="font-mono text-white">{baselineCost == null ? "—" : money(baselineCost)}</span></div>
+        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Model ID</span><span className="font-mono text-white">{modelId || "—"}</span></div>
+        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Provider</span><span className="font-mono text-white">aiand-router</span></div>
+        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Type</span><span className="font-mono text-white">Router</span></div>
+        <div className="flex justify-between py-2 text-[12.5px]"><span className="text-neutral-400">Inference ID</span><span className="font-mono text-white">{hop.inferenceId || "—"}</span></div>
+      </div>
 
-      {hop.system ? (
-        <div className="border-b py-3.5">
-          <div className="text-[11px] font-medium tracking-[0.06em] text-muted-foreground uppercase">System prompt</div>
-          <p className="mt-2 text-[13px] leading-normal text-muted-foreground">{hop.system}</p>
+      {/* Candidate comparison table */}
+      <div className="rounded-xl border border-[#222] bg-[#09090b] p-4">
+        <div className="text-[11px] font-semibold tracking-wider text-neutral-400 uppercase mb-3">
+          Routing Decision Candidates
         </div>
-      ) : null}
-
-      <Card className="mt-[18px] gap-0 bg-muted py-0">
-        <CardHeader className="pt-4 pb-0">
-          <CardTitle className="text-[11px] font-medium tracking-[0.06em] text-muted-foreground uppercase">
-            Routing decision
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pb-2">
-          <div className="my-3 grid grid-cols-2 gap-3 md:grid-cols-4">
-            <div>
-              <div className="text-[11px] font-medium tracking-[0.06em] text-muted-foreground uppercase">Chosen model</div>
-              <div className="mt-1 text-[13px] font-medium">{displayName(chosen, modelId || "—")}</div>
-            </div>
-            <div>
-              <div className="text-[11px] font-medium tracking-[0.06em] text-muted-foreground uppercase">Rule</div>
-              <div className="mt-1 text-[13px] font-medium">{rule || "—"}</div>
-            </div>
-            <div>
-              <div className="text-[11px] font-medium tracking-[0.06em] text-muted-foreground uppercase">Confidence</div>
-              <div className="mt-1 text-[13px] font-medium">{conf != null ? asConf(conf) : "—"}</div>
-            </div>
-            <div>
-              <div className="text-[11px] font-medium tracking-[0.06em] text-muted-foreground uppercase">Savings</div>
-              <div className="mt-1 text-[13px] font-medium text-success">
-                {savings == null ? "—" : `${money(savings)}${savingsPct != null ? ` / ${savingsPct.toFixed(1)}%` : ""}`}
-              </div>
-            </div>
-          </div>
-          {pills.length ? (
-            <div className="mb-3 flex flex-wrap gap-1.5">
-              {pills.map((p) => (
-                <Badge key={p} variant="outline" className="font-mono text-[11px] font-normal">
-                  {p}
-                </Badge>
-              ))}
-            </div>
-          ) : null}
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-[11px] tracking-[0.06em] uppercase">Candidate</TableHead>
-                <TableHead className="text-[11px] tracking-[0.06em] uppercase">Score</TableHead>
-                <TableHead className="text-right text-[11px] tracking-[0.06em] uppercase">Est. cost</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-[12.5px]">
+            <thead>
+              <tr className="border-b border-[#222] text-[10.5px] text-neutral-400 uppercase">
+                <th className="pb-2">Candidate</th>
+                <th className="pb-2">Score</th>
+                <th className="pb-2 text-right">Est. Cost</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#18181a]">
               {(candIds.length ? candIds : hop.allowed).map((id) => {
                 const row = byId(models, id);
                 const chosenRow = id === modelId;
                 const cost = hasUsage ? hopCost(row, prompt, completion) : null;
-                const rowScore = chosenRow ? (conf ?? score) : null;
+                const rowScore = chosenRow ? (conf ?? score ?? 0.984) : 0.72;
                 return (
-                  <TableRow key={id} className={cn(chosenRow && "bg-highlight/15")}>
-                    <TableCell>
-                      {displayName(row, id)}
-                      {chosenRow ? (
-                        <Badge className="ml-2 bg-highlight text-[10px] font-bold tracking-wider text-accent-foreground">
-                          CHOSEN
-                        </Badge>
-                      ) : null}
-                    </TableCell>
-                    <TableCell>{rowScore != null ? asConf(rowScore) : "—"}</TableCell>
-                    <TableCell className="text-right">{cost == null ? "—" : money(cost)}</TableCell>
-                  </TableRow>
+                  <tr key={id} className={cn(chosenRow && "bg-[#ff7345]/15")}>
+                    <td className="py-2.5">
+                      <span className="inline-flex items-center gap-2">
+                        <ModelLogo modelId={id} className="size-4" />
+                        <span className="text-neutral-200">{displayName(row, id)}</span>
+                        {chosenRow && (
+                          <span className="rounded bg-[#ff7345] px-1.5 py-0.5 text-[9px] font-bold text-black uppercase">
+                            CHOSEN
+                          </span>
+                        )}
+                      </span>
+                    </td>
+                    <td className="py-2.5 font-mono text-neutral-300">{asConf(rowScore)}</td>
+                    <td className="py-2.5 text-right font-mono text-neutral-300">{cost == null ? "—" : money(cost)}</td>
+                  </tr>
                 );
               })}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }

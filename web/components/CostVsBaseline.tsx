@@ -25,7 +25,12 @@ export function CostVsBaseline({
   const max = Math.max(routed, baseline, 1);
   const routedPct = (routed / max) * 100;
   const baselinePct = (baseline / max) * 100;
-  const saved = savingsUsd > 0 ? savingsUsd : Math.max(0, baseline - routed);
+  const saved =
+    savingsUsd > 0
+      ? savingsUsd
+      : unrealized
+        ? Math.max(0, routed - baseline)
+        : Math.max(0, baseline - routed);
 
   return (
     <div className="card card-pad flex flex-col gap-0 rounded-[14px] border border-[#232329] bg-[#101013] p-[22px_24px]">

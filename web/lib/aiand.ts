@@ -174,8 +174,6 @@ export function overlayOverview(opts: {
   }
 
   const n = logs.length;
-  // ponytail: scale last ~200 log costs across metrics tokens; paginate all logs if mix drifts
-  const costPerToken = sampleTokens > 0 ? sampleSpend / sampleTokens : 0;
   const tokenBuckets = rollup(parseMetricBuckets(opts.metrics));
   const metricTotals = tokenBuckets.reduce(
     (a, b) => ({
@@ -185,11 +183,14 @@ export function overlayOverview(opts: {
     }),
     { requests: 0, input_tokens: 0, output_tokens: 0 },
   );
-  const requests = summary.requests || metricTotals.requests;
+  const requests = summary.requests || metricTotals.requests || n;
   const inputTokens = summary.input_tokens || metricTotals.input_tokens;
   const outputTokens = summary.output_tokens || metricTotals.output_tokens;
   const fullTokens = inputTokens + outputTokens;
-  const spend = n ? costPerToken * fullTokens : 0;
+  // Prefer summed billed log `cost` when the sample covers (or exceeds) analytics token volume.
+  const coverage = fullTokens > 0 ? sampleTokens / fullTokens : n > 0 ? 1 : 0;
+  const costPerToken = sampleTokens > 0 ? sampleSpend / sampleTokens : 0;
+  const spend = n === 0 ? 0 : coverage >= 0.85 ? sampleSpend : costPerToken * fullTokens;
   const routerEst = flashUsd(inputTokens, outputTokens);
   const unsaved = Math.max(0, spend - routerEst);
   const baseline = spend;
@@ -198,14 +199,15 @@ export function overlayOverview(opts: {
   const mixes = mixByBucket(logs, tokenBuckets);
   const usage_buckets: UsageBucket[] = tokenBuckets.map((b, i) => {
     const tokens = b.input_tokens + b.output_tokens;
-    const actual = costPerToken * tokens;
+    const actual =
+      coverage >= 0.85 && fullTokens > 0 ? (spend * tokens) / fullTokens : costPerToken * tokens;
     const cheap = flashUsd(b.input_tokens, b.output_tokens);
     return {
       ts: isoTs(b.ts),
       requests: b.requests,
       by_model: mixes[i] || {},
-      spend_usd: Math.min(cheap, actual),
-      baseline_usd: actual,
+      spend_usd: actual,
+      baseline_usd: cheap,
     };
   });
 

@@ -2,38 +2,54 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
+type ChatMessage = { role: string; content: string };
+
 type ChatBody = {
+  model?: string;
   prompt?: string;
   system?: string;
+  messages?: ChatMessage[];
   effort?: string;
   allowedModels?: string[];
   stream?: boolean;
   jsonMode?: boolean;
+  temperature?: number;
+  max_tokens?: number;
+  tools?: unknown[];
 };
 
 function routerHeaders(src: Headers): Record<string, string> {
   const out: Record<string, string> = {};
   src.forEach((v, k) => {
-    if (k.toLowerCase().startsWith("x-router-")) out[k.toLowerCase()] = v;
+    if (k.toLowerCase().startsWith("x-router-") || k.toLowerCase() === "content-type") {
+      out[k.toLowerCase()] = v;
+    }
   });
   return out;
 }
 
-function messages(body: ChatBody) {
+function buildMessages(body: ChatBody): ChatMessage[] {
+  if (Array.isArray(body.messages) && body.messages.length > 0) {
+    const list = [...body.messages];
+    if (body.system?.trim() && !list.some((m) => m.role === "system")) {
+      list.unshift({ role: "system", content: body.system.trim() });
+    }
+    return list;
+  }
   const prompt = (body.prompt || "").trim();
   const system = (body.system || "").trim();
-  const out: { role: string; content: string }[] = [];
+  const out: ChatMessage[] = [];
   if (system) out.push({ role: "system", content: system });
-  out.push({ role: "user", content: prompt });
+  if (prompt) out.push({ role: "user", content: prompt });
   return out;
 }
 
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as ChatBody;
-  const prompt = (body.prompt || "").trim();
-  if (!prompt) {
+  const msgs = buildMessages(body);
+  if (msgs.length === 0) {
     return NextResponse.json(
-      { ok: false, status: 400, headers: {}, json: null, error: "prompt required" },
+      { ok: false, status: 400, headers: {}, json: null, error: "prompt or messages required" },
       { status: 400 },
     );
   }
@@ -48,11 +64,14 @@ export async function POST(req: Request) {
   if (body.allowedModels?.length) headers["x-allowed-models"] = body.allowedModels.join(",");
 
   const payload: Record<string, unknown> = {
-    model: "router/auto",
-    messages: messages(body),
+    model: body.model || "router/auto",
+    messages: msgs,
     stream: Boolean(body.stream),
   };
   if (body.jsonMode) payload.response_format = { type: "json_object" };
+  if (typeof body.temperature === "number") payload.temperature = body.temperature;
+  if (typeof body.max_tokens === "number") payload.max_tokens = body.max_tokens;
+  if (Array.isArray(body.tools) && body.tools.length > 0) payload.tools = body.tools;
 
   try {
     const r = await fetch(`${base}/v1/chat/completions`, {
@@ -77,7 +96,7 @@ export async function POST(req: Request) {
       status: r.status,
       headers: hop,
       json,
-      error: r.ok ? undefined : r.statusText,
+      error: r.ok ? undefined : r.statusText || "Request failed",
     });
   } catch (e) {
     return NextResponse.json({

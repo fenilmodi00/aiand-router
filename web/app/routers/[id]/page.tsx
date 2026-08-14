@@ -54,7 +54,10 @@ export default async function RouterDetailPage({
   ]);
   const local = overviewRes.data!;
   const org = orgRes.data?.overview;
-  const useOrg = local.routed_requests === 0 && !!org && org.routed_requests > 0;
+  // Prefer AIand org analytics whenever it has more traffic than the local hop log.
+  // Local-only was wrong after a key rotate / one playground hop: UI stuck on 1 while org had 100s.
+  const useOrg =
+    orgRes.ok && !!org && org.routed_requests > 0 && org.routed_requests > (local.routed_requests || 0);
   const o = useOrg && org ? org : local;
   const inferences = useOrg ? (orgRes.data?.inferences ?? []) : (inferencesRes.data?.data ?? []);
   const n = o.candidates.filter((c) => c.enabled).length || o.candidates.length;
@@ -166,12 +169,15 @@ export default async function RouterDetailPage({
         <Alert className="mb-4">
           <AlertTitle>AIand org traffic — not routed</AlertTitle>
           <AlertDescription>
-            Inference is down, so this dashboard is showing existing org usage from{" "}
+            Showing live account usage from{" "}
             <a href="https://docs.aiand.com/analytics/metrics/" className="underline">
               AIand analytics
-            </a>
-            , not hops through this router. Spend is estimated from recent logs × token volume. You
-            saved {usd(0)}; you have not saved {usd(o.unsaved_usd)} versus Flash.
+            </a>{" "}
+            ({o.routed_requests} requests
+            {o.org_sample_n ? `, ${o.org_sample_n} detailed logs` : ""}
+            {local.routed_requests > 0 ? `; this gateway logged ${local.routed_requests} local hop(s)` : ""}
+            ). Spend uses billed log costs when the log sample covers token volume; otherwise it is
+            scaled. You saved {usd(0)}; you have not saved {usd(o.unsaved_usd)} versus Flash.
           </AlertDescription>
         </Alert>
       ) : !orgRes.ok && local.routed_requests === 0 ? (
@@ -208,7 +214,7 @@ export default async function RouterDetailPage({
         <StatCard
           label={useOrg ? "Your spend" : "Candidates"}
           value={useOrg ? usd(o.spend_usd) : String(n)}
-          sub={useOrg ? "est. from recent mix" : "configured models"}
+          sub={useOrg ? (o.org_sample_n ? `from ${o.org_sample_n} billed logs` : "from AIand logs") : "configured models"}
         />
       </div>
 
@@ -216,8 +222,8 @@ export default async function RouterDetailPage({
       <div className="mt-[18px] grid gap-[18px] lg:grid-cols-2">
         <CostVsBaseline
           buckets={o.usage_buckets}
-          savingsUsd={o.savings_usd}
-          savingsPct={o.savings_pct}
+          savingsUsd={useOrg ? o.unsaved_usd : o.savings_usd}
+          savingsPct={useOrg ? (o.spend_usd > 0 ? (100 * o.unsaved_usd) / o.spend_usd : 0) : o.savings_pct}
           unrealized={useOrg}
         />
         <CandidateMixPioneer
@@ -234,15 +240,15 @@ export default async function RouterDetailPage({
         <RouterSavingsChart buckets={o.usage_buckets} unrealized={useOrg} />
       </div>
 
-      <div className="mt-[42px] mb-[18px]">
-        <h2 className="text-base font-semibold">Routing pipeline</h2>
-        <p className="mt-1 text-[13px] text-muted-foreground">
-          {useOrg
-            ? `How the last ${o.org_sample_n} org requests were sent directly to models, skipping the router.`
-            : `How the last ${o.routed_requests} routed requests flowed to each candidate model.`}
-        </p>
+      <div className="mt-[36px]">
+        <RoutingPipeline
+          requests={useOrg ? o.org_sample_n : o.routed_requests}
+          rows={rows}
+          savingsUsd={useOrg ? o.unsaved_usd : o.savings_usd}
+          savingsPct={o.savings_pct}
+          routerName="pioneer/auto"
+        />
       </div>
-      <RoutingPipeline requests={useOrg ? o.org_sample_n : o.routed_requests} rows={rows} />
 
       <Card className="mt-[18px] gap-0 py-0">
         <CardHeader className="flex flex-row items-start justify-between pt-[22px]">
