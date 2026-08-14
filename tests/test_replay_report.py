@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from aiand_router.replay_report import (
     assert_not_production_floors,
+    main,
     replay_gate_pass,
     replay_report,
 )
@@ -71,6 +74,17 @@ def test_fixture_is_not_production_floors():
 def test_replay_report_policies_success_rate_and_list_price_cost():
     assert_not_production_floors(GOLD, _artifact())
     report = _report()
+    # 4×2 gold: p0 both win, p1 strong only, p2 flash only, p3 neither.
+    assert report["policies"]["oracle"]["success_rate"] == 3 / 4
+    flash = report["policies"]["always_flash"]
+    strong = report["policies"]["always_strong"]
+    assert flash["success_rate"] == 2 / 4
+    assert strong["success_rate"] == 2 / 4
+    assert flash["list_price_cost"] < strong["list_price_cost"]
+    assert report["rules_cost_delta"] == (
+        report["policies"]["trained"]["list_price_cost"]
+        - report["policies"]["rules"]["list_price_cost"]
+    )
     for name in POLICIES:
         row = report["policies"][name]
         assert 0.0 <= row["success_rate"] <= 1.0
@@ -90,6 +104,27 @@ def test_replay_report_disagreement_and_calibration_metrics_defined():
         "ece_equal_mass",
     ):
         assert isinstance(report[key], float)
+    # selected-hop y = flash gold cells; p = artifact cheap/flash.
+    ys = (1.0, 0.0, 1.0, 0.0)
+    p = 0.85
+    brier = sum((p - y) ** 2 for y in ys) / len(ys)
+    ybar = sum(ys) / len(ys)
+    brier_ref = sum((ybar - y) ** 2 for y in ys) / len(ys)
+    assert report["brier"] == pytest.approx(brier)
+    assert report["brier_skill"] == pytest.approx(1.0 - brier / brier_ref)
+    assert report["brier_skill"] != 0.0
+
+
+def test_cli_gold_is_holdout(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        main(["-h"])
+    assert exit_info.value.code == 0
+    help_text = capsys.readouterr().out.lower()
+    assert "--gold" in help_text
+    assert "holdout" in help_text
+    assert "train" in help_text or "cal" in help_text
+    report = _report()
+    assert report["gold_is_holdout"] is True
 
 
 def test_replay_gate_pass_is_bool_on_toy_fixture():

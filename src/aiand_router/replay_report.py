@@ -242,6 +242,7 @@ def replay_report(
     }
     return {
         "n_prompts": n,
+        "gold_is_holdout": True,
         "policies": policies,
         "disagreement_rate": (disagree / n) if n else 0.0,
         "rank_auc": _rank_auc(auc_pairs),
@@ -272,7 +273,14 @@ def replay_gate_pass(report: dict[str, Any]) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Offline replay report (no live provider)")
-    parser.add_argument("--gold", required=True)
+    parser.add_argument(
+        "--gold",
+        required=True,
+        help=(
+            "Holdout gold JSONL (the evaluation set). Assumed unused for train/cal; "
+            "passing mixed gold contaminates the gate. No hash split."
+        ),
+    )
     parser.add_argument("--artifact", required=True)
     parser.add_argument("--models", default="config/models.yaml")
     args = parser.parse_args(argv)
