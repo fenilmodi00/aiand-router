@@ -325,6 +325,21 @@ async def run_teacher(
 SPARSE_ANCHORS = (FLASH, *MEASURED_TRIO)
 
 
+def _gold_ids(q: dict[str, Any], models_by_id: dict[str, Model], *, dense: bool) -> list[str]:
+    ids = list(SPARSE_ANCHORS)
+    if dense:
+        ids = [i for i in models_by_id if i != K3 and models_by_id[i].enabled]
+    out = []
+    for model_id in ids:
+        m = models_by_id.get(model_id)
+        if m is None or not m.enabled or model_id == K3:
+            continue
+        if q.get("needs_tools") and not m.supports_tools:
+            continue
+        out.append(model_id)
+    return out
+
+
 def _gold_body(model_id: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
     effort = MIN_REASONING_EFFORT.get(model_id)
     max_tokens = GOLD_REASONING_MAX_TOKENS if effort and effort != "none" else GOLD_MAX_TOKENS
@@ -395,6 +410,16 @@ def _gold_label(
     expected = meta.get("expected")
     if expected is not None:
         return str(expected) in text, "verified"
+    schema = meta.get("json_schema") or meta.get("schema")
+    if schema is not None:
+        try:
+            obj = json.loads(_strip_fences(text) if text else "")
+        except json.JSONDecodeError:
+            return False, "verified"
+        req = schema.get("required") or [] if isinstance(schema, dict) else []
+        if req and (not isinstance(obj, dict) or any(k not in obj for k in req)):
+            return False, "verified"
+        return True, "verified"
     if message.get("tool_calls"):
         return True, "proxy"
     finish = str(choice.get("finish_reason") or "")
@@ -467,15 +492,10 @@ async def run_gold(
     models_by_id: dict[str, Model],
     dense: bool = False,
 ) -> None:
-    ids = list(SPARSE_ANCHORS)
-    if dense:
-        ids = [i for i in models_by_id if i != K3 and models_by_id[i].enabled]
     jobs: list[tuple[list[dict[str, Any]], str, dict[str, Any]]] = []
     for q in queries:
         messages = _messages(q)
-        for model_id in ids:
-            if model_id not in models_by_id or model_id == K3:
-                continue
+        for model_id in _gold_ids(q, models_by_id, dense=dense):
             jobs.append((messages, model_id, q))
     spend._async_lock = asyncio.Lock()
     sem = asyncio.Semaphore(_concurrency())

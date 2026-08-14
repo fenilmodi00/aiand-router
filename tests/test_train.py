@@ -194,8 +194,10 @@ def test_gold_sparse_skips_k3_and_fit_writes_not_spec_floors(tmp_path, monkeypat
     rows = [json.loads(line) for line in gold.read_text(encoding="utf-8").splitlines() if line.strip()]
     models = {r["model_id"] for r in rows}
     assert "moonshotai/kimi-k3" not in models
-    assert "deepseek-ai/deepseek-v4-flash" in models
-    assert "qwen/qwen3.6-27b" in models
+    assert models >= set(SPARSE_ANCHORS)
+    for r in rows:
+        assert "success" in r and "success_tier" in r
+        assert "resolved" not in r and "y" not in r
     silver = tmp_path / "silver.jsonl"
     silver.write_text(
         json.dumps(
@@ -256,6 +258,7 @@ def test_gold_timeout_is_unsuccessful_cell_not_crash(tmp_path, monkeypatch):
 
 def test_gold_runs_cells_concurrently(tmp_path, monkeypatch):
     monkeypatch.setenv(OPT_IN_ENV, "1")
+    monkeypatch.setenv("TRAIN_CONCURRENCY", "2")
 
     class Slow:
         def __init__(self):
@@ -286,7 +289,7 @@ def test_gold_runs_cells_concurrently(tmp_path, monkeypatch):
         )
         == 0
     )
-    assert provider.max_in_flight > 1
+    assert 1 < provider.max_in_flight <= 2
 
 
 def test_gold_refuses_without_opt_in(tmp_path, monkeypatch):
@@ -496,6 +499,17 @@ def test_gold_expected_beats_tool_calls_proxy():
     assert ok is False and tier == "verified"
 
 
+def test_gold_json_schema_beats_tool_calls_proxy():
+    """Verified JSON/schema on the query wins before gateway tool_calls proxy."""
+    ok, tier = _gold_label(
+        {"content": "not json", "tool_calls": [{"id": "1"}]},
+        "call a tool",
+        {},
+        meta={"json_schema": {"type": "object", "required": ["status"]}},
+    )
+    assert ok is False and tier == "verified"
+
+
 def test_gold_query_level_tests_passed_is_not_y():
     """Dump/query tests_passed must not stamp the same y on every model."""
     ok, tier = _gold_label(
@@ -505,6 +519,178 @@ def test_gold_query_level_tests_passed_is_not_y():
         meta={"tests_passed": False},
     )
     assert ok is True and tier == "weak"
+
+
+def test_gold_sparse_skips_ineligible_anchors(tmp_path, monkeypatch):
+    """Flash + measured trio run when eligible; ineligible anchors are not gold cells."""
+    import yaml
+
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    cfg = yaml.safe_load(Path("config/models.yaml").read_text(encoding="utf-8"))
+    for m in cfg["models"]:
+        if m["id"] == "moonshotai/kimi-k2.7-code":
+            m["supports_tools"] = False
+    models_path = tmp_path / "models.yaml"
+    models_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    provider = FakeProvider()
+    spend = SpendLog(tmp_path / "spend.txt", 15)
+    queries = tmp_path / "q.jsonl"
+    queries.write_text(
+        json.dumps(
+            {
+                "prompt": "Use a tool to list files in src.",
+                "phase": "tool",
+                "hint_bin": "standard",
+                "needs_tools": True,
+                "source": "swe-smith",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    gold = tmp_path / "gold.jsonl"
+    assert (
+        main(
+            ["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1"],
+            provider=provider,
+            spend=spend,
+            cache_dir=tmp_path / "cache",
+            models_path=models_path,
+        )
+        == 0
+    )
+    called = {c["model"] for c in provider.calls}
+    assert "moonshotai/kimi-k2.7-code" not in called
+    assert "deepseek-ai/deepseek-v4-flash" in called
+    assert "qwen/qwen3.6-27b" in called
+    assert "deepseek-ai/deepseek-v4-pro" in called
+    assert "moonshotai/kimi-k3" not in called
+    rows = [json.loads(line) for line in gold.read_text(encoding="utf-8").splitlines() if line.strip()]
+    models = {r["model_id"] for r in rows}
+    assert "moonshotai/kimi-k2.7-code" not in models
+    assert "moonshotai/kimi-k3" not in models
+    for r in rows:
+        if not r.get("unobserved"):
+            assert "success" in r and "success_tier" in r
+
+
+def test_gold_is_cache_first(tmp_path, monkeypatch):
+    """Second gold run on the same bodies is cache-first: no new spend, no new provider calls."""
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    provider = FakeProvider()
+    spend = SpendLog(tmp_path / "spend.txt", 15)
+    queries = tmp_path / "q.jsonl"
+    queries.write_text(json.dumps({"prompt": "add a docstring"}) + "\n", encoding="utf-8")
+    gold = tmp_path / "gold.jsonl"
+    kwargs = dict(
+        provider=provider,
+        spend=spend,
+        cache_dir=tmp_path / "cache",
+        models_path=Path("config/models.yaml"),
+    )
+    assert main(["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1"], **kwargs) == 0
+    n_calls = len(provider.calls)
+    first_spend = spend.total()
+    assert n_calls > 0 and first_spend > 0
+    assert main(["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1"], **kwargs) == 0
+    assert len(provider.calls) == n_calls
+    assert spend.total() == first_spend
+
+
+def test_gold_upstream_429_is_unobserved_not_failure(tmp_path, monkeypatch):
+    """Provider 429 is missing, not success=0."""
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    rate = {"status": 429, "json": {"error": {"message": "rate"}}}
+    provider = FakeProvider([rate, rate, rate, rate])
+    spend = SpendLog(tmp_path / "spend.txt", 15)
+    queries = tmp_path / "q.jsonl"
+    queries.write_text(json.dumps({"prompt": "add a docstring"}) + "\n", encoding="utf-8")
+    gold = tmp_path / "gold.jsonl"
+    assert (
+        main(
+            ["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1"],
+            provider=provider,
+            spend=spend,
+            cache_dir=tmp_path / "cache",
+            models_path=Path("config/models.yaml"),
+        )
+        == 0
+    )
+    rows = [json.loads(line) for line in gold.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert rows and all(r.get("unobserved") is True for r in rows)
+    assert all("success" not in r for r in rows)
+
+
+def test_gold_dump_resolved_is_not_y(tmp_path, monkeypatch):
+    """Dump teacher resolved on a pool-shaped row is not gold y."""
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+
+    class Empty:
+        def __init__(self):
+            self.calls = []
+
+        async def complete(self, body):
+            self.calls.append(dict(body))
+            return _ok("")
+
+    provider = Empty()
+    spend = SpendLog(tmp_path / "spend.txt", 15)
+    queries = tmp_path / "q.jsonl"
+    queries.write_text(
+        json.dumps(
+            {
+                "prompt": "add a docstring",
+                "phase": "edit",
+                "hint_bin": "trivial",
+                "needs_tools": False,
+                "source": "swe-smith",
+                "resolved": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    gold = tmp_path / "gold.jsonl"
+    assert (
+        main(
+            ["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1"],
+            provider=provider,
+            spend=spend,
+            cache_dir=tmp_path / "cache",
+            models_path=Path("config/models.yaml"),
+        )
+        == 0
+    )
+    rows = [json.loads(line) for line in gold.read_text(encoding="utf-8").splitlines() if line.strip()]
+    observed = [r for r in rows if not r.get("unobserved")]
+    assert observed and all(r.get("success") is False for r in observed)
+    assert all("resolved" not in r and "y" not in r for r in rows)
+
+
+def test_gold_budget_code_default_stays_15(tmp_path, monkeypatch):
+    """Code default BUDGET_LIMIT_USD stays 15 unless the operator raises it."""
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    monkeypatch.delenv("BUDGET_LIMIT_USD", raising=False)
+    captured: dict[str, float] = {}
+    real = SpendLog
+
+    def wrap(path, limit):
+        captured["limit"] = float(limit)
+        return real(tmp_path / "spend.txt", limit)
+
+    monkeypatch.setattr("aiand_router.train.SpendLog", wrap)
+    queries = tmp_path / "q.jsonl"
+    queries.write_text(json.dumps({"prompt": "x"}) + "\n", encoding="utf-8")
+    assert (
+        main(
+            ["gold", "--queries", str(queries), "--out", str(tmp_path / "gold.jsonl"), "--limit", "1"],
+            provider=FakeProvider(),
+            cache_dir=tmp_path / "cache",
+            models_path=Path("config/models.yaml"),
+        )
+        == 0
+    )
+    assert captured["limit"] == 15.0
 
 
 def test_gold_budget_skip_is_unobserved_not_failure(tmp_path, monkeypatch):
