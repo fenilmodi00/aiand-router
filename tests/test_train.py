@@ -759,6 +759,67 @@ def test_fit_cal_only_id_with_silver_gets_no_weights(tmp_path, monkeypatch):
     assert flash in data["weights"]
 
 
+def test_fit_cal_only_id_onboards_via_table_not_calibrated_logistic(tmp_path, monkeypatch):
+    """Cal-only ids have success gold: live P(success) is the gold table, not silver logistic."""
+    from aiand_router.scorer import score_eligible
+
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    flash = "deepseek-ai/deepseek-v4-flash"
+    gemma = "google/gemma-4-31b-it"
+    train_rows = [_gold_cell(f"train prompt {i}", flash, True) for i in range(4)]
+    cal_rows = [_gold_cell(f"zz cal prompt {i}", flash, False) for i in range(2)]
+    cal_rows += [_gold_cell(r["prompt"], gemma, True) for r in cal_rows[:2]]
+    for r in cal_rows:
+        r["dense"] = True
+    gold = tmp_path / "sparse.jsonl"
+    gold.write_text("".join(json.dumps(r) + "\n" for r in train_rows), encoding="utf-8")
+    cal = tmp_path / "dense.jsonl"
+    cal.write_text("".join(json.dumps(r) + "\n" for r in cal_rows), encoding="utf-8")
+    silver = tmp_path / "silver.jsonl"
+    silver.write_text(
+        json.dumps(
+            {
+                "prompt": "silver only",
+                "complexity_bin": "standard",
+                "p_success": {gemma: 0.1, flash: 0.8},
+                "tokens": 10,
+                "needs_tools": False,
+                "phase": "edit",
+                "hint_bin": "standard",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    artifact = tmp_path / "scorer.json"
+    assert (
+        main(
+            [
+                "fit",
+                "--gold",
+                str(gold),
+                "--cal",
+                str(cal),
+                "--silver",
+                str(silver),
+                "--out",
+                str(artifact),
+            ],
+            provider=FakeProvider(),
+            spend=SpendLog(tmp_path / "spend.txt", 15),
+            cache_dir=tmp_path / "cache",
+            models_path=Path("config/models.yaml"),
+        )
+        == 0
+    )
+    data = json.loads(artifact.read_text(encoding="utf-8"))
+    _, ps = score_eligible(
+        data, [flash, gemma], phase="edit", needs_tools=False, tokens=10, hint_bin=None
+    )
+    assert flash in ps
+    assert ps[gemma] == 1.0
+
+
 def test_fit_dense_tagged_rows_unused_for_train_weights(tmp_path, monkeypatch):
     """dense=true gold cells stay out of train weights even in a concatenated --gold file."""
     monkeypatch.setenv(OPT_IN_ENV, "1")
@@ -823,6 +884,133 @@ def test_fit_silver_only_regularizes_unobserved_not_observed_gold(tmp_path, monk
     assert data["p_success"][mid] == 0.0
     assert "google/gemma-4-31b-it" not in data["weights"]
     assert "google/gemma-4-31b-it" not in data["p_success"]
+
+
+def test_fit_then_score_omits_ids_with_no_success_gold(tmp_path, monkeypatch):
+    """Catalog ids with silver only must not appear in live calibrated P(success)."""
+    from aiand_router.scorer import score_eligible
+
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    flash = "deepseek-ai/deepseek-v4-flash"
+    gemma = "google/gemma-4-31b-it"
+    gold = tmp_path / "gold.jsonl"
+    gold.write_text(
+        "".join(json.dumps(_gold_cell(f"train {i}", flash, True)) + "\n" for i in range(4)),
+        encoding="utf-8",
+    )
+    silver = tmp_path / "silver.jsonl"
+    silver.write_text(
+        json.dumps(
+            {
+                "prompt": "unobserved other query",
+                "complexity_bin": "standard",
+                "p_success": {flash: 0.4, gemma: 0.99},
+                "tokens": 10,
+                "needs_tools": False,
+                "phase": "edit",
+                "hint_bin": "standard",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    artifact = tmp_path / "scorer.json"
+    assert (
+        main(
+            ["fit", "--gold", str(gold), "--silver", str(silver), "--out", str(artifact)],
+            provider=FakeProvider(),
+            spend=SpendLog(tmp_path / "spend.txt", 15),
+            cache_dir=tmp_path / "cache",
+            models_path=Path("config/models.yaml"),
+        )
+        == 0
+    )
+    data = json.loads(artifact.read_text(encoding="utf-8"))
+    assert data["not_spec_floors"] is True
+    assert "threshold" not in data
+    assert "max_regret" not in data
+    assert "gbdt" not in data
+    _, ps = score_eligible(
+        data, [flash, gemma], phase="edit", needs_tools=False, tokens=10, hint_bin=None
+    )
+    assert flash in ps
+    assert gemma not in ps
+
+
+def test_fit_silver_unobserved_regularizes_weights_not_intercepts_or_platt(tmp_path, monkeypatch):
+    """Silver on an unobserved cell may move feature weights; intercepts stay gold; Platt y is cal-gold."""
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    flash = "deepseek-ai/deepseek-v4-flash"
+    train = [_gold_cell(f"train prompt {i}", flash, True) for i in range(8)]
+    cal = [_gold_cell(f"zz cal prompt {i}", flash, False) for i in range(2)]
+    gold = tmp_path / "gold.jsonl"
+    gold.write_text("".join(json.dumps(r) + "\n" for r in train + cal), encoding="utf-8")
+    silver_row = {
+        "prompt": "unobserved tools query",
+        "complexity_bin": "hard",
+        "p_success": {flash: 1.0},
+        "tokens": 40,
+        "needs_tools": True,
+        "phase": "debug",
+        "hint_bin": "hard",
+    }
+    unlabeled = {
+        "prompt": "still unlabeled",
+        "unlabeled": True,
+        "p_success": {flash: 1.0},
+        "complexity_bin": "frontier",
+        "tokens": 40,
+        "needs_tools": True,
+        "phase": "debug",
+        "hint_bin": "frontier",
+    }
+    kwargs = dict(
+        provider=FakeProvider(),
+        spend=SpendLog(tmp_path / "spend.txt", 15),
+        cache_dir=tmp_path / "cache",
+        models_path=Path("config/models.yaml"),
+    )
+    gold_only = tmp_path / "gold_only.json"
+    assert main(["fit", "--gold", str(gold), "--out", str(gold_only)], **kwargs) == 0
+    silver = tmp_path / "silver.jsonl"
+    silver.write_text(json.dumps(silver_row) + "\n" + json.dumps(unlabeled) + "\n", encoding="utf-8")
+    with_silver = tmp_path / "with_silver.json"
+    assert (
+        main(
+            ["fit", "--gold", str(gold), "--silver", str(silver), "--out", str(with_silver)],
+            **kwargs,
+        )
+        == 0
+    )
+    labeled_only = tmp_path / "labeled_only.json"
+    silver_labeled = tmp_path / "silver_labeled.jsonl"
+    silver_labeled.write_text(json.dumps(silver_row) + "\n", encoding="utf-8")
+    assert (
+        main(
+            ["fit", "--gold", str(gold), "--silver", str(silver_labeled), "--out", str(labeled_only)],
+            **kwargs,
+        )
+        == 0
+    )
+    a = json.loads(gold_only.read_text(encoding="utf-8"))
+    b = json.loads(with_silver.read_text(encoding="utf-8"))
+    c = json.loads(labeled_only.read_text(encoding="utf-8"))
+    assert a["intercepts"][flash] == b["intercepts"][flash] == _logit(1.0)
+    assert a["weights"][flash] != b["weights"][flash]
+    assert b["weights"][flash] == c["weights"][flash]
+    assert b["not_spec_floors"] is True
+    _, cal_prompts = _split_cal_prompts([r["prompt"] for r in train + cal])
+    cal_gold = [r for r in cal if r["prompt"] in cal_prompts]
+    w = b["weights"][flash]
+    ic = b["intercepts"][flash]
+    zs, ys = [], []
+    for r in cal_gold:
+        x = _row_x(r)
+        zs.append(ic + sum(w[i] * x[i] for i in range(len(w))))
+        ys.append(1.0 if r["success"] else 0.0)
+    pa, pb = _fit_platt(zs, ys)
+    assert b["platt"]["a"] == pa
+    assert b["platt"]["b"] == pb
 
 
 def test_gold_y_verified_beats_nonempty_content():

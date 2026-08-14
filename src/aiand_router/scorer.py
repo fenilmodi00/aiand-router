@@ -141,6 +141,10 @@ def score_eligible(
         table = artifact.get("p_success") or {}
         p_success = {}
         for i in eligible_ids:
+            if intercepts and i not in intercepts:
+                if i in table:
+                    p_success[i] = float(table[i])
+                continue
             w = weights.get(i)
             if not w or len(w) != len(x):
                 if i in table:

@@ -90,6 +90,24 @@ def test_intercepts_change_p_success():
     assert high["m/a"] > missing["m/a"] > low["m/a"]
 
 
+def test_score_eligible_omits_ids_with_silver_weights_but_no_gold_intercept():
+    """Ids without success gold get no live calibrated P(success) from silver alone."""
+    from aiand_router.scorer import score_eligible
+
+    zeros = _zeros(_full_dim())
+    artifact = {
+        "weights": {"m/gold": zeros, "m/silver": zeros},
+        "intercepts": {"m/gold": 0.5},
+        "p_success": {"m/gold": 0.8},
+        "platt": {"a": 1.0, "b": 0.0},
+    }
+    _, ps = score_eligible(
+        artifact, ["m/gold", "m/silver"], phase="plan", needs_tools=False, tokens=100
+    )
+    assert "m/gold" in ps
+    assert "m/silver" not in ps
+
+
 def test_score_eligible_uses_predicted_bin_when_hint_bin_is_none():
     from aiand_router.scorer import predict_complexity_bin, score_eligible
 
