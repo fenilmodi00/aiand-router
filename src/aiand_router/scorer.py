@@ -117,6 +117,16 @@ def _calibrator_ab(artifact: dict[str, Any]) -> tuple[float, float]:
     return float(src.get("a", 1.0)), float(src.get("b", 0.0))
 
 
+def _gbdt_z(head: dict[str, Any], x: list[float]) -> float:
+    z = float(head.get("intercept") or 0.0)
+    for t in head.get("trees") or []:
+        j = int(t["feature"])
+        if j >= len(x):
+            continue
+        z += float(t["left"] if x[j] <= float(t["threshold"]) else t["right"])
+    return z
+
+
 def score_eligible(
     artifact: dict[str, Any],
     eligible_ids: list[str],
@@ -126,6 +136,32 @@ def score_eligible(
     tokens: int = 1,
     hint_bin: str | None = None,
 ) -> tuple[str, dict[str, float]]:
+    gbdt = artifact.get("gbdt")
+    if isinstance(gbdt, dict) and gbdt:
+        bin_ = (
+            hint_bin
+            if hint_bin in BINS
+            else predict_complexity_bin(
+                artifact, phase=phase, needs_tools=needs_tools, tokens=tokens
+            )
+        )
+        x = featurize(phase, needs_tools, tokens, bin_)
+        a, b = _calibrator_ab(artifact)
+        intercepts = artifact.get("intercepts") or {}
+        table = artifact.get("p_success") or {}
+        p_success = {}
+        for i in eligible_ids:
+            if intercepts and i not in intercepts:
+                if i in table:
+                    p_success[i] = float(table[i])
+                continue
+            head = gbdt.get(i)
+            if not isinstance(head, dict):
+                if i in table:
+                    p_success[i] = float(table[i])
+                continue
+            p_success[i] = _sigmoid(a * _gbdt_z(head, x) + b)
+        return bin_, p_success
     weights = artifact.get("weights")
     if isinstance(weights, dict) and weights:
         bin_ = (

@@ -1338,3 +1338,120 @@ def test_fit_binary_intercept_freezes_bias_column():
     ys = [1.0, 0.0, 1.0, 0.0]
     w = _fit_binary_intercept(xs, ys, intercept=_logit(0.5))
     assert w[0] == 0.0
+
+
+def test_fit_gbdt_writes_trees_keeps_not_spec_floors(tmp_path, monkeypatch):
+    """One GBDT + post-hoc Platt after logistic fails the gate. Rec B / live embed stay closed."""
+    from aiand_router.scorer import score_eligible
+
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    flash = "deepseek-ai/deepseek-v4-flash"
+    train = [_gold_cell(f"train prompt {i}", flash, i % 2 == 0) for i in range(8)]
+    for i, r in enumerate(train):
+        r["needs_tools"] = i >= 4
+        r["phase"] = "debug" if i >= 4 else "edit"
+    gold = tmp_path / "gold.jsonl"
+    gold.write_text("".join(json.dumps(r) + "\n" for r in train), encoding="utf-8")
+    cal = tmp_path / "cal.jsonl"
+    cal.write_text(
+        "".join(json.dumps(_gold_cell(f"zz cal {i}", flash, False)) + "\n" for i in range(2)),
+        encoding="utf-8",
+    )
+    artifact = tmp_path / "scorer.json"
+    assert (
+        main(
+            [
+                "fit",
+                "--gold",
+                str(gold),
+                "--cal",
+                str(cal),
+                "--out",
+                str(artifact),
+                "--gbdt",
+            ],
+            provider=FakeProvider(),
+            spend=SpendLog(tmp_path / "spend.txt", 15),
+            cache_dir=tmp_path / "cache",
+            models_path=Path("config/models.yaml"),
+        )
+        == 0
+    )
+    data = json.loads(artifact.read_text(encoding="utf-8"))
+    assert data["not_spec_floors"] is True
+    assert "threshold" not in data
+    assert "max_regret" not in data
+    assert "embed" not in data and "bilinear" not in data
+    assert flash in data["gbdt"]
+    trees = data["gbdt"][flash]["trees"]
+    assert isinstance(trees, list) and trees
+    assert "feature" in trees[0] and "threshold" in trees[0]
+    _, ps = score_eligible(
+        data, [flash], phase="edit", needs_tools=False, tokens=10, hint_bin=None
+    )
+    assert flash in ps
+    assert 0.0 < ps[flash] < 1.0
+
+
+def test_fit_gbdt_platt_on_cal_gold_only(tmp_path, monkeypatch):
+    """GBDT z is calibrated on the cal-gold slice only — never silver, never train y."""
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    flash = "deepseek-ai/deepseek-v4-flash"
+    train = [_gold_cell(f"train prompt {i}", flash, True) for i in range(8)]
+    cal_rows = [_gold_cell(f"zz cal prompt {i}", flash, False) for i in range(2)]
+    gold = tmp_path / "gold.jsonl"
+    gold.write_text("".join(json.dumps(r) + "\n" for r in train), encoding="utf-8")
+    cal = tmp_path / "cal.jsonl"
+    cal.write_text("".join(json.dumps(r) + "\n" for r in cal_rows), encoding="utf-8")
+    silver = tmp_path / "silver.jsonl"
+    silver.write_text(
+        json.dumps(
+            {
+                "prompt": "unobserved silver",
+                "complexity_bin": "standard",
+                "p_success": {flash: 1.0},
+                "tokens": 10,
+                "needs_tools": False,
+                "phase": "edit",
+                "hint_bin": "standard",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    artifact = tmp_path / "scorer.json"
+    assert (
+        main(
+            [
+                "fit",
+                "--gold",
+                str(gold),
+                "--cal",
+                str(cal),
+                "--silver",
+                str(silver),
+                "--out",
+                str(artifact),
+                "--gbdt",
+            ],
+            provider=FakeProvider(),
+            spend=SpendLog(tmp_path / "spend.txt", 15),
+            cache_dir=tmp_path / "cache",
+            models_path=Path("config/models.yaml"),
+        )
+        == 0
+    )
+    data = json.loads(artifact.read_text(encoding="utf-8"))
+    head = data["gbdt"][flash]
+    zs, ys = [], []
+    for r in cal_rows:
+        x = _row_x(r)
+        z = float(head["intercept"])
+        for t in head["trees"]:
+            z += t["left"] if x[int(t["feature"])] <= float(t["threshold"]) else t["right"]
+        zs.append(z)
+        ys.append(1.0 if r["success"] else 0.0)
+    a, b = _fit_platt(zs, ys)
+    assert data["platt"]["a"] == a
+    assert data["platt"]["b"] == b
+    assert data["not_spec_floors"] is True

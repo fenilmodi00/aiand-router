@@ -269,3 +269,26 @@ def test_load_scorer_corrupt_is_none_and_scorer_down_does_not_invent_p(tmp_path)
     assert out.complexity_bin is None
     assert "scorer_down" in (out.reason_codes or [])
     assert out.p_success is None
+
+
+def test_score_eligible_uses_gbdt_when_present():
+    """GBDT artifact scores from trees + Platt, not the logistic weights path."""
+    from aiand_router.scorer import score_eligible
+
+    zeros = _zeros(_full_dim())
+    artifact = {
+        "not_spec_floors": True,
+        "weights": {"m/a": zeros},
+        "intercepts": {"m/a": 0.0},
+        "gbdt": {
+            "m/a": {
+                "intercept": 0.0,
+                "trees": [{"feature": 1, "threshold": 0.5, "left": -2.0, "right": 2.0}],
+            }
+        },
+        "platt": {"a": 1.0, "b": 0.0},
+    }
+    _, no_tools = score_eligible(artifact, ["m/a"], phase="plan", needs_tools=False, tokens=100)
+    _, with_tools = score_eligible(artifact, ["m/a"], phase="plan", needs_tools=True, tokens=100)
+    assert no_tools["m/a"] < 0.5 < with_tools["m/a"]
+    assert artifact["not_spec_floors"] is True

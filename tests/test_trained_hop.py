@@ -596,3 +596,48 @@ def test_shadow_loads_rec_a_and_predicts_bin_without_hint_bin(tmp_path):
     row = _last_row(tmp_path)
     assert row["path"] == "shadow"
     assert row["complexity_bin"] == "frontier"
+
+
+def test_shadow_loads_gbdt_and_does_not_auto_flip(tmp_path):
+    """GBDT Rec A still serves rules under default shadow; JSONL/headers show path. No Verified stamp."""
+    from aiand_router.scorer import BINS, FAMILIES
+
+    yaml_path = _tiny_catalog(tmp_path)
+    obs = 3 + 4 + len(FAMILIES)
+    obs_z = [0.0] * obs
+    artifact = tmp_path / "scorer.json"
+    artifact.write_text(
+        json.dumps(
+            {
+                "not_spec_floors": True,
+                "complexity_bin": "standard",
+                "gbdt": {
+                    "cheap/ok": {"intercept": -1.0, "trees": []},
+                    "mid/ok": {"intercept": 0.5, "trees": []},
+                    "dear/ok": {"intercept": 1.5, "trees": []},
+                },
+                "intercepts": {"cheap/ok": -1.0, "mid/ok": 0.5, "dear/ok": 1.5},
+                "p_success": {"cheap/ok": 0.3, "mid/ok": 0.6, "dear/ok": 0.9},
+                "bin_weights": {
+                    "trivial": obs_z,
+                    "standard": obs_z,
+                    "hard": obs_z,
+                    "frontier": obs_z,
+                },
+                "platt": {"a": 1.0, "b": 0.0},
+            }
+        ),
+        encoding="utf-8",
+    )
+    client, provider = _client(tmp_path, scorer_path=artifact, config_path=yaml_path)
+    response = client.post("/v1/chat/completions", json=CHAT, headers=AUTH)
+    assert response.status_code == 200
+    assert response.headers["x-router-path"] == "shadow"
+    assert provider.calls[0]["model"] == "cheap/ok"
+    # GBDT intercepts: cheap 0.27 / mid 0.62 / dear 0.82 → cheapest-above-bar is mid.
+    # Table-only p_success would pick dear. Live hop stays rules (cheap).
+    assert response.headers["x-router-trained-would"] == "mid/ok"
+    row = _last_row(tmp_path)
+    assert row["path"] == "shadow"
+    data = json.loads(artifact.read_text(encoding="utf-8"))
+    assert data["not_spec_floors"] is True

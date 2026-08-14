@@ -26,7 +26,7 @@ from .router import (
     Model,
 )
 from .pool import run_pool, sample_stratum
-from .scorer import BINS, featurize, featurize_observable
+from .scorer import BINS, _gbdt_z, featurize, featurize_observable
 
 _TEACHER_SYS = (
     "Label this coding-agent request for a model router. Do not solve the task. "
@@ -623,6 +623,66 @@ def _fit_binary_intercept(
     return w
 
 
+GBDT_TREES = 24
+GBDT_LR = 0.1
+
+
+def _fit_stump(xs: list[list[float]], resid: list[float]) -> dict[str, float]:
+    n = len(xs)
+    dim = len(xs[0]) if xs else 0
+    best: tuple[float, int, float, float, float] | None = None
+    for j in range(1, dim):
+        vals = sorted({x[j] for x in xs})
+        if len(vals) < 2:
+            continue
+        for k in range(len(vals) - 1):
+            thr = 0.5 * (vals[k] + vals[k + 1])
+            left_s = left_n = right_s = right_n = 0.0
+            for x, r in zip(xs, resid):
+                if x[j] <= thr:
+                    left_s += r
+                    left_n += 1
+                else:
+                    right_s += r
+                    right_n += 1
+            if left_n == 0 or right_n == 0:
+                continue
+            left, right = left_s / left_n, right_s / right_n
+            sse = 0.0
+            for x, r in zip(xs, resid):
+                pred = left if x[j] <= thr else right
+                sse += (r - pred) ** 2
+            if best is None or sse < best[0]:
+                best = (sse, j, thr, left, right)
+    if best is None:
+        mean = (sum(resid) / n) if n else 0.0
+        return {"feature": 0, "threshold": 0.0, "left": mean, "right": mean}
+    return {"feature": best[1], "threshold": best[2], "left": best[3], "right": best[4]}
+
+
+def _fit_gbdt(
+    xs: list[list[float]],
+    ys: list[float],
+    intercept: float,
+    n_trees: int = GBDT_TREES,
+    lr: float = GBDT_LR,
+) -> dict[str, Any]:
+    z = [intercept] * len(xs)
+    trees: list[dict[str, float]] = []
+    for _ in range(n_trees):
+        p = [1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, zi)))) for zi in z]
+        resid = [y - pi for y, pi in zip(ys, p)]
+        stump = _fit_stump(xs, resid)
+        stump["left"] = float(stump["left"]) * lr
+        stump["right"] = float(stump["right"]) * lr
+        trees.append(stump)
+        j = int(stump["feature"])
+        thr = float(stump["threshold"])
+        for i, x in enumerate(xs):
+            z[i] += stump["left"] if (j < len(x) and x[j] <= thr) else stump["right"]
+    return {"intercept": intercept, "trees": trees}
+
+
 def _fit_platt(zs: list[float], ys: list[float]) -> tuple[float, float]:
     if len(zs) < 2:
         return 1.0, 0.0
@@ -666,7 +726,11 @@ def _observed_gold(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def fit_scorer(
-    gold_path: Path, silver_path: Path | None, out: Path, cal_path: Path | None = None
+    gold_path: Path,
+    silver_path: Path | None,
+    out: Path,
+    cal_path: Path | None = None,
+    gbdt: bool = False,
 ) -> None:
     gold = _jsonl_rows(gold_path)
     silver = _jsonl_rows(silver_path) if silver_path and silver_path.exists() else []
@@ -709,8 +773,9 @@ def fit_scorer(
                 continue
             by_model_x[mid].append(x)
             by_model_y[mid].append(float(p))
-    weights = {}
+    weights: dict[str, list[float]] = {}
     intercepts = {}
+    gbdt_heads: dict[str, dict[str, Any]] = {}
     for mid, xs in by_model_x.items():
         n_train = train_counts[mid]
         if n_train == 0 or not xs:
@@ -719,17 +784,26 @@ def fit_scorer(
         rate = sum(gold_ys) / len(gold_ys) if gold_ys else 0.5
         ic = _logit(rate)
         intercepts[mid] = ic
-        weights[mid] = _fit_binary_intercept(xs, by_model_y[mid], ic)
+        if gbdt:
+            gbdt_heads[mid] = _fit_gbdt(xs, by_model_y[mid], ic)
+        else:
+            weights[mid] = _fit_binary_intercept(xs, by_model_y[mid], ic)
     zs_cal: list[float] = []
     ys_cal: list[float] = []
     for row in cal_gold:
         mid = row["model_id"]
-        w = weights.get(mid)
-        if not w:
-            continue
-        ic = intercepts[mid]
         x = _row_x(row)
-        zs_cal.append(ic + sum(w[i] * x[i] for i in range(len(w))))
+        if gbdt:
+            head = gbdt_heads.get(mid)
+            if not head:
+                continue
+            zs_cal.append(_gbdt_z(head, x))
+        else:
+            w = weights.get(mid)
+            if not w:
+                continue
+            ic = intercepts[mid]
+            zs_cal.append(ic + sum(w[i] * x[i] for i in range(len(w))))
         ys_cal.append(1.0 if row.get("success") else 0.0)
     a, b = _fit_platt(zs_cal, ys_cal)
     bin_xs: list[list[float]] = []
@@ -749,7 +823,7 @@ def fit_scorer(
             p_success[mid] = sum(gold_ys) / len(gold_ys)
     bins = [str(r.get("complexity_bin")) for r in silver if r.get("complexity_bin") in BINS]
     bin_ = max(set(bins), key=bins.count) if bins else "standard"
-    artifact = {
+    artifact: dict[str, Any] = {
         "not_spec_floors": True,
         "complexity_bin": bin_,
         "p_success": p_success,
@@ -761,6 +835,8 @@ def fit_scorer(
         "n_cal": len(cal_gold),
         "n_silver": len(silver),
     }
+    if gbdt:
+        artifact["gbdt"] = gbdt_heads
     out.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
 
 
@@ -908,6 +984,7 @@ def main(
     f.add_argument("--cal")
     f.add_argument("--silver")
     f.add_argument("--out", required=True)
+    f.add_argument("--gbdt", action="store_true")
     r = sub.add_parser("relabel")
     r.add_argument("--gold", required=True)
     r.add_argument("--queries", required=True)
@@ -935,6 +1012,7 @@ def main(
             Path(args.silver) if args.silver else None,
             Path(args.out),
             Path(args.cal) if args.cal else None,
+            gbdt=bool(args.gbdt),
         )
         return 0
     if args.cmd == "relabel":
