@@ -825,8 +825,8 @@ def main(
     cache_dir: Path | None = None,
     models_path: Path | None = None,
 ) -> int:
-    argv = list(argv) if argv is not None else None
-    is_pool = (argv or [])[:1] == ["pool"]
+    argv = list(argv) if argv is not None else sys.argv[1:]
+    is_pool = argv[:1] == ["pool"]
     if not is_pool and os.getenv(OPT_IN_ENV) != "1":
         return _refuse()
     parser = argparse.ArgumentParser()

@@ -275,7 +275,12 @@ def build_pool(
         if iid in blocked or prompt_key in blocked:
             continue
         kept.append(r)
-    return mix_sources(kept, n, seed)
+    if not any(r.get("source") == "swe-smith" for r in kept):
+        raise ValueError("smith contributed nothing")
+    mixed = mix_sources(kept, n, seed)
+    if not mixed:
+        raise ValueError("empty pool")
+    return mixed
 
 
 def write_pool(rows: list[dict[str, Any]], out: Path) -> None:

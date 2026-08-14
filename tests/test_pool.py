@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from aiand_router.train import OPT_IN_ENV, _read_queries, main
@@ -406,3 +407,73 @@ def test_read_queries_stratum_samples_not_first_n(tmp_path):
     assert len(picked) == 10
     assert {r["hint_bin"] for r in picked} != {"trivial"}
     assert len({r["hint_bin"] for r in picked}) >= 2
+
+
+def test_pool_main_argv_none_reads_sys_argv(tmp_path, monkeypatch):
+    monkeypatch.delenv(OPT_IN_ENV, raising=False)
+    smith = _write_jsonl(
+        tmp_path / "smith-tool.jsonl",
+        [_smith("ok-1", "Refactor the spend log deadlock across cache and gold.")],
+    )
+    out = tmp_path / "pool.jsonl"
+    old = sys.argv
+    try:
+        sys.argv = [
+            "train.py",
+            "pool",
+            "--smith",
+            str(smith),
+            "--eval",
+            str(_empty_eval(tmp_path)),
+            "--out",
+            str(out),
+            "--n",
+            "1",
+        ]
+        code = main()
+    finally:
+        sys.argv = old
+    assert code == 0
+    assert out.exists()
+    rows = _load(out)
+    assert len(rows) == 1
+    assert rows[0]["instance_id"] == "ok-1"
+
+
+def test_pool_refuses_when_smith_all_collide_even_if_gym_present(tmp_path, monkeypatch):
+    monkeypatch.delenv(OPT_IN_ENV, raising=False)
+    smith = _write_jsonl(
+        tmp_path / "smith-tool.jsonl",
+        [_smith("django__django-12345", "Fix the ORM race in django.")],
+    )
+    gym = _write_jsonl(
+        tmp_path / "gym.jsonl",
+        [
+            {
+                "instance_id": "gym-1",
+                "messages": [{"role": "user", "content": "OpenHands gym extra task with a long patch plan."}],
+            }
+        ],
+    )
+    verified = _write_jsonl(
+        tmp_path / "eval.jsonl",
+        [{"instance_id": "django__django-12345", "problem_statement": "Fix the ORM race in django."}],
+    )
+    out = tmp_path / "pool.jsonl"
+    code = main(
+        [
+            "pool",
+            "--smith",
+            str(smith),
+            "--gym",
+            str(gym),
+            "--eval",
+            str(verified),
+            "--out",
+            str(out),
+            "--n",
+            "10",
+        ]
+    )
+    assert code != 0
+    assert not out.exists()
