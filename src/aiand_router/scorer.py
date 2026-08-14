@@ -138,10 +138,13 @@ def score_eligible(
         x = featurize(phase, needs_tools, tokens, bin_)
         a, b = _calibrator_ab(artifact)
         intercepts = artifact.get("intercepts") or {}
+        table = artifact.get("p_success") or {}
         p_success = {}
         for i in eligible_ids:
             w = weights.get(i)
-            if not w:
+            if not w or len(w) != len(x):
+                if i in table:
+                    p_success[i] = float(table[i])
                 continue
             ic = float(intercepts.get(i, 0.0))
             p_success[i] = _sigmoid(a * (ic + _dot([float(v) for v in w], x)) + b)

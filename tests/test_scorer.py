@@ -163,6 +163,21 @@ def test_old_weights_platt_artifact_scores_without_intercepts():
     assert 0.0 < ps["m/a"] < 1.0
 
 
+def test_score_eligible_short_weights_use_table_p_not_truncated_dot():
+    from aiand_router.scorer import score_eligible
+
+    table_p = 0.42
+    # Pre-17-dim layout (bias + tools + log1p + families). Truncated w·x → ~1.0.
+    short = [10.0] * (3 + len(FAMILIES))
+    artifact = {
+        "weights": {"m/a": short, "m/b": short},
+        "p_success": {"m/a": table_p},
+        "platt": {"a": 1.0, "b": 0.0},
+    }
+    _, ps = score_eligible(artifact, ["m/a", "m/b"], phase="plan", needs_tools=False, tokens=100)
+    assert ps == {"m/a": table_p}
+
+
 def test_old_p_success_table_artifact_still_works():
     from aiand_router.scorer import score_eligible
 
