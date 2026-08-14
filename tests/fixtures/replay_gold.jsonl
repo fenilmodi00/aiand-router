@@ -1,0 +1,8 @@
+{"prompt": "p0", "model_id": "cheap/flash", "success": true, "success_tier": "gateway", "tokens": 100, "needs_tools": false, "phase": "plan", "hint_bin": "standard"}
+{"prompt": "p0", "model_id": "dear/strong", "success": true, "success_tier": "gateway", "tokens": 100, "needs_tools": false, "phase": "plan", "hint_bin": "standard"}
+{"prompt": "p1", "model_id": "cheap/flash", "success": false, "success_tier": "gateway", "tokens": 100, "needs_tools": false, "phase": "plan", "hint_bin": "standard"}
+{"prompt": "p1", "model_id": "dear/strong", "success": true, "success_tier": "gateway", "tokens": 100, "needs_tools": false, "phase": "plan", "hint_bin": "standard"}
+{"prompt": "p2", "model_id": "cheap/flash", "success": true, "success_tier": "gateway", "tokens": 100, "needs_tools": false, "phase": "plan", "hint_bin": "standard"}
+{"prompt": "p2", "model_id": "dear/strong", "success": false, "success_tier": "gateway", "tokens": 100, "needs_tools": false, "phase": "plan", "hint_bin": "standard"}
+{"prompt": "p3", "model_id": "cheap/flash", "success": false, "success_tier": "gateway", "tokens": 100, "needs_tools": false, "phase": "plan", "hint_bin": "standard"}
+{"prompt": "p3", "model_id": "dear/strong", "success": false, "success_tier": "gateway", "tokens": 100, "needs_tools": false, "phase": "plan", "hint_bin": "standard"}

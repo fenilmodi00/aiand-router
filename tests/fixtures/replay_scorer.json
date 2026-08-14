@@ -1,0 +1,9 @@
+{
+  "not_spec_floors": true,
+  "complexity_bin": "standard",
+  "n_gold": 8,
+  "p_success": {
+    "cheap/flash": 0.85,
+    "dear/strong": 0.25
+  }
+}
