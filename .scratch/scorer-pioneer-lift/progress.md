@@ -48,7 +48,7 @@ Spec: `.scratch/scorer-pioneer-lift/spec.md`
 - Issue 09: complete — verified-like train/cal pool (`--verified-like`). Same report.
 - Issue 10: complete — dual shadow eval (`--cost-gold`). Same report.
 - Issue 11: complete — prefer logistic until Spearman > 0. Same report.
-- Issue 12: needs-info — paid hard-y probe; recipe in ticket. No invented gold cells.
+- Issue 12: complete — paid hard-y probe. Spearman 0.0, y_rate 0.0 (27 observed / 88), `kill_spearman` false. **Fail-pass / do not scale.** Issue 07 not taken. Reports: `issue-12-probe-run.md`, `task-12-probe-report.md`.
 
 ## Whole-branch (issues 01–06)
 
@@ -63,9 +63,11 @@ Spec: `.scratch/scorer-pioneer-lift/spec.md`
 - Decision: `.scratch/scorer-pioneer-lift/next-path-decision.md` — **Option A** (verified-like train/cal gold + dual shadow eval). Not bar-rewrite, not more easy n, not leak/flip.
 - Goal is transfer ranking + hard-cal P(success) + a slice where rules ≠ Flash so cost_delta is real; frozen `gold-verified.jsonl` stays eval-only. Restore logistic until labels transfer; do not serve length-stump GBDT.
 - Issue 07 still not taken. Legitimate only after AUC ≥ 0.65 / BSS>0 / ECE on an unused hard holdout **and** a real cost comparison (or an explicit H3 waiver). No `TRAINED_PATH` flip, no fake pass.
-- Issue 08: complete — unpaid geometry lock (`python -m aiand_router.geometry`). Spearman/kill/prefer_logistic. Eval not fit y.
-- Issue 09: complete — `pool --verified-like` short hard-check train/cal pool, collision-filter vs `--eval`. Not Verified as fit.
-- Issue 10: complete — `replay_report --cost-gold` dual eval; `rules_ne_cheapest_rate`; gate still from `--gold`; no fake pass.
-- Issue 11: complete — logistic default; GBDT replay note + `--gbdt` help; operator recipe uses `data/scorer-logistic.json` until Spearman > 0.
-- Issue 12: needs-info — paid hard-y probe. Recipe in the ticket. Do not invent gold cells. Kill if Spearman still < 0.
-- Report: `.scratch/scorer-pioneer-lift/task-08-plus-report.md`
+- Issue 08: complete (`c3732e8`..`c0b0e0a`, review clean) — unpaid geometry lock (`python -m aiand_router.geometry`). Spearman/kill/prefer_logistic until rho > 0. Eval not fit y.
+- Issue 09: complete (same range, review clean) — `pool --verified-like`; no fake `status` schema; trivial→hard remap; collision-filter vs `--eval`. Not Verified as fit.
+- Issue 10: complete (same range, review clean) — `replay_report --cost-gold` dual eval; `rules_ne_cheapest_rate`; gate still from `--gold`; no fake pass.
+- Issue 11: complete (same range, review clean) — logistic default; GBDT replay note + `--gbdt` help; prefer logistic until Spearman > 0.
+- Issue 12: complete — hard-y probe ran (`datasets/train-queries.jsonl` as `--smith`; no HF SWE-smith dump). Spearman **0.0**, train y_rate **0.0**, `kill_spearman` false, `prefer_logistic` true. **Do not scale** (failed pass; not the ~0.39 easy-y kill). No dense/fit/`--cost-gold`. Issue 07 still not taken. Spend delta ≈ 0.023; 61/88 budget-unobserved (operator `.env` cap; code default 15 unchanged).
+- Issue 13 / scale: **not taken**.
+- Minors (defer): issue-08 ticket text still says Spearman < 0; token histograms thinner than brief; `--cost-gold` no collision vs `--gold`; nested cost_slice gate; hop `SCORER_PATH` recipe; blunt trivial→hard remap; inferred `json_schema` from the word `json`
+- Report: `.scratch/scorer-pioneer-lift/task-12-probe-report.md` / `issue-12-probe-run.md` / `task-08-plus-report.md`
