@@ -84,6 +84,10 @@ def _pick_flash(cfg: dict[str, Any], eligible: list[Model]) -> Model | None:
     return min(eligible, key=lambda m: m.unit_cost) if eligible else None
 
 
+def _pick_cheapest(eligible: list[Model]) -> Model | None:
+    return min(eligible, key=lambda m: m.unit_cost) if eligible else None
+
+
 def _pick_strong(eligible: list[Model]) -> Model | None:
     return max(eligible, key=lambda m: (m.quality, m.unit_cost)) if eligible else None
 
@@ -188,6 +192,7 @@ def replay_report(
     rules_picks: list[tuple[Model | None, dict[str, Any]]] = []
     trained_picks: list[tuple[Model | None, dict[str, Any]]] = []
     flash_picks: list[tuple[Model | None, dict[str, Any]]] = []
+    cheapest_picks: list[tuple[Model | None, dict[str, Any]]] = []
     strong_picks: list[tuple[Model | None, dict[str, Any]]] = []
     oracle_picks: list[tuple[Model | None, dict[str, Any]]] = []
     disagree = 0
@@ -211,6 +216,7 @@ def replay_report(
         rules_picks.append((rules.model, item))
         trained_picks.append((trained.model, item))
         flash_picks.append((_pick_flash(cfg, eligible), item))
+        cheapest_picks.append((_pick_cheapest(eligible), item))
         strong_picks.append((_pick_strong(eligible), item))
         oracle_picks.append((_pick_oracle(eligible, success, item["prompt"]), item))
         if rules.model.id != trained.model.id:
@@ -240,9 +246,10 @@ def replay_report(
         "trained": _policy_stats(trained_picks, success),
         "oracle": _policy_stats(oracle_picks, success),
         "always_flash": _policy_stats(flash_picks, success),
+        "always_cheapest": _policy_stats(cheapest_picks, success),
         "always_strong": _policy_stats(strong_picks, success),
     }
-    return {
+    out = {
         "n_prompts": n,
         "gold_is_holdout": True,
         "policies": policies,
@@ -256,11 +263,15 @@ def replay_report(
         "rules_cost_delta": policies["trained"]["list_price_cost"]
         - policies["rules"]["list_price_cost"],
     }
+    return apply_replay_gate(out)
 
 
 def replay_gate_pass(report: dict[str, Any]) -> bool:
     trained_s = report["policies"]["trained"]["success_rate"]
     rules_s = report["policies"]["rules"]["success_rate"]
+    always_cheapest = report["policies"].get(
+        "always_cheapest", report["policies"]["always_flash"]
+    )
     return (
         report["rank_auc"] >= 0.65
         and report["mean_p_spread"] >= 0.10
@@ -269,8 +280,17 @@ def replay_gate_pass(report: dict[str, Any]) -> bool:
         and report["ece_equal_mass"] <= 0.03
         and trained_s >= rules_s - 0.01
         and report["rules_cost_delta"] < 0
-        and report["policies"]["trained"] != report["policies"]["always_flash"]
+        and report["policies"]["trained"] != always_cheapest
     )
+
+
+def apply_replay_gate(report: dict[str, Any]) -> dict[str, Any]:
+    """Failing any bar keeps shadow and not_spec_floors. Never stamps Verified or flips path."""
+    out = dict(report)
+    out["replay_gate_pass"] = replay_gate_pass(out)
+    out["path"] = "shadow"
+    out["not_spec_floors"] = True
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -292,7 +312,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     report = replay_report(Path(args.gold), artifact, load_models(cfg), cfg)
     print(json.dumps(report, indent=2))
-    print("replay_gate_pass", replay_gate_pass(report))
+    print("replay_gate_pass", report["replay_gate_pass"])
+    print(f"path={report['path']}")
+    print("not_spec_floors", report["not_spec_floors"])
     return 0
 
 

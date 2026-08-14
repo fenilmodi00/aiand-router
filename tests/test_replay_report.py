@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from aiand_router.replay_report import (
+    apply_replay_gate,
     assert_not_production_floors,
     main,
     replay_gate_pass,
@@ -64,7 +65,26 @@ def _artifact() -> dict:
 
 def _report(**kwargs):
     cfg = _toy_cfg()
+    assert_not_production_floors(GOLD, _artifact())
     return replay_report(GOLD, _artifact(), load_models(cfg), cfg, **kwargs)
+
+
+def _bars_green() -> dict:
+    cheapest = {"success_rate": 0.5, "list_price_cost": 0.01}
+    return {
+        "rank_auc": 0.9,
+        "mean_p_spread": 0.2,
+        "brier_skill": 0.1,
+        "ece_equal_width": 0.01,
+        "ece_equal_mass": 0.01,
+        "rules_cost_delta": -0.01,
+        "policies": {
+            "trained": {"success_rate": 0.8, "list_price_cost": 0.04},
+            "rules": {"success_rate": 0.8, "list_price_cost": 0.05},
+            "always_flash": dict(cheapest),
+            "always_cheapest": dict(cheapest),
+        },
+    }
 
 
 def test_fixture_is_not_production_floors():
@@ -128,8 +148,12 @@ def test_cli_gold_is_holdout(capsys):
 
 
 def test_replay_gate_pass_is_bool_on_toy_fixture():
+    assert_not_production_floors(GOLD, _artifact())
     report = _report()
     assert isinstance(replay_gate_pass(report), bool)
+    # toy fixture is allowed to fail the bars; do not require AUC ≥ 0.65 here
+    assert report["path"] == "shadow"
+    assert report["not_spec_floors"] is True
 
 
 def test_replay_gate_fails_when_trained_is_always_cheapest():
@@ -147,6 +171,29 @@ def test_replay_gate_fails_when_trained_is_always_cheapest():
             "trained": dict(cheapest),
             "rules": {"success_rate": 0.5, "list_price_cost": 0.05},
             "always_flash": dict(cheapest),
+            "always_cheapest": dict(cheapest),
+        },
+    }
+    assert replay_gate_pass(report) is False
+
+
+def test_replay_gate_fails_when_trained_is_always_cheapest_even_if_not_flash():
+    """Gate compares trained ≠ always-cheapest-eligible, not trained ≠ always-Flash."""
+    cheapest = {"success_rate": 0.9, "list_price_cost": 0.01}
+    dear = {"success_rate": 0.5, "list_price_cost": 0.10}
+    report = {
+        "rank_auc": 0.9,
+        "mean_p_spread": 0.2,
+        "brier_skill": 0.1,
+        "ece_equal_width": 0.01,
+        "ece_equal_mass": 0.01,
+        "rules_cost_delta": -0.01,
+        "disagreement_rate": 0.4,
+        "policies": {
+            "trained": dict(cheapest),
+            "rules": dict(dear),
+            "always_flash": dict(dear),
+            "always_cheapest": dict(cheapest),
         },
     }
     assert replay_gate_pass(report) is False
@@ -231,3 +278,74 @@ def test_assert_not_production_floors_rejects_staffed_promotion_stamp():
     except AssertionError:
         return
     raise AssertionError("expected staffed promotion floors to be rejected")
+
+
+def test_failing_any_bar_keeps_shadow_and_not_spec_floors():
+    """Toy fixture fails the gate; report stays path=shadow and not_spec_floors (no Verified stamp)."""
+    assert_not_production_floors(GOLD, _artifact())
+    report = _report()
+    assert replay_gate_pass(report) is False
+    assert report["replay_gate_pass"] is False
+    assert report["path"] == "shadow"
+    assert report["not_spec_floors"] is True
+    assert "savings" not in report
+
+
+def test_cli_stdout_grepable_shadow_and_not_spec_floors(tmp_path, capsys, monkeypatch):
+    import os
+
+    import yaml
+
+    monkeypatch.delenv("TRAINED_PATH", raising=False)
+    models = tmp_path / "models.yaml"
+    models.write_text(yaml.safe_dump(_toy_cfg()), encoding="utf-8")
+    assert main(["--gold", str(GOLD), "--artifact", str(SCORER), "--models", str(models)]) == 0
+    out = capsys.readouterr().out
+    assert "path=shadow" in out
+    assert "not_spec_floors" in out
+    assert "replay_gate_pass" in out
+    assert os.getenv("TRAINED_PATH") != "trained"
+
+
+def test_passing_gate_still_keeps_shadow_and_not_spec_floors():
+    """This cycle does not auto-flip TRAINED_PATH or stamp Verified."""
+    out = apply_replay_gate(_bars_green())
+    assert out["replay_gate_pass"] is True
+    assert out["path"] == "shadow"
+    assert out["not_spec_floors"] is True
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("rank_auc", 0.64),
+        ("mean_p_spread", 0.09),
+        ("brier_skill", 0.0),
+        ("ece_equal_width", 0.031),
+        ("ece_equal_mass", 0.031),
+        ("rules_cost_delta", 0.0),
+    ],
+)
+def test_failing_numeric_bar_keeps_shadow_and_not_spec_floors(key, value):
+    report = _bars_green()
+    report[key] = value
+    out = apply_replay_gate(report)
+    assert out["replay_gate_pass"] is False
+    assert out["path"] == "shadow"
+    assert out["not_spec_floors"] is True
+
+
+def test_trained_success_below_rules_minus_1pp_fails_gate():
+    report = _bars_green()
+    report["policies"]["trained"]["success_rate"] = 0.78
+    out = apply_replay_gate(report)
+    assert out["replay_gate_pass"] is False
+    assert out["path"] == "shadow"
+    assert out["not_spec_floors"] is True
+
+
+def test_replay_report_includes_always_cheapest_policy():
+    assert_not_production_floors(GOLD, _artifact())
+    row = _report()["policies"]["always_cheapest"]
+    assert 0.0 <= row["success_rate"] <= 1.0
+    assert row["list_price_cost"] >= 0.0
