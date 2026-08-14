@@ -46,14 +46,59 @@ def load_scorer(path: Path | None) -> dict[str, Any] | None:
     return data
 
 
-def featurize(phase: str, needs_tools: bool, tokens: int) -> list[float]:
+def _token_bins(tokens: int) -> list[float]:
+    t = max(0, tokens)
+    return [
+        1.0 if t < 128 else 0.0,
+        1.0 if 128 <= t < 512 else 0.0,
+        1.0 if 512 <= t < 2048 else 0.0,
+        1.0 if t >= 2048 else 0.0,
+    ]
+
+
+def featurize_observable(phase: str, needs_tools: bool, tokens: int) -> list[float]:
+    """Request-observable features only (no hint_bin). Used for live complexity prediction."""
     fam = PHASE_FAMILY.get(phase, "plan")
     return [
         1.0,
         1.0 if needs_tools else 0.0,
         math.log1p(max(0, tokens)),
+        *_token_bins(tokens),
         *[1.0 if fam == f else 0.0 for f in FAMILIES],
     ]
+
+
+def featurize(
+    phase: str,
+    needs_tools: bool,
+    tokens: int,
+    hint_bin: str = "standard",
+) -> list[float]:
+    fam = PHASE_FAMILY.get(phase, "plan")
+    hb = hint_bin if hint_bin in BINS else "standard"
+    return [
+        1.0,
+        1.0 if needs_tools else 0.0,
+        math.log1p(max(0, tokens)),
+        *_token_bins(tokens),
+        *[1.0 if hb == b else 0.0 for b in BINS],
+        *[1.0 if fam == f else 0.0 for f in FAMILIES],
+    ]
+
+
+def predict_complexity_bin(
+    artifact: dict[str, Any],
+    *,
+    phase: str,
+    needs_tools: bool,
+    tokens: int,
+) -> str:
+    bin_w = artifact.get("bin_weights") or {}
+    if not bin_w:
+        bin_ = str(artifact.get("complexity_bin") or "standard")
+        return bin_ if bin_ in BINS else "standard"
+    x = featurize_observable(phase, needs_tools, tokens)
+    return max(BINS, key=lambda b: _dot([float(v) for v in (bin_w.get(b) or [])], x))
 
 
 def _sigmoid(z: float) -> float:
@@ -66,6 +111,12 @@ def _dot(w: list[float], x: list[float]) -> float:
     return sum(float(w[i]) * x[i] for i in range(n))
 
 
+def _calibrator_ab(artifact: dict[str, Any]) -> tuple[float, float]:
+    cal = artifact.get("calibrator") if isinstance(artifact.get("calibrator"), dict) else {}
+    src = cal if ("a" in cal or "b" in cal) else (artifact.get("platt") or {})
+    return float(src.get("a", 1.0)), float(src.get("b", 0.0))
+
+
 def score_eligible(
     artifact: dict[str, Any],
     eligible_ids: list[str],
@@ -73,21 +124,27 @@ def score_eligible(
     phase: str = "plan",
     needs_tools: bool = False,
     tokens: int = 1,
+    hint_bin: str | None = None,
 ) -> tuple[str, dict[str, float]]:
     weights = artifact.get("weights")
     if isinstance(weights, dict) and weights:
-        x = featurize(phase, needs_tools, tokens)
-        bin_w = artifact.get("bin_weights") or {}
-        bin_ = max(BINS, key=lambda b: _dot(list(bin_w.get(b) or []), x))
-        platt = artifact.get("platt") or {}
-        a = float(platt.get("a", 1.0))
-        b = float(platt.get("b", 0.0))
+        bin_ = (
+            hint_bin
+            if hint_bin in BINS
+            else predict_complexity_bin(
+                artifact, phase=phase, needs_tools=needs_tools, tokens=tokens
+            )
+        )
+        x = featurize(phase, needs_tools, tokens, bin_)
+        a, b = _calibrator_ab(artifact)
+        intercepts = artifact.get("intercepts") or {}
         p_success = {}
         for i in eligible_ids:
             w = weights.get(i)
             if not w:
                 continue
-            p_success[i] = _sigmoid(a * _dot([float(v) for v in w], x) + b)
+            ic = float(intercepts.get(i, 0.0))
+            p_success[i] = _sigmoid(a * (ic + _dot([float(v) for v in w], x)) + b)
         return bin_, p_success
     raw = artifact.get("p_success") or {}
     p_success = {i: float(raw[i]) for i in eligible_ids if i in raw}
@@ -144,6 +201,7 @@ def trained_select(
     streaming: bool = False,
     max_tokens: int | None = None,
     latency_limit_ms: float | None = None,
+    hint_bin: str | None = None,
 ) -> Decision:
     aa_bar, eligible = eligible_models(
         cfg,
@@ -167,6 +225,7 @@ def trained_select(
         phase=phase,
         needs_tools=needs_tools,
         tokens=tokens,
+        hint_bin=hint_bin,
     )
     chosen, rule = pick_cheapest_above_bar(eligible, p_success, threshold=t, max_regret=regret)
     if chosen is None:
