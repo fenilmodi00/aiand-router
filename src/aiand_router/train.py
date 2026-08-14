@@ -192,8 +192,9 @@ async def _teacher_call(
         "response_format": _SCHEMA,
         "max_completion_tokens": max_completion_tokens,
     }
-    if model_id == CHEAP_TEACHER:
-        body["reasoning_effort"] = "low"
+    effort = MIN_REASONING_EFFORT.get(model_id)
+    if effort:
+        body["reasoning_effort"] = effort
     result = await _complete(provider, body, cache=cache, spend=spend, models_by_id=models_by_id)
     parsed = _parse_label(result)
     if parsed:

@@ -7,7 +7,10 @@ from pathlib import Path
 
 import httpx
 from aiand_router.router import SpendLog
+from aiand_router.cache import RequestCache
 from aiand_router.train import (
+    ESCALATE_TEACHER,
+    MIN_REASONING_EFFORT,
     OPT_IN_ENV,
     SPARSE_ANCHORS,
     _fit_binary_intercept,
@@ -17,6 +20,7 @@ from aiand_router.train import (
     _logit,
     _row_x,
     _split_cal_prompts,
+    _teacher_call,
     main,
 )
 from tests.test_gateway import FakeProvider, _ok
@@ -99,6 +103,22 @@ def test_teacher_writes_silver_and_uses_motif_then_cache(tmp_path, monkeypatch):
     assert main(["teacher", "--queries", str(queries), "--out", str(out), "--limit", "1"], **kwargs) == 0
     assert spend.total() == first_spend
     assert provider.calls[0]["model"] != "qwen/qwen3.6-27b"
+
+
+def test_teacher_call_sends_min_reasoning_effort_for_glm(tmp_path):
+    """Escalate/salvage GLM must send published min effort so JSON can finish."""
+    provider = FakeProvider([_label()])
+    asyncio.run(
+        _teacher_call(
+            provider,
+            ESCALATE_TEACHER,
+            [{"role": "user", "content": "x"}],
+            cache=RequestCache(tmp_path / "cache"),
+            spend=SpendLog(tmp_path / "spend.txt", 15),
+            models_by_id={},
+        )
+    )
+    assert provider.calls[0]["reasoning_effort"] == MIN_REASONING_EFFORT[ESCALATE_TEACHER]
 
 
 def test_parse_fail_still_escalates_after_quality_cap(tmp_path, monkeypatch):

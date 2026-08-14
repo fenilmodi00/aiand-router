@@ -227,7 +227,9 @@ def replay_report(
         if len(ps) >= 2:
             spreads.append(max(ps.values()) - min(ps.values()))
         for mid in ids:
-            auc_pairs.append((float(ps.get(mid, 0.5)), 1 if success[(item["prompt"], mid)] else 0))
+            if mid not in ps:
+                continue
+            auc_pairs.append((float(ps[mid]), 1 if success[(item["prompt"], mid)] else 0))
         y = success.get((item["prompt"], trained.model.id))
         if trained.confidence is not None and y is not None:
             selected.append((float(trained.confidence), 1.0 if y else 0.0))
@@ -267,7 +269,7 @@ def replay_gate_pass(report: dict[str, Any]) -> bool:
         and report["ece_equal_mass"] <= 0.03
         and trained_s >= rules_s - 0.01
         and report["rules_cost_delta"] < 0
-        and report["disagreement_rate"] > 0
+        and report["policies"]["trained"] != report["policies"]["always_flash"]
     )
 
 

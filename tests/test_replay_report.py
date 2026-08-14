@@ -132,6 +132,75 @@ def test_replay_gate_pass_is_bool_on_toy_fixture():
     assert isinstance(replay_gate_pass(report), bool)
 
 
+def test_replay_gate_fails_when_trained_is_always_cheapest():
+    """Rules≠trained is not enough; trained=always-Flash must fail the gate."""
+    cheapest = {"success_rate": 0.5, "list_price_cost": 0.01}
+    report = {
+        "rank_auc": 0.9,
+        "mean_p_spread": 0.2,
+        "brier_skill": 0.1,
+        "ece_equal_width": 0.01,
+        "ece_equal_mass": 0.01,
+        "rules_cost_delta": -0.01,
+        "disagreement_rate": 0.4,
+        "policies": {
+            "trained": dict(cheapest),
+            "rules": {"success_rate": 0.5, "list_price_cost": 0.05},
+            "always_flash": dict(cheapest),
+        },
+    }
+    assert replay_gate_pass(report) is False
+
+
+def test_rank_auc_skips_unscored_gold_ids(tmp_path):
+    """Unscored eligible ids must not be imputed as 0.5 (that pulls AUC to chance)."""
+    cfg = _toy_cfg()
+    cfg["models"].append(
+        {
+            "id": "mid/other",
+            "enabled": True,
+            "input_per_1m": 1,
+            "output_per_1m": 1,
+            "context_window": 100000,
+            "supports_tools": True,
+            "aa_index": 50,
+            "aa_source": "test",
+            "measured_on": "test",
+        }
+    )
+    gold = tmp_path / "gold.jsonl"
+    gold.write_text(
+        "".join(
+            json.dumps(
+                {
+                    "prompt": "q",
+                    "model_id": mid,
+                    "success": ok,
+                    "tokens": 100,
+                    "needs_tools": False,
+                    "phase": "plan",
+                }
+            )
+            + "\n"
+            for mid, ok in (
+                ("cheap/flash", True),
+                ("dear/strong", False),
+                ("mid/other", True),
+            )
+        ),
+        encoding="utf-8",
+    )
+    artifact = {
+        "not_spec_floors": True,
+        "n_gold": 3,
+        "complexity_bin": "standard",
+        "p_success": {"cheap/flash": 0.9, "dear/strong": 0.8},
+    }
+    report = replay_report(gold, artifact, load_models(cfg), cfg)
+    # skip mid/other: (0.9, 1) vs (0.8, 0) → 1.0; impute 0.5 → also (0.5, 1) vs (0.8, 0) → 0.5
+    assert report["rank_auc"] == 1.0
+
+
 def test_holdout_ids_restricts_to_unused_split():
     assert_not_production_floors(GOLD, _artifact())
     one = _report(holdout_ids={"p0"})
