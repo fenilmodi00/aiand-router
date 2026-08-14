@@ -6,10 +6,11 @@ import os
 from pathlib import Path
 
 import httpx
-from aiand_router.router import SpendLog
+from aiand_router.router import SpendLog, load_config, load_models
 from aiand_router.cache import RequestCache
 from aiand_router.train import (
     ESCALATE_TEACHER,
+    K3,
     MIN_REASONING_EFFORT,
     OPT_IN_ENV,
     SPARSE_ANCHORS,
@@ -331,6 +332,81 @@ def test_dense_gold_excludes_k3(tmp_path, monkeypatch):
     assert "google/gemma-4-31b-it" in models
 
 
+def test_dense_gold_runs_every_eligible_id_except_k3(tmp_path, monkeypatch):
+    """Dense/cal slice runs every enabled catalog id except K3; JSONL marks dense."""
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    provider = FakeProvider()
+    spend = SpendLog(tmp_path / "spend.txt", 15)
+    queries = tmp_path / "q.jsonl"
+    queries.write_text(json.dumps({"prompt": "cal slice prompt"}) + "\n", encoding="utf-8")
+    gold = tmp_path / "gold.jsonl"
+    assert (
+        main(
+            ["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1", "--dense"],
+            provider=provider,
+            spend=spend,
+            cache_dir=tmp_path / "cache",
+            models_path=Path("config/models.yaml"),
+        )
+        == 0
+    )
+    rows = [json.loads(line) for line in gold.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert rows
+    assert all(r.get("dense") is True for r in rows)
+    models = {r["model_id"] for r in rows}
+    cfg = load_config(Path("config/models.yaml"))
+    eligible = {m.id for m in load_models(cfg) if m.enabled and m.id != K3}
+    assert models == eligible
+    assert K3 not in models
+    assert K3 not in {c["model"] for c in provider.calls}
+    for r in rows:
+        if not r.get("unobserved"):
+            assert "success" in r and "success_tier" in r
+
+
+def test_dense_gold_excludes_sparse_train_prompts(tmp_path, monkeypatch):
+    """Dense/cal queries are disjoint from sparse train prompts used for feature fit."""
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    provider = FakeProvider()
+    spend = SpendLog(tmp_path / "spend.txt", 15)
+    train_q = tmp_path / "train.jsonl"
+    train_q.write_text(json.dumps({"prompt": "sparse train prompt"}) + "\n", encoding="utf-8")
+    queries = tmp_path / "q.jsonl"
+    queries.write_text(
+        json.dumps({"prompt": "sparse train prompt"})
+        + "\n"
+        + json.dumps({"prompt": "held out cal prompt"})
+        + "\n",
+        encoding="utf-8",
+    )
+    gold = tmp_path / "dense.jsonl"
+    assert (
+        main(
+            [
+                "gold",
+                "--queries",
+                str(queries),
+                "--out",
+                str(gold),
+                "--dense",
+                "--exclude",
+                str(train_q),
+            ],
+            provider=provider,
+            spend=spend,
+            cache_dir=tmp_path / "cache",
+            models_path=Path("config/models.yaml"),
+        )
+        == 0
+    )
+    rows = [json.loads(line) for line in gold.read_text(encoding="utf-8").splitlines() if line.strip()]
+    prompts = {r["prompt"] for r in rows}
+    assert prompts == {"held out cal prompt"}
+    assert "sparse train prompt" not in prompts
+    assert all(r.get("dense") is True for r in rows)
+    assert K3 not in {r["model_id"] for r in rows}
+
+
 def test_gold_success_json_and_one_word():
     assert _gold_success({"content": '{"ok": true}'}, "Reply with JSON only.", {}) is True
     assert _gold_success({"content": "not json"}, "Reply with JSON only.", {}) is False
@@ -434,6 +510,78 @@ def test_fit_calibrates_on_held_out_gold_cal_slice_only(tmp_path, monkeypatch):
     a, b = _fit_platt(zs, ys)
     assert data["platt"]["a"] == a
     assert data["platt"]["b"] == b
+
+
+def test_fit_dense_cal_unused_for_train_weights(tmp_path, monkeypatch):
+    """Dense/cal JSONL is Platt + new-id onboard only — not train intercepts/weights."""
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    flash = "deepseek-ai/deepseek-v4-flash"
+    gemma = "google/gemma-4-31b-it"
+    train_rows = [_gold_cell(f"train prompt {i}", flash, True) for i in range(4)]
+    cal_rows = [_gold_cell(f"zz cal prompt {i}", flash, False) for i in range(2)]
+    cal_rows += [_gold_cell(r["prompt"], gemma, True) for r in cal_rows[:2]]
+    for r in cal_rows:
+        r["dense"] = True
+    gold = tmp_path / "sparse.jsonl"
+    gold.write_text("".join(json.dumps(r) + "\n" for r in train_rows), encoding="utf-8")
+    cal = tmp_path / "dense.jsonl"
+    cal.write_text("".join(json.dumps(r) + "\n" for r in cal_rows), encoding="utf-8")
+    artifact = tmp_path / "scorer.json"
+    assert (
+        main(
+            ["fit", "--gold", str(gold), "--cal", str(cal), "--out", str(artifact)],
+            provider=FakeProvider(),
+            spend=SpendLog(tmp_path / "spend.txt", 15),
+            cache_dir=tmp_path / "cache",
+            models_path=Path("config/models.yaml"),
+        )
+        == 0
+    )
+    data = json.loads(artifact.read_text(encoding="utf-8"))
+    assert data["not_spec_floors"] is True
+    assert data["intercepts"][flash] == _logit(1.0)
+    assert gemma not in data.get("weights", {})
+    assert gemma not in data.get("intercepts", {})
+    assert data["p_success"][gemma] == 1.0
+    assert data["n_cal"] == len(cal_rows)
+    w = data["weights"][flash]
+    ic = data["intercepts"][flash]
+    zs, ys = [], []
+    for r in cal_rows:
+        if r["model_id"] != flash:
+            continue
+        x = _row_x(r)
+        zs.append(ic + sum(w[i] * x[i] for i in range(len(w))))
+        ys.append(1.0 if r["success"] else 0.0)
+    a, b = _fit_platt(zs, ys)
+    assert data["platt"]["a"] == a
+    assert data["platt"]["b"] == b
+
+
+def test_fit_dense_tagged_rows_unused_for_train_weights(tmp_path, monkeypatch):
+    """dense=true gold cells stay out of train weights even in a concatenated --gold file."""
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    flash = "deepseek-ai/deepseek-v4-flash"
+    train_rows = [_gold_cell(f"zz train {i}", flash, True) for i in range(8)]
+    cal_rows = [_gold_cell(f"aa cal {i}", flash, False) for i in range(2)]
+    for r in cal_rows:
+        r["dense"] = True
+    gold = tmp_path / "gold.jsonl"
+    gold.write_text("".join(json.dumps(r) + "\n" for r in train_rows + cal_rows), encoding="utf-8")
+    artifact = tmp_path / "scorer.json"
+    assert (
+        main(
+            ["fit", "--gold", str(gold), "--out", str(artifact)],
+            provider=FakeProvider(),
+            spend=SpendLog(tmp_path / "spend.txt", 15),
+            cache_dir=tmp_path / "cache",
+            models_path=Path("config/models.yaml"),
+        )
+        == 0
+    )
+    data = json.loads(artifact.read_text(encoding="utf-8"))
+    assert data["intercepts"][flash] == _logit(1.0)
+    assert data["n_cal"] == len(cal_rows)
 
 
 def test_fit_silver_only_regularizes_unobserved_not_observed_gold(tmp_path, monkeypatch):

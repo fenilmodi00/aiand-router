@@ -516,7 +516,7 @@ async def run_gold(
             )
             status = result.get("status", 200)
             if status == 429:
-                return {
+                row = {
                     "prompt": _prompt_of(messages),
                     "model_id": model_id,
                     "unobserved": True,
@@ -525,13 +525,16 @@ async def run_gold(
                     "phase": str(q.get("phase") or "plan"),
                     "hint_bin": str(q.get("hint_bin") or "standard"),
                 }
+                if dense:
+                    row["dense"] = True
+                return row
             if status < 400 and result.get("json"):
                 cache.put(request_cache_key(body, model_id), result["json"])
             choice = ((result.get("json") or {}).get("choices") or [{}])[0]
             message = choice.get("message") or {}
             success, tier = _gold_label(message, _prompt_of(messages), choice, meta=q)
             success = status < 400 and success
-            return {
+            row = {
                 "prompt": _prompt_of(messages),
                 "model_id": model_id,
                 "success": success,
@@ -542,6 +545,9 @@ async def run_gold(
                 "phase": str(q.get("phase") or "plan"),
                 "hint_bin": str(q.get("hint_bin") or "standard"),
             }
+            if dense:
+                row["dense"] = True
+            return row
 
     rows: list[dict[str, Any]] = []
     for coro in asyncio.as_completed([one(*j) for j in jobs]):
@@ -643,25 +649,42 @@ def _split_cal_prompts(prompts: list[str], frac: float = CAL_FRAC) -> tuple[set[
     return set(uniq) - cal, cal
 
 
-def fit_scorer(gold_path: Path, silver_path: Path | None, out: Path) -> None:
-    gold = [
+def _jsonl_rows(path: Path) -> list[dict[str, Any]]:
+    return [
         json.loads(line)
-        for line in gold_path.read_text(encoding="utf-8").splitlines()
+        for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    silver = []
-    if silver_path and silver_path.exists():
-        silver = [
-            json.loads(line)
-            for line in silver_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-    observed = [r for r in gold if not r.get("unobserved") and "model_id" in r]
+
+
+def _observed_gold(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [r for r in rows if not r.get("unobserved") and "model_id" in r]
+
+
+def fit_scorer(
+    gold_path: Path, silver_path: Path | None, out: Path, cal_path: Path | None = None
+) -> None:
+    gold = _jsonl_rows(gold_path)
+    silver = _jsonl_rows(silver_path) if silver_path and silver_path.exists() else []
+    observed = _observed_gold(gold)
+    cal_file = _observed_gold(_jsonl_rows(cal_path)) if cal_path and cal_path.exists() else []
+    tagged_cal = [r for r in observed if r.get("dense")]
+    tagged_train = [r for r in observed if not r.get("dense")]
+    if cal_file:
+        train_gold = tagged_train
+        cal_gold = cal_file
+    elif tagged_cal:
+        train_gold = tagged_train
+        cal_gold = tagged_cal
+    else:
+        train_prompts, cal_prompts = _split_cal_prompts(
+            [str(r.get("prompt") or "") for r in observed]
+        )
+        train_gold = [r for r in observed if str(r.get("prompt") or "") in train_prompts]
+        cal_gold = [r for r in observed if str(r.get("prompt") or "") in cal_prompts]
+    observed = train_gold + cal_gold
     gold_cells = {(str(r.get("prompt")), r["model_id"]) for r in observed}
     gold_ids = {mid for _, mid in gold_cells}
-    train_prompts, cal_prompts = _split_cal_prompts([str(r.get("prompt") or "") for r in observed])
-    train_gold = [r for r in observed if str(r.get("prompt") or "") in train_prompts]
-    cal_gold = [r for r in observed if str(r.get("prompt") or "") in cal_prompts]
     by_model_x: dict[str, list[list[float]]] = {mid: [] for mid in gold_ids}
     by_model_y: dict[str, list[float]] = {mid: [] for mid in gold_ids}
     train_counts: dict[str, int] = {mid: 0 for mid in gold_ids}
@@ -875,8 +898,10 @@ def main(
     g.add_argument("--out", required=True)
     g.add_argument("--limit", type=int, default=None)
     g.add_argument("--dense", action="store_true")
+    g.add_argument("--exclude")
     f = sub.add_parser("fit")
     f.add_argument("--gold", required=True)
+    f.add_argument("--cal")
     f.add_argument("--silver")
     f.add_argument("--out", required=True)
     r = sub.add_parser("relabel")
@@ -901,7 +926,12 @@ def main(
     upstream = provider or HttpAiandProvider(base, key)
 
     if args.cmd == "fit":
-        fit_scorer(Path(args.gold), Path(args.silver) if args.silver else None, Path(args.out))
+        fit_scorer(
+            Path(args.gold),
+            Path(args.silver) if args.silver else None,
+            Path(args.out),
+            Path(args.cal) if args.cal else None,
+        )
         return 0
     if args.cmd == "relabel":
         relabel_gold(
@@ -929,6 +959,9 @@ def main(
     else:
         limit = args.limit
     queries = _read_queries(Path(args.queries), limit)
+    if getattr(args, "exclude", None):
+        blocked = {str(r.get("prompt") or "") for r in _jsonl_rows(Path(args.exclude))}
+        queries = [q for q in queries if _prompt_of(_messages(q)) not in blocked]
     if args.cmd == "teacher":
         asyncio.run(
             run_teacher(
