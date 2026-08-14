@@ -728,6 +728,8 @@ def _router_headers(decision: Decision) -> dict[str, str]:
             "X-Router-Threshold": str(decision.threshold),
             "X-Router-Candidates": ",".join(decision.candidates),
         }
+        if decision.path == "shadow":
+            meta["X-Router-Reason"] = decision.reason
         if decision.complexity_bin:
             meta["X-Router-Complexity-Bin"] = decision.complexity_bin
         if decision.confidence is not None:
