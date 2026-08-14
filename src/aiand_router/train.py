@@ -95,12 +95,16 @@ def _refuse() -> int:
     return 2
 
 
-def _read_queries(path: Path, limit: int) -> list[dict[str, Any]]:
+def _read_queries(
+    path: Path, limit: int, exclude: set[str] | None = None
+) -> list[dict[str, Any]]:
     rows = []
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         rows.append(json.loads(line))
+    if exclude:
+        rows = [q for q in rows if _prompt_of(_messages(q)) not in exclude]
     if limit >= len(rows):
         return rows
     return sample_stratum(rows, limit, seed=0)
@@ -708,9 +712,9 @@ def fit_scorer(
     weights = {}
     intercepts = {}
     for mid, xs in by_model_x.items():
-        if not xs:
-            continue
         n_train = train_counts[mid]
+        if n_train == 0 or not xs:
+            continue
         gold_ys = by_model_y[mid][:n_train]
         rate = sum(gold_ys) / len(gold_ys) if gold_ys else 0.5
         ic = _logit(rate)
@@ -955,13 +959,19 @@ def main(
         )
         return 0
     if args.cmd == "gold":
+        if args.dense and not args.exclude:
+            print("refusing: --dense requires --exclude so the cal slice stays disjoint", file=sys.stderr)
+            return 2
         limit = args.limit if args.limit is not None else (DENSE_LIMIT if args.dense else SPARSE_LIMIT)
     else:
         limit = args.limit
-    queries = _read_queries(Path(args.queries), limit)
+    blocked: set[str] = set()
     if getattr(args, "exclude", None):
         blocked = {str(r.get("prompt") or "") for r in _jsonl_rows(Path(args.exclude))}
-        queries = [q for q in queries if _prompt_of(_messages(q)) not in blocked]
+    queries = _read_queries(Path(args.queries), limit, exclude=blocked or None)
+    if args.cmd == "gold" and args.dense and not queries:
+        print("refusing: --dense --exclude left no queries to run", file=sys.stderr)
+        return 2
     if args.cmd == "teacher":
         asyncio.run(
             run_teacher(

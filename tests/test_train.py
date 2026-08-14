@@ -316,8 +316,21 @@ def test_dense_gold_excludes_k3(tmp_path, monkeypatch):
     queries = tmp_path / "q.jsonl"
     queries.write_text(json.dumps({"prompt": "x"}) + "\n", encoding="utf-8")
     gold = tmp_path / "gold.jsonl"
+    empty = tmp_path / "none.jsonl"
+    empty.write_text("", encoding="utf-8")
     main(
-        ["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1", "--dense"],
+        [
+            "gold",
+            "--queries",
+            str(queries),
+            "--out",
+            str(gold),
+            "--limit",
+            "1",
+            "--dense",
+            "--exclude",
+            str(empty),
+        ],
         provider=provider,
         spend=spend,
         cache_dir=tmp_path / "cache",
@@ -340,9 +353,22 @@ def test_dense_gold_runs_every_eligible_id_except_k3(tmp_path, monkeypatch):
     queries = tmp_path / "q.jsonl"
     queries.write_text(json.dumps({"prompt": "cal slice prompt"}) + "\n", encoding="utf-8")
     gold = tmp_path / "gold.jsonl"
+    empty = tmp_path / "none.jsonl"
+    empty.write_text("", encoding="utf-8")
     assert (
         main(
-            ["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1", "--dense"],
+            [
+                "gold",
+                "--queries",
+                str(queries),
+                "--out",
+                str(gold),
+                "--limit",
+                "1",
+                "--dense",
+                "--exclude",
+                str(empty),
+            ],
             provider=provider,
             spend=spend,
             cache_dir=tmp_path / "cache",
@@ -405,6 +431,123 @@ def test_dense_gold_excludes_sparse_train_prompts(tmp_path, monkeypatch):
     assert "sparse train prompt" not in prompts
     assert all(r.get("dense") is True for r in rows)
     assert K3 not in {r["model_id"] for r in rows}
+
+
+def test_dense_exclude_before_sample_same_pool_is_nonempty_and_disjoint(tmp_path, monkeypatch):
+    """Same pool + same seed: exclude before sample so dense fills n from leftover."""
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    provider = FakeProvider()
+    spend = SpendLog(tmp_path / "spend.txt", 15)
+    cache = tmp_path / "cache"
+    models = Path("config/models.yaml")
+    pool = tmp_path / "pool.jsonl"
+    pool.write_text(
+        "".join(json.dumps({"prompt": f"pool prompt {i}"}) + "\n" for i in range(6)),
+        encoding="utf-8",
+    )
+    sparse = tmp_path / "sparse.jsonl"
+    dense = tmp_path / "dense.jsonl"
+    assert (
+        main(
+            ["gold", "--queries", str(pool), "--out", str(sparse), "--limit", "3"],
+            provider=provider,
+            spend=spend,
+            cache_dir=cache,
+            models_path=models,
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "gold",
+                "--queries",
+                str(pool),
+                "--out",
+                str(dense),
+                "--dense",
+                "--exclude",
+                str(sparse),
+                "--limit",
+                "2",
+            ],
+            provider=provider,
+            spend=spend,
+            cache_dir=cache,
+            models_path=models,
+        )
+        == 0
+    )
+    sparse_prompts = {json.loads(line)["prompt"] for line in sparse.read_text(encoding="utf-8").splitlines() if line.strip()}
+    rows = [json.loads(line) for line in dense.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert rows
+    dense_prompts = {r["prompt"] for r in rows}
+    assert dense_prompts.isdisjoint(sparse_prompts)
+    cfg = load_config(models)
+    eligible = {m.id for m in load_models(cfg) if m.enabled and m.id != K3}
+    assert {r["model_id"] for r in rows} == eligible
+    assert K3 not in {r["model_id"] for r in rows}
+
+
+def test_dense_exclude_empty_leftover_fails_closed(tmp_path, monkeypatch):
+    """--dense --exclude with nothing left must not write an empty cal slice."""
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    provider = FakeProvider()
+    spend = SpendLog(tmp_path / "spend.txt", 15)
+    pool = tmp_path / "pool.jsonl"
+    pool.write_text(
+        json.dumps({"prompt": "a"}) + "\n" + json.dumps({"prompt": "b"}) + "\n",
+        encoding="utf-8",
+    )
+    sparse = tmp_path / "sparse.jsonl"
+    dense = tmp_path / "dense.jsonl"
+    assert (
+        main(
+            ["gold", "--queries", str(pool), "--out", str(sparse), "--limit", "2"],
+            provider=provider,
+            spend=spend,
+            cache_dir=tmp_path / "cache",
+            models_path=Path("config/models.yaml"),
+        )
+        == 0
+    )
+    code = main(
+        [
+            "gold",
+            "--queries",
+            str(pool),
+            "--out",
+            str(dense),
+            "--dense",
+            "--exclude",
+            str(sparse),
+            "--limit",
+            "1",
+        ],
+        provider=provider,
+        spend=spend,
+        cache_dir=tmp_path / "cache",
+        models_path=Path("config/models.yaml"),
+    )
+    assert code != 0
+    assert not dense.exists()
+
+
+def test_dense_requires_exclude(tmp_path, monkeypatch):
+    """--dense without --exclude would let the same prompts sit in sparse gold and cal."""
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    queries = tmp_path / "q.jsonl"
+    queries.write_text(json.dumps({"prompt": "x"}) + "\n", encoding="utf-8")
+    gold = tmp_path / "dense.jsonl"
+    code = main(
+        ["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1", "--dense"],
+        provider=FakeProvider(),
+        spend=SpendLog(tmp_path / "spend.txt", 15),
+        cache_dir=tmp_path / "cache",
+        models_path=Path("config/models.yaml"),
+    )
+    assert code != 0
+    assert not gold.exists()
 
 
 def test_gold_success_json_and_one_word():
@@ -556,6 +699,64 @@ def test_fit_dense_cal_unused_for_train_weights(tmp_path, monkeypatch):
     a, b = _fit_platt(zs, ys)
     assert data["platt"]["a"] == a
     assert data["platt"]["b"] == b
+
+
+def test_fit_cal_only_id_with_silver_gets_no_weights(tmp_path, monkeypatch):
+    """Cal-only ids onboard via p_success; silver must not invent intercepts/weights."""
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    flash = "deepseek-ai/deepseek-v4-flash"
+    gemma = "google/gemma-4-31b-it"
+    train_rows = [_gold_cell(f"train prompt {i}", flash, True) for i in range(4)]
+    cal_rows = [_gold_cell(f"zz cal prompt {i}", flash, False) for i in range(2)]
+    cal_rows += [_gold_cell(r["prompt"], gemma, True) for r in cal_rows[:2]]
+    for r in cal_rows:
+        r["dense"] = True
+    gold = tmp_path / "sparse.jsonl"
+    gold.write_text("".join(json.dumps(r) + "\n" for r in train_rows), encoding="utf-8")
+    cal = tmp_path / "dense.jsonl"
+    cal.write_text("".join(json.dumps(r) + "\n" for r in cal_rows), encoding="utf-8")
+    silver = tmp_path / "silver.jsonl"
+    silver.write_text(
+        json.dumps(
+            {
+                "prompt": "silver only",
+                "complexity_bin": "standard",
+                "p_success": {gemma: 0.9, flash: 0.8},
+                "tokens": 10,
+                "needs_tools": False,
+                "phase": "edit",
+                "hint_bin": "standard",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    artifact = tmp_path / "scorer.json"
+    assert (
+        main(
+            [
+                "fit",
+                "--gold",
+                str(gold),
+                "--cal",
+                str(cal),
+                "--silver",
+                str(silver),
+                "--out",
+                str(artifact),
+            ],
+            provider=FakeProvider(),
+            spend=SpendLog(tmp_path / "spend.txt", 15),
+            cache_dir=tmp_path / "cache",
+            models_path=Path("config/models.yaml"),
+        )
+        == 0
+    )
+    data = json.loads(artifact.read_text(encoding="utf-8"))
+    assert gemma not in data.get("weights", {})
+    assert gemma not in data.get("intercepts", {})
+    assert data["p_success"][gemma] == 1.0
+    assert flash in data["weights"]
 
 
 def test_fit_dense_tagged_rows_unused_for_train_weights(tmp_path, monkeypatch):
