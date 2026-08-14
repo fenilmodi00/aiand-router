@@ -253,12 +253,15 @@ def build_pool(
     n: int = 4000,
     seed: int = 0,
 ) -> list[dict[str, Any]]:
+    if not smith:
+        raise ValueError("pool requires --smith as the primary source")
+    smith_rows = ingest_path(smith, "swe-smith")
+    if not smith_rows:
+        raise ValueError("smith contributed nothing")
     blocked: set[str] = set()
     for p in eval_paths or []:
         blocked |= collision_keys(_read_jsonl(p))
-    candidates: list[dict[str, Any]] = []
-    if smith:
-        candidates.extend(ingest_path(smith, "swe-smith"))
+    candidates: list[dict[str, Any]] = list(smith_rows)
     if bfcl:
         candidates.extend(ingest_path(bfcl, "bfcl"))
     if gym:
@@ -282,15 +285,22 @@ def write_pool(rows: list[dict[str, Any]], out: Path) -> None:
 
 def run_pool(args: Any) -> int:
     eval_paths = [Path(p) for p in (getattr(args, "eval", None) or [])]
-    rows = build_pool(
-        smith=Path(args.smith) if args.smith else None,
-        bfcl=Path(args.bfcl) if getattr(args, "bfcl", None) else None,
-        gym=Path(args.gym) if getattr(args, "gym", None) else None,
-        r2e=Path(args.r2e) if getattr(args, "r2e", None) else None,
-        eval_paths=eval_paths,
-        n=int(args.n),
-        seed=int(getattr(args, "seed", 0) or 0),
-    )
+    if not eval_paths:
+        print("refusing: pool requires --eval JSONL so collision-filter always runs", flush=True)
+        return 2
+    try:
+        rows = build_pool(
+            smith=Path(args.smith) if args.smith else None,
+            bfcl=Path(args.bfcl) if getattr(args, "bfcl", None) else None,
+            gym=Path(args.gym) if getattr(args, "gym", None) else None,
+            r2e=Path(args.r2e) if getattr(args, "r2e", None) else None,
+            eval_paths=eval_paths,
+            n=int(args.n),
+            seed=int(getattr(args, "seed", 0) or 0),
+        )
+    except ValueError as e:
+        print(f"refusing: {e}", flush=True)
+        return 2
     write_pool(rows, Path(args.out))
     print(f"pool n={len(rows)} -> {args.out}", flush=True)
     return 0
