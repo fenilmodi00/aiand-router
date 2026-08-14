@@ -7,6 +7,8 @@ import asyncio
 import json
 import math
 import os
+import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -23,7 +25,7 @@ from .router import (
     load_models,
     Model,
 )
-from .scorer import BINS, featurize
+from .scorer import BINS, featurize, featurize_observable
 
 _TEACHER_SYS = (
     "Label this coding-agent request for a model router. Do not solve the task. "
@@ -40,7 +42,7 @@ ESCALATE_TEACHER = "zai-org/glm-5.2"
 BINS = {"trivial", "standard", "hard", "frontier"}
 EXCLUDED_PREFIXES = ("qwen/", "moonshotai/", "deepseek-ai/")
 TEACHER_LIMIT = 1000
-SPARSE_LIMIT = 200
+SPARSE_LIMIT = 400
 DENSE_LIMIT = 100
 MEASURED_TRIO = (
     "qwen/qwen3.6-27b",
@@ -49,6 +51,20 @@ MEASURED_TRIO = (
 )
 FLASH = "deepseek-ai/deepseek-v4-flash"
 K3 = "moonshotai/kimi-k3"
+# Catalog min published effort (GET /v1/models). Omit → upstream default (Qwen defaults high).
+MIN_REASONING_EFFORT = {
+    FLASH: "none",
+    "qwen/qwen3.6-27b": "none",
+    "deepseek-ai/deepseek-v4-pro": "none",
+    "google/gemma-4-31b-it": "none",
+    ESCALATE_TEACHER: "none",
+    CHEAP_TEACHER: "low",
+    "openai/gpt-oss-120b": "low",
+    "moonshotai/kimi-k2.7-code": "high",
+    K3: "low",
+}
+GOLD_MAX_TOKENS = 512
+GOLD_REASONING_MAX_TOKENS = 1024
 
 _SCHEMA = {
     "type": "json_schema",
@@ -140,13 +156,18 @@ async def _complete(
     usage = payload.get("usage") or {}
     model = models_by_id.get(body["model"])
     if model is not None:
-        spend.add(
-            estimate_cost(
-                model,
-                int(usage.get("prompt_tokens") or 0),
-                int(usage.get("completion_tokens") or 0),
+        lock = getattr(spend, "_async_lock", None)
+        if lock is None:
+            lock = asyncio.Lock()
+            spend._async_lock = lock
+        async with lock:
+            spend.add(
+                estimate_cost(
+                    model,
+                    int(usage.get("prompt_tokens") or 0),
+                    int(usage.get("completion_tokens") or 0),
+                )
             )
-        )
     return result
 
 
@@ -158,9 +179,10 @@ async def _teacher_call(
     cache: RequestCache,
     spend: SpendLog,
     models_by_id: dict[str, Model],
+    max_completion_tokens: int = 1024,
 ) -> dict[str, Any] | None:
     ids = ", ".join(sorted(models_by_id))
-    body = {
+    body: dict[str, Any] = {
         "model": model_id,
         "messages": [
             {"role": "system", "content": _TEACHER_SYS.format(ids=ids)},
@@ -168,8 +190,10 @@ async def _teacher_call(
         ],
         "temperature": 0,
         "response_format": _SCHEMA,
-        "max_tokens": 512,
+        "max_completion_tokens": max_completion_tokens,
     }
+    if model_id == CHEAP_TEACHER:
+        body["reasoning_effort"] = "low"
     result = await _complete(provider, body, cache=cache, spend=spend, models_by_id=models_by_id)
     parsed = _parse_label(result)
     if parsed:
@@ -182,6 +206,10 @@ async def _teacher_call(
     return parsed
 
 
+def _concurrency() -> int:
+    return max(1, int(os.getenv("TRAIN_CONCURRENCY", "16")))
+
+
 async def run_teacher(
     queries: list[dict[str, Any]],
     out: Path,
@@ -191,50 +219,61 @@ async def run_teacher(
     cache: RequestCache,
     models_by_id: dict[str, Model],
 ) -> None:
-    rows: list[dict[str, Any]] = []
-    escalated = 0
-    cap = max(1, int(len(queries) * 0.25))
     if any(tid.startswith(prefix) for tid in (CHEAP_TEACHER, ESCALATE_TEACHER) for prefix in EXCLUDED_PREFIXES):
         raise ValueError("teacher ids must exclude measured-trio and fallback providers")
-    for q in queries:
-        messages = _messages(q)
-        label = await _teacher_call(
-            provider, CHEAP_TEACHER, messages, cache=cache, spend=spend, models_by_id=models_by_id
-        )
-        parse_fail = label is None
-        needs_esc = True
-        if label is not None:
-            needs_esc = (
-                label["complexity_bin"] in {"hard", "frontier"}
-                or float(label["label_confidence"]) < 0.60
+    spend._async_lock = asyncio.Lock()
+    cap = max(1, int(len(queries) * 0.25))
+    escalated = 0
+    esc_lock = asyncio.Lock()
+    sem = asyncio.Semaphore(_concurrency())
+
+    async def one(q: dict[str, Any]) -> dict[str, Any]:
+        nonlocal escalated
+        async with sem:
+            messages = _messages(q)
+            label = await _teacher_call(
+                provider, CHEAP_TEACHER, messages, cache=cache, spend=spend, models_by_id=models_by_id
             )
-        # parse-fail always escalates; 25% cap is quality-only (hard/frontier / low confidence)
-        if needs_esc and (parse_fail or escalated < cap):
-            esc = await _teacher_call(
-                provider, ESCALATE_TEACHER, messages, cache=cache, spend=spend, models_by_id=models_by_id
-            )
-            if not parse_fail:
-                escalated += 1
-            if esc:
-                label = esc
-        if not label:
-            rows.append({"prompt": _prompt_of(messages), "unlabeled": True})
-            if spend.total() >= spend.limit_usd:
-                break
-            continue
-        row = {
-            "prompt": _prompt_of(messages),
-            "complexity_bin": label["complexity_bin"],
-            "p_success": label["p_success"],
-            "teacher": CHEAP_TEACHER,
-            "tokens": estimate_tokens(messages),
-            "needs_tools": bool(q.get("needs_tools")),
-            "phase": str(q.get("phase") or "plan"),
-        }
-        if "bloom_level" in label:
-            row["bloom_level"] = label["bloom_level"]
-        rows.append(row)
+            parse_fail = label is None
+            needs_esc = True
+            if label is not None:
+                needs_esc = (
+                    label["complexity_bin"] in {"hard", "frontier"}
+                    or float(label["label_confidence"]) < 0.60
+                )
+            do_esc = False
+            async with esc_lock:
+                if needs_esc and (parse_fail or escalated < cap):
+                    do_esc = True
+                    if not parse_fail:
+                        escalated += 1
+            if do_esc:
+                esc = await _teacher_call(
+                    provider, ESCALATE_TEACHER, messages, cache=cache, spend=spend, models_by_id=models_by_id
+                )
+                if esc:
+                    label = esc
+            if not label:
+                return {"prompt": _prompt_of(messages), "unlabeled": True}
+            row = {
+                "prompt": _prompt_of(messages),
+                "complexity_bin": label["complexity_bin"],
+                "p_success": label["p_success"],
+                "teacher": CHEAP_TEACHER,
+                "tokens": estimate_tokens(messages),
+                "needs_tools": bool(q.get("needs_tools")),
+                "phase": str(q.get("phase") or "plan"),
+                "hint_bin": str(q.get("hint_bin") or "standard"),
+            }
+            if "bloom_level" in label:
+                row["bloom_level"] = label["bloom_level"]
+            return row
+
+    rows: list[dict[str, Any]] = []
+    for coro in asyncio.as_completed([one(q) for q in queries]):
+        rows.append(await coro)
         if len(rows) % 10 == 0:
+            out.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
             print(
                 f"teacher {len(rows)}/{len(queries)} spend={spend.total():.4f}",
                 flush=True,
@@ -245,10 +284,178 @@ async def run_teacher(
         f"spend={spend.total():.4f} -> {out}",
         flush=True,
     )
+    # GLM salvage for parse failures (Motif truncation etc.)
+    by_prompt = {_prompt_of(_messages(q)): q for q in queries}
+    salvaged = 0
+    for i, row in enumerate(rows):
+        if not row.get("unlabeled"):
+            continue
+        q = by_prompt.get(row["prompt"])
+        if not q:
+            continue
+        label = await _teacher_call(
+            provider,
+            ESCALATE_TEACHER,
+            _messages(q),
+            cache=cache,
+            spend=spend,
+            models_by_id=models_by_id,
+        )
+        if not label:
+            continue
+        rows[i] = {
+            "prompt": row["prompt"],
+            "complexity_bin": label["complexity_bin"],
+            "p_success": label["p_success"],
+            "teacher": ESCALATE_TEACHER,
+            "tokens": estimate_tokens(_messages(q)),
+            "needs_tools": bool(q.get("needs_tools")),
+            "phase": str(q.get("phase") or "plan"),
+            "hint_bin": str(q.get("hint_bin") or "standard"),
+        }
+        salvaged += 1
+    if salvaged:
+        labeled = sum(1 for r in rows if not r.get("unlabeled"))
+        print(f"teacher salvage +{salvaged} labeled={labeled} spend={spend.total():.4f}", flush=True)
     out.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
 
 
 SPARSE_ANCHORS = (FLASH, *MEASURED_TRIO)
+
+
+def _gold_body(model_id: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
+    effort = MIN_REASONING_EFFORT.get(model_id)
+    max_tokens = GOLD_REASONING_MAX_TOKENS if effort and effort != "none" else GOLD_MAX_TOKENS
+    body: dict[str, Any] = {
+        "model": model_id,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": 0,
+    }
+    if effort:
+        body["reasoning_effort"] = effort
+    return body
+
+
+def _strip_fences(text: str) -> str:
+    t = text.strip()
+    if "```" not in t:
+        return t
+    inner = t.split("```", 2)[1]
+    if inner.startswith(("json", "python", "yaml")):
+        inner = inner.split("\n", 1)[-1] if "\n" in inner else inner[3:]
+    return inner.strip()
+
+
+def _pytest_verify(text: str, meta: dict[str, Any]) -> bool | None:
+    if not meta.get("verify_pytest"):
+        return None
+    module = str(meta.get("module") or "fix.py")
+    tests = meta.get("tests")
+    if not tests or "```" not in text:
+        return False
+    inner = text.split("```", 2)[1]
+    if inner.startswith("python"):
+        inner = inner[len("python") :].lstrip("\n")
+    code = inner.strip()
+    if not code:
+        return False
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / module).write_text(code + "\n", encoding="utf-8")
+        test_name = f"test_{Path(module).stem}.py"
+        (root / test_name).write_text(str(tests).strip() + "\n", encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "--noconftest", "-o", f"testpaths={root}"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+        return proc.returncode == 0
+
+
+def _gold_label(
+    message: dict[str, Any],
+    prompt: str,
+    choice: dict[str, Any],
+    *,
+    meta: dict[str, Any] | None = None,
+) -> tuple[bool, str]:
+    """Return (success, tier). verified > proxy > weak."""
+    meta = meta or {}
+    if meta.get("tests_passed") is not None:
+        return bool(meta["tests_passed"]), "verified"
+    content = message.get("content")
+    text = content.strip() if isinstance(content, str) else ""
+    pytest_ok = _pytest_verify(text, meta)
+    if pytest_ok is not None:
+        return pytest_ok, "verified"
+    if message.get("tool_calls"):
+        return True, "proxy"
+    finish = str(choice.get("finish_reason") or "")
+    if finish == "length" and not text:
+        return False, "weak"
+    if not text:
+        return False, "weak"
+    expected = meta.get("expected")
+    if expected is not None:
+        ok = str(expected) in text
+        return ok, "verified"
+    pl = prompt.lower()
+    body = _strip_fences(text)
+    used_proxy = False
+    if any(k in pl for k in ("reply with json", "json_schema", "valid json", "json only")):
+        used_proxy = True
+        try:
+            json.loads(body)
+        except json.JSONDecodeError:
+            return False, "proxy"
+    elif "json object" in pl and ("return" in pl or "parse" in pl):
+        used_proxy = True
+        if "{" in body:
+            try:
+                json.loads(body[body.index("{") : body.rindex("}") + 1])
+            except (json.JSONDecodeError, ValueError):
+                return False, "proxy"
+    for pat in (
+        r"reply with the single word (\w+)",
+        r"reply with only (\w+)",
+        r"respond with only (\w+)",
+        r"single word (\w+)",
+    ):
+        m = re.search(pat, pl, re.I)
+        if m:
+            used_proxy = True
+            if body.lower().split()[0] != m.group(1).lower():
+                return False, "proxy"
+    m = re.search(r"(?:must contain|include the (?:string|substring)) [`'\"]?([^`'\".\n]+)", pl, re.I)
+    if m:
+        used_proxy = True
+        if m.group(1).lower() not in text.lower():
+            return False, "proxy"
+    m = re.search(r"typo ['\"](\w+)['\"] to ['\"](\w+)['\"]", pl, re.I)
+    if m:
+        used_proxy = True
+        wrong, right = m.group(1).lower(), m.group(2).lower()
+        if wrong in text.lower() or right not in text.lower():
+            return False, "proxy"
+    if "yaml snippet" in pl or "write a yaml" in pl:
+        used_proxy = True
+        if ":" not in body or body.lstrip().startswith("{"):
+            return False, "proxy"
+    return True, "proxy" if used_proxy else "weak"
+
+
+def _gold_success(
+    message: dict[str, Any],
+    prompt: str,
+    choice: dict[str, Any],
+    *,
+    meta: dict[str, Any] | None = None,
+) -> bool:
+    return _gold_label(message, prompt, choice, meta=meta)[0]
 
 
 async def run_gold(
@@ -264,39 +471,48 @@ async def run_gold(
     ids = list(SPARSE_ANCHORS)
     if dense:
         ids = [i for i in models_by_id if i != K3 and models_by_id[i].enabled]
-    rows = []
+    jobs: list[tuple[list[dict[str, Any]], str, dict[str, Any]]] = []
     for q in queries:
         messages = _messages(q)
         for model_id in ids:
             if model_id not in models_by_id or model_id == K3:
                 continue
-            body = {"model": model_id, "messages": messages, "max_tokens": 512, "temperature": 0}
+            jobs.append((messages, model_id, q))
+    spend._async_lock = asyncio.Lock()
+    sem = asyncio.Semaphore(_concurrency())
+
+    async def one(
+        messages: list[dict[str, Any]], model_id: str, q: dict[str, Any]
+    ) -> dict[str, Any]:
+        async with sem:
+            body = _gold_body(model_id, messages)
             result = await _complete(
                 provider, body, cache=cache, spend=spend, models_by_id=models_by_id
             )
-            if result.get("status") == 429:
-                break
             if result.get("status", 200) < 400 and result.get("json"):
                 cache.put(request_cache_key(body, model_id), result["json"])
             status = result.get("status", 200)
-            message = (((result.get("json") or {}).get("choices") or [{}])[0].get("message") or {})
-            success = status < 400 and bool(message.get("content") or message.get("tool_calls"))
-            rows.append(
-                {
-                    "prompt": _prompt_of(messages),
-                    "model_id": model_id,
-                    "success": success,
-                    "unobserved": False,
-                    "tokens": estimate_tokens(messages),
-                    "needs_tools": bool(q.get("needs_tools")),
-                    "phase": str(q.get("phase") or "plan"),
-                }
-            )
-            if spend.total() >= spend.limit_usd:
-                break
-        if spend.total() >= spend.limit_usd:
-            break
+            choice = ((result.get("json") or {}).get("choices") or [{}])[0]
+            message = choice.get("message") or {}
+            success, tier = _gold_label(message, _prompt_of(messages), choice, meta=q)
+            success = status < 400 and success
+            return {
+                "prompt": _prompt_of(messages),
+                "model_id": model_id,
+                "success": success,
+                "success_tier": tier,
+                "unobserved": False,
+                "tokens": estimate_tokens(messages),
+                "needs_tools": bool(q.get("needs_tools")),
+                "phase": str(q.get("phase") or "plan"),
+                "hint_bin": str(q.get("hint_bin") or "standard"),
+            }
+
+    rows: list[dict[str, Any]] = []
+    for coro in asyncio.as_completed([one(*j) for j in jobs]):
+        rows.append(await coro)
         if len(rows) % 20 == 0:
+            out.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
             print(f"gold {len(rows)} cells spend={spend.total():.4f}", flush=True)
     print(f"gold done cells={len(rows)} spend={spend.total():.4f} -> {out}", flush=True)
     out.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
@@ -308,10 +524,22 @@ def _prompt_of(messages: list[dict[str, Any]]) -> str:
     return content if isinstance(content, str) else str(content or "")
 
 
+def _row_x_observable(row: dict[str, Any]) -> list[float]:
+    messages = row.get("messages") or [{"role": "user", "content": row.get("prompt") or ""}]
+    tokens = int(row.get("tokens") or estimate_tokens(messages))
+    return featurize_observable(str(row.get("phase") or "plan"), bool(row.get("needs_tools")), tokens)
+
+
 def _row_x(row: dict[str, Any]) -> list[float]:
     messages = row.get("messages") or [{"role": "user", "content": row.get("prompt") or ""}]
     tokens = int(row.get("tokens") or estimate_tokens(messages))
-    return featurize(str(row.get("phase") or "plan"), bool(row.get("needs_tools")), tokens)
+    hint = str(row.get("hint_bin") or row.get("complexity_bin") or "standard")
+    return featurize(str(row.get("phase") or "plan"), bool(row.get("needs_tools")), tokens, hint)
+
+
+def _logit(p: float) -> float:
+    p = max(1e-6, min(1.0 - 1e-6, p))
+    return math.log(p / (1.0 - p))
 
 
 def _fit_binary(xs: list[list[float]], ys: list[float], steps: int = 80, lr: float = 0.35) -> list[float]:
@@ -322,6 +550,25 @@ def _fit_binary(xs: list[list[float]], ys: list[float], steps: int = 80, lr: flo
         grad = [0.0] * dim
         for x, y in zip(xs, ys):
             z = sum(w[i] * x[i] for i in range(dim))
+            z = max(-30.0, min(30.0, z))
+            err = (1.0 / (1.0 + math.exp(-z))) - y
+            for i in range(dim):
+                grad[i] += err * x[i]
+        for i in range(dim):
+            w[i] -= lr * grad[i] / n
+    return w
+
+
+def _fit_binary_intercept(
+    xs: list[list[float]], ys: list[float], intercept: float, steps: int = 80, lr: float = 0.35
+) -> list[float]:
+    dim = len(xs[0])
+    w = [0.0] * dim
+    n = max(1, len(xs))
+    for _ in range(steps):
+        grad = [0.0] * dim
+        for x, y in zip(xs, ys):
+            z = intercept + sum(w[i] * x[i] for i in range(dim))
             z = max(-30.0, min(30.0, z))
             err = (1.0 / (1.0 + math.exp(-z))) - y
             for i in range(dim):
@@ -348,6 +595,19 @@ def _fit_platt(zs: list[float], ys: list[float]) -> tuple[float, float]:
     return a, b
 
 
+CAL_FRAC = 0.2
+
+
+def _split_cal_prompts(prompts: list[str], frac: float = CAL_FRAC) -> tuple[set[str], set[str]]:
+    """Hold out a sorted tail of unique prompts as the gold cal slice."""
+    uniq = sorted({p for p in prompts if p})
+    if len(uniq) < 2:
+        return set(uniq), set()
+    n_cal = max(1, int(round(len(uniq) * frac)))
+    cal = set(uniq[-n_cal:])
+    return set(uniq) - cal, cal
+
+
 def fit_scorer(gold_path: Path, silver_path: Path | None, out: Path) -> None:
     gold = [
         json.loads(line)
@@ -361,16 +621,20 @@ def fit_scorer(gold_path: Path, silver_path: Path | None, out: Path) -> None:
             for line in silver_path.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
-    gold_cells = {(str(r.get("prompt")), r["model_id"]) for r in gold if not r.get("unobserved") and "model_id" in r}
+    observed = [r for r in gold if not r.get("unobserved") and "model_id" in r]
+    gold_cells = {(str(r.get("prompt")), r["model_id"]) for r in observed}
     gold_ids = {mid for _, mid in gold_cells}
+    train_prompts, cal_prompts = _split_cal_prompts([str(r.get("prompt") or "") for r in observed])
+    train_gold = [r for r in observed if str(r.get("prompt") or "") in train_prompts]
+    cal_gold = [r for r in observed if str(r.get("prompt") or "") in cal_prompts]
     by_model_x: dict[str, list[list[float]]] = {mid: [] for mid in gold_ids}
     by_model_y: dict[str, list[float]] = {mid: [] for mid in gold_ids}
-    for row in gold:
-        if row.get("unobserved") or "model_id" not in row:
-            continue
+    train_counts: dict[str, int] = {mid: 0 for mid in gold_ids}
+    for row in train_gold:
         mid = row["model_id"]
         by_model_x[mid].append(_row_x(row))
         by_model_y[mid].append(1.0 if row.get("success") else 0.0)
+        train_counts[mid] += 1
     for row in silver:
         if row.get("unlabeled"):
             continue
@@ -384,35 +648,41 @@ def fit_scorer(gold_path: Path, silver_path: Path | None, out: Path) -> None:
             by_model_x[mid].append(x)
             by_model_y[mid].append(float(p))
     weights = {}
-    zs_all: list[float] = []
-    ys_all: list[float] = []
+    intercepts = {}
     for mid, xs in by_model_x.items():
         if not xs:
             continue
-        w = _fit_binary(xs, by_model_y[mid])
-        weights[mid] = w
-        n_gold = sum(1 for r in gold if r.get("model_id") == mid and not r.get("unobserved"))
-        for x, y in zip(xs[:n_gold], by_model_y[mid][:n_gold]):
-            zs_all.append(sum(w[i] * x[i] for i in range(len(w))))
-            ys_all.append(y)
-    a, b = _fit_platt(zs_all, ys_all)
+        n_train = train_counts[mid]
+        gold_ys = by_model_y[mid][:n_train]
+        rate = sum(gold_ys) / len(gold_ys) if gold_ys else 0.5
+        ic = _logit(rate)
+        intercepts[mid] = ic
+        weights[mid] = _fit_binary_intercept(xs, by_model_y[mid], ic)
+    zs_cal: list[float] = []
+    ys_cal: list[float] = []
+    for row in cal_gold:
+        mid = row["model_id"]
+        w = weights.get(mid)
+        if not w:
+            continue
+        ic = intercepts[mid]
+        x = _row_x(row)
+        zs_cal.append(ic + sum(w[i] * x[i] for i in range(len(w))))
+        ys_cal.append(1.0 if row.get("success") else 0.0)
+    a, b = _fit_platt(zs_cal, ys_cal)
     bin_xs: list[list[float]] = []
     bin_ys: dict[str, list[float]] = {bn: [] for bn in BINS}
     for row in silver:
         if row.get("unlabeled") or row.get("complexity_bin") not in BINS:
             continue
-        x = _row_x(row)
+        x = _row_x_observable(row)
         bin_xs.append(x)
         for bn in BINS:
             bin_ys[bn].append(1.0 if row["complexity_bin"] == bn else 0.0)
     bin_weights = {bn: _fit_binary(bin_xs, bin_ys[bn]) for bn in BINS} if bin_xs else {}
     p_success = {}
     for mid in gold_ids:
-        gold_ys = [
-            1.0 if r.get("success") else 0.0
-            for r in gold
-            if r.get("model_id") == mid and not r.get("unobserved")
-        ]
+        gold_ys = [1.0 if r.get("success") else 0.0 for r in observed if r["model_id"] == mid]
         if gold_ys:
             p_success[mid] = sum(gold_ys) / len(gold_ys)
     bins = [str(r.get("complexity_bin")) for r in silver if r.get("complexity_bin") in BINS]
@@ -422,12 +692,120 @@ def fit_scorer(gold_path: Path, silver_path: Path | None, out: Path) -> None:
         "complexity_bin": bin_,
         "p_success": p_success,
         "weights": weights,
+        "intercepts": intercepts,
         "bin_weights": bin_weights,
         "platt": {"a": a, "b": b},
         "n_gold": len(gold),
+        "n_cal": len(cal_gold),
         "n_silver": len(silver),
     }
     out.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
+
+
+def _query_map(queries_path: Path) -> dict[str, dict[str, Any]]:
+    qmap: dict[str, dict[str, Any]] = {}
+    paths = [queries_path, queries_path.parent / "verified-queries.jsonl"]
+    for path in paths:
+        if path.exists():
+            for q in _read_queries(path, 10_000):
+                qmap[_prompt_of(_messages(q))] = q
+    return qmap
+
+
+def relabel_gold(
+    gold_path: Path,
+    queries_path: Path,
+    out: Path,
+    *,
+    cache: RequestCache,
+    models_by_id: dict[str, Model],
+) -> None:
+    """Re-score gold success from cache using current _gold_success (no paid calls)."""
+    qmap = _query_map(queries_path)
+    rows = [
+        json.loads(line)
+        for line in gold_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    changed = 0
+    for row in rows:
+        if row.get("unobserved") or "model_id" not in row:
+            continue
+        q = qmap.get(row["prompt"], {})
+        messages = _messages(q) if q else [{"role": "user", "content": row["prompt"]}]
+        body = _gold_body(row["model_id"], messages)
+        hit = cache.get(request_cache_key(body, row["model_id"]))
+        if not hit:
+            continue
+        choice = (hit.get("choices") or [{}])[0]
+        message = choice.get("message") or {}
+        ok, tier = _gold_label(message, row["prompt"], choice, meta=q)
+        if ok != row.get("success") or tier != row.get("success_tier"):
+            changed += 1
+        row["success"] = ok
+        row["success_tier"] = tier
+    out.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    rate = sum(r["success"] for r in rows if not r.get("unobserved")) / max(
+        1, sum(1 for r in rows if not r.get("unobserved"))
+    )
+    print(f"relabel changed={changed} success_rate={rate:.4f} -> {out}", flush=True)
+
+
+async def run_salvage_silver(
+    silver_path: Path,
+    queries_path: Path,
+    *,
+    provider: Any,
+    spend: SpendLog,
+    cache: RequestCache,
+    models_by_id: dict[str, Model],
+) -> None:
+    rows = [
+        json.loads(line)
+        for line in silver_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    qmap = {_prompt_of(_messages(q)): q for q in _read_queries(queries_path, 10_000)}
+    spend._async_lock = asyncio.Lock()
+    sem = asyncio.Semaphore(_concurrency())
+    salvaged = 0
+
+    async def one(i: int) -> None:
+        nonlocal salvaged
+        row = rows[i]
+        if not row.get("unlabeled"):
+            return
+        q = qmap.get(row["prompt"])
+        if not q:
+            return
+        async with sem:
+            label = await _teacher_call(
+                provider,
+                ESCALATE_TEACHER,
+                _messages(q),
+                cache=cache,
+                spend=spend,
+                models_by_id=models_by_id,
+                max_completion_tokens=2048,
+            )
+        if not label:
+            return
+        rows[i] = {
+            "prompt": row["prompt"],
+            "complexity_bin": label["complexity_bin"],
+            "p_success": label["p_success"],
+            "teacher": ESCALATE_TEACHER,
+            "tokens": row.get("tokens") or estimate_tokens(_messages(q)),
+            "needs_tools": bool(q.get("needs_tools")),
+            "phase": str(q.get("phase") or "plan"),
+            "hint_bin": str(q.get("hint_bin") or "standard"),
+        }
+        salvaged += 1
+
+    await asyncio.gather(*[one(i) for i in range(len(rows))])
+    silver_path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    labeled = sum(1 for r in rows if not r.get("unlabeled"))
+    print(f"salvage +{salvaged} labeled={labeled} spend={spend.total():.4f}", flush=True)
 
 
 def main(
@@ -455,6 +833,13 @@ def main(
     f.add_argument("--gold", required=True)
     f.add_argument("--silver")
     f.add_argument("--out", required=True)
+    r = sub.add_parser("relabel")
+    r.add_argument("--gold", required=True)
+    r.add_argument("--queries", required=True)
+    r.add_argument("--out", required=True)
+    s = sub.add_parser("salvage")
+    s.add_argument("--silver", required=True)
+    s.add_argument("--queries", required=True)
     args = parser.parse_args(argv)
 
     root = Path(__file__).resolve().parents[2]
@@ -469,6 +854,27 @@ def main(
 
     if args.cmd == "fit":
         fit_scorer(Path(args.gold), Path(args.silver) if args.silver else None, Path(args.out))
+        return 0
+    if args.cmd == "relabel":
+        relabel_gold(
+            Path(args.gold),
+            Path(args.queries),
+            Path(args.out),
+            cache=cache,
+            models_by_id=by_id,
+        )
+        return 0
+    if args.cmd == "salvage":
+        asyncio.run(
+            run_salvage_silver(
+                Path(args.silver),
+                Path(args.queries),
+                provider=upstream,
+                spend=spend_log,
+                cache=cache,
+                models_by_id=by_id,
+            )
+        )
         return 0
     if args.cmd == "gold":
         limit = args.limit if args.limit is not None else (DENSE_LIMIT if args.dense else SPARSE_LIMIT)

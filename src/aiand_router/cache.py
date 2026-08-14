@@ -17,6 +17,8 @@ def request_cache_key(body: dict[str, Any], model_id: str, key_fp: str = "") -> 
         "max_tokens": body.get("max_tokens") or body.get("max_completion_tokens"),
         "key_fp": key_fp or "",
     }
+    if body.get("reasoning_effort"):
+        payload["reasoning_effort"] = body["reasoning_effort"]
     blob = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
