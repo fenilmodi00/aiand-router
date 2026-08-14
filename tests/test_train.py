@@ -521,6 +521,77 @@ def test_gold_query_level_tests_passed_is_not_y():
     assert ok is True and tier == "weak"
 
 
+def test_gold_needs_tools_sends_tools_array(tmp_path, monkeypatch):
+    """needs_tools gold request must include a tools array so the model can emit tool_calls."""
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    provider = FakeProvider()
+    spend = SpendLog(tmp_path / "spend.txt", 15)
+    queries = tmp_path / "q.jsonl"
+    queries.write_text(
+        json.dumps(
+            {
+                "prompt": "Use a tool to list files in src.",
+                "phase": "tool",
+                "hint_bin": "standard",
+                "needs_tools": True,
+                "source": "swe-smith",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    gold = tmp_path / "gold.jsonl"
+    assert (
+        main(
+            ["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1"],
+            provider=provider,
+            spend=spend,
+            cache_dir=tmp_path / "cache",
+            models_path=Path("config/models.yaml"),
+        )
+        == 0
+    )
+    assert provider.calls
+    assert all(isinstance(c.get("tools"), list) and c["tools"] for c in provider.calls)
+
+
+def test_gold_needs_tools_without_tool_calls_is_not_success(tmp_path, monkeypatch):
+    """needs_tools + nonempty text + no tool_calls is observed fail, not weak-True."""
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    provider = FakeProvider()
+    spend = SpendLog(tmp_path / "spend.txt", 15)
+    queries = tmp_path / "q.jsonl"
+    queries.write_text(
+        json.dumps(
+            {
+                "prompt": "Use a tool to list files in src.",
+                "phase": "tool",
+                "hint_bin": "standard",
+                "needs_tools": True,
+                "source": "swe-smith",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    gold = tmp_path / "gold.jsonl"
+    assert (
+        main(
+            ["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1"],
+            provider=provider,
+            spend=spend,
+            cache_dir=tmp_path / "cache",
+            models_path=Path("config/models.yaml"),
+        )
+        == 0
+    )
+    rows = [json.loads(line) for line in gold.read_text(encoding="utf-8").splitlines() if line.strip()]
+    observed = [r for r in rows if not r.get("unobserved")]
+    assert observed
+    assert all(r.get("success") is False for r in observed)
+    assert all("success" in r for r in observed)
+
+
 def test_gold_sparse_skips_ineligible_anchors(tmp_path, monkeypatch):
     """Flash + measured trio run when eligible; ineligible anchors are not gold cells."""
     import yaml

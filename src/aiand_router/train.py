@@ -340,7 +340,9 @@ def _gold_ids(q: dict[str, Any], models_by_id: dict[str, Model], *, dense: bool)
     return out
 
 
-def _gold_body(model_id: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
+def _gold_body(
+    model_id: str, messages: list[dict[str, Any]], *, needs_tools: bool = False
+) -> dict[str, Any]:
     effort = MIN_REASONING_EFFORT.get(model_id)
     max_tokens = GOLD_REASONING_MAX_TOKENS if effort and effort != "none" else GOLD_MAX_TOKENS
     body: dict[str, Any] = {
@@ -351,6 +353,8 @@ def _gold_body(model_id: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
     }
     if effort:
         body["reasoning_effort"] = effort
+    if needs_tools:
+        body["tools"] = [{"type": "function", "function": {"name": "read", "parameters": {}}}]
     return body
 
 
@@ -422,6 +426,8 @@ def _gold_label(
         return True, "verified"
     if message.get("tool_calls"):
         return True, "proxy"
+    if meta.get("needs_tools"):
+        return False, "proxy"
     finish = str(choice.get("finish_reason") or "")
     if finish == "length" and not text:
         return False, "weak"
@@ -504,7 +510,7 @@ async def run_gold(
         messages: list[dict[str, Any]], model_id: str, q: dict[str, Any]
     ) -> dict[str, Any]:
         async with sem:
-            body = _gold_body(model_id, messages)
+            body = _gold_body(model_id, messages, needs_tools=bool(q.get("needs_tools")))
             result = await _complete(
                 provider, body, cache=cache, spend=spend, models_by_id=models_by_id
             )
@@ -762,7 +768,7 @@ def relabel_gold(
             continue
         q = qmap.get(row["prompt"], {})
         messages = _messages(q) if q else [{"role": "user", "content": row["prompt"]}]
-        body = _gold_body(row["model_id"], messages)
+        body = _gold_body(row["model_id"], messages, needs_tools=bool(q.get("needs_tools")))
         hit = cache.get(request_cache_key(body, row["model_id"]))
         if not hit:
             continue
