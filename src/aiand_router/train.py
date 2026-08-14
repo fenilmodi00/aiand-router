@@ -25,6 +25,7 @@ from .router import (
     load_models,
     Model,
 )
+from .pool import run_pool, sample_stratum
 from .scorer import BINS, featurize, featurize_observable
 
 _TEACHER_SYS = (
@@ -100,9 +101,9 @@ def _read_queries(path: Path, limit: int) -> list[dict[str, Any]]:
         if not line.strip():
             continue
         rows.append(json.loads(line))
-        if len(rows) >= limit:
-            break
-    return rows
+    if limit >= len(rows):
+        return rows
+    return sample_stratum(rows, limit, seed=0)
 
 
 def _messages(row: dict[str, Any]) -> list[dict[str, Any]]:
@@ -824,10 +825,21 @@ def main(
     cache_dir: Path | None = None,
     models_path: Path | None = None,
 ) -> int:
-    if os.getenv(OPT_IN_ENV) != "1":
+    argv = list(argv) if argv is not None else None
+    is_pool = (argv or [])[:1] == ["pool"]
+    if not is_pool and os.getenv(OPT_IN_ENV) != "1":
         return _refuse()
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("pool")
+    p.add_argument("--smith")
+    p.add_argument("--bfcl")
+    p.add_argument("--gym")
+    p.add_argument("--r2e")
+    p.add_argument("--eval", nargs="*", default=[])
+    p.add_argument("--out", required=True)
+    p.add_argument("--n", type=int, default=4000)
+    p.add_argument("--seed", type=int, default=0)
     t = sub.add_parser("teacher")
     t.add_argument("--queries", required=True)
     t.add_argument("--out", required=True)
@@ -849,6 +861,8 @@ def main(
     s.add_argument("--silver", required=True)
     s.add_argument("--queries", required=True)
     args = parser.parse_args(argv)
+    if args.cmd == "pool":
+        return run_pool(args)
 
     root = Path(__file__).resolve().parents[2]
     cfg = load_config(models_path or root / "config" / "models.yaml")
