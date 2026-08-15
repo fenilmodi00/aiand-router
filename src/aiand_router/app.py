@@ -21,6 +21,7 @@ from .anthropic_adapter import (
     stream_openai_to_anthropic_sse,
 )
 from .cache import RequestCache, request_cache_key
+from .canary import is_tripped
 from .console import (
     LOG_QUERY_KEYS,
     aiand_origin,
@@ -742,6 +743,11 @@ def create_app(
 
 
 def _router_headers(decision: Decision) -> dict[str, str]:
+    if is_tripped():
+        if decision.reason_codes is None:
+            decision.reason_codes = []
+        if "retrain_drift" not in decision.reason_codes:
+            decision.reason_codes.append("retrain_drift")
     if decision.path in {"shadow", "trained"}:
         meta = {
             "X-Router-Phase": decision.phase,
