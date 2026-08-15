@@ -22,13 +22,23 @@ from .pool import run_pool, sample_stratum
 from .router import (
     SpendLog,
     _text,
+    eligible_models,
     estimate_cost,
     estimate_tokens,
     load_config,
     load_models,
     Model,
+    select_model,
 )
-from .scorer import BINS, _gbdt_z, featurize, featurize_observable
+from .scorer import (
+    BINS,
+    _gbdt_z,
+    featurize,
+    featurize_observable,
+    load_scorer,
+    pick_cheapest_above_bar,
+    score_eligible,
+)
 
 _TEACHER_SYS = (
     "Label this coding-agent request for a model router. Do not solve the task. "
@@ -1111,6 +1121,207 @@ async def run_salvage_silver(
     print(f"salvage +{salvaged} labeled={labeled} spend={spend.total():.4f}", flush=True)
 
 
+def run_retune(
+    dense_path: Path,
+    scorer_path: Path | None = None,
+    models_path: Path | None = None,
+) -> str:
+    """Search (threshold, max_regret) on a held-out tune split.
+
+    Loads dense gold rows (n >= 300), runs a grid search over threshold
+    [0, 1] step 0.01 and max_regret [0, 0.2] step 0.01, and picks the
+    (t, r) that minimizes total list USD subject to:
+
+        resolve_rate   >= rules_resolve_rate   - 0.01
+        escalate_rate  >= rules_escalate_rate  - 0.01
+
+    where escalate_rate = 1 - resolve_rate (trained pick failed or declined).
+
+    Fits **medium only**; derives low/high/max via Pioneer offsets
+    dt(-0.05, +0.10) / (+0.10, -0.05) / (+0.50, -0.17), clamped to [0, 1],
+    then walked to restore t_low <= t_med <= t_high <= t_max and
+    r_low >= r_med >= r_high >= r_max.
+
+    Returns the ``trained_effort:`` YAML fragment, or ``"do-not-promote"``
+    if no (t, r) satisfies the constraints.
+    """
+    rows = _jsonl_rows(dense_path)
+    if len(rows) < 300:
+        raise ValueError(f"tune split has {len(rows)} rows; need >= 300")
+
+    root = Path(__file__).resolve().parents[2]
+    cfg = load_config(models_path or root / "config" / "models.yaml")
+    models = load_models(cfg)
+    by_id = {m.id: m for m in models}
+
+    scorer_file = scorer_path or Path(
+        os.getenv("SCORER_PATH") or str(root / "data" / "scorer.json")
+    )
+    artifact = load_scorer(scorer_file)
+    if artifact is None:
+        return "do-not-promote"
+
+    # Group rows by prompt -> per-query dense gold
+    queries: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        prompt = str(row.get("prompt") or "")
+        if not prompt:
+            continue
+        queries.setdefault(prompt, []).append(row)
+
+    if not queries:
+        return "do-not-promote"
+
+    # Pre-compute per-query data (score_eligible is independent of t, r)
+    per_query: list[dict[str, Any]] = []
+    for prompt, qrows in queries.items():
+        first = qrows[0]
+        phase = str(first.get("phase") or "plan")
+        needs_tools = bool(first.get("needs_tools"))
+        tokens = int(first.get("tokens") or 500)
+
+        gold: dict[str, bool] = {}
+        for r in qrows:
+            mid = r.get("model_id")
+            if mid and mid in by_id:
+                gold[mid] = bool(r.get("success"))
+
+        if not gold:
+            continue
+
+        _, eligible = eligible_models(
+            cfg,
+            models,
+            phase=phase,
+            needs_tools=needs_tools,
+            tokens=tokens,
+            effort="medium",
+            allowed=None,
+            spend_usd=0.0,
+            budget_usd=1e18,
+        )
+        eligible_ids = [m.id for m in eligible]
+
+        eligible_gold = {mid: gold[mid] for mid in eligible_ids if mid in gold}
+        if not eligible_gold:
+            continue
+
+        rules_decision = select_model(
+            cfg,
+            models,
+            phase=phase,
+            needs_tools=needs_tools,
+            tokens=tokens,
+            effort="medium",
+            allowed=None,
+            spend_usd=0.0,
+            budget_usd=1e18,
+        )
+        rules_model_id = rules_decision.model.id
+        rules_success = gold.get(rules_model_id, False)
+        rules_cost = estimate_cost(rules_decision.model, tokens, 800)
+
+        _, p_success = score_eligible(
+            artifact,
+            eligible_ids,
+            phase=phase,
+            needs_tools=needs_tools,
+            tokens=tokens,
+            text=prompt,
+        )
+        scored_eligible = [m for m in eligible if m.id in p_success]
+
+        per_query.append(
+            {
+                "eligible": scored_eligible,
+                "p_success": p_success,
+                "gold": eligible_gold,
+                "rules_success": rules_success,
+                "rules_cost": rules_cost,
+                "tokens": tokens,
+            }
+        )
+
+    if not per_query:
+        return "do-not-promote"
+
+    n_queries = len(per_query)
+
+    # Rules baseline
+    rules_resolve = sum(1 for q in per_query if q["rules_success"]) / n_queries
+    rules_escalate = 1.0 - rules_resolve
+
+    # Grid search: threshold [0, 1] step 0.01, max_regret [0, 0.2] step 0.01
+    best_cost = float("inf")
+    best_t: float | None = None
+    best_r: float | None = None
+
+    for t_i in range(101):
+        t = t_i / 100.0
+        for r_i in range(21):
+            r = r_i / 100.0
+            total_cost = 0.0
+            n_resolve = 0
+
+            for q in per_query:
+                chosen, _ = pick_cheapest_above_bar(
+                    q["eligible"],
+                    q["p_success"],
+                    threshold=t,
+                    max_regret=r,
+                )
+                if chosen is None:
+                    total_cost += q["rules_cost"]
+                else:
+                    total_cost += estimate_cost(chosen, q["tokens"], 800)
+                    if q["gold"].get(chosen.id, False):
+                        n_resolve += 1
+
+            resolve_rate = n_resolve / n_queries
+            escalate_rate = 1.0 - resolve_rate
+
+            if resolve_rate < rules_resolve - 0.01:
+                continue
+            if escalate_rate < rules_escalate - 0.01:
+                continue
+
+            if total_cost < best_cost:
+                best_cost = total_cost
+                best_t = t
+                best_r = r
+
+    if best_t is None:
+        return "do-not-promote"
+
+    # Pioneer offsets: derive low/high/max from medium
+    t_med, r_med = best_t, best_r
+    t_low = max(0.0, min(1.0, t_med - 0.05))
+    r_low = max(0.0, min(1.0, r_med + 0.10))
+    t_high = max(0.0, min(1.0, t_med + 0.10))
+    r_high = max(0.0, min(1.0, r_med - 0.05))
+    t_max = max(0.0, min(1.0, t_med + 0.50))
+    r_max = max(0.0, min(1.0, r_med - 0.17))
+
+    # Walk to restore ordering
+    t_low = min(t_low, t_med)
+    t_high = max(t_high, t_med)
+    t_max = max(t_max, t_high)
+    r_low = max(r_low, r_med)
+    r_high = min(r_high, r_med)
+    r_max = min(r_max, r_high)
+
+    lines = ["trained_effort:"]
+    for name, t_val, r_val in [
+        ("low", t_low, r_low),
+        ("medium", t_med, r_med),
+        ("high", t_high, r_high),
+        ("max", t_max, r_max),
+    ]:
+        lines.append(f"  {name}: {{threshold: {t_val:.2f}, max_regret: {r_val:.2f}}}")
+
+    return "\n".join(lines) + "\n"
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -1120,8 +1331,8 @@ def main(
     models_path: Path | None = None,
 ) -> int:
     argv = list(argv) if argv is not None else sys.argv[1:]
-    is_pool = argv[:1] == ["pool"]
-    if not is_pool and os.getenv(OPT_IN_ENV) != "1":
+    is_offline = argv[:1] in (["pool"], ["retune"])
+    if not is_offline and os.getenv(OPT_IN_ENV) != "1":
         return _refuse()
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -1215,9 +1426,22 @@ def main(
     s = sub.add_parser("salvage")
     s.add_argument("--silver", required=True)
     s.add_argument("--queries", required=True)
+    rt = sub.add_parser("retune")
+    rt.add_argument("--dense", required=True)
+    rt.add_argument("--scorer")
+    rt.add_argument("--models")
     args = parser.parse_args(argv)
     if args.cmd == "pool":
         return run_pool(args)
+    if args.cmd == "retune":
+        root = Path(__file__).resolve().parents[2]
+        result = run_retune(
+            Path(args.dense),
+            scorer_path=Path(args.scorer) if args.scorer else None,
+            models_path=Path(args.models) if args.models else models_path,
+        )
+        print(result, end="")
+        return 0
 
     root = Path(__file__).resolve().parents[2]
     cfg = load_config(models_path or root / "config" / "models.yaml")
