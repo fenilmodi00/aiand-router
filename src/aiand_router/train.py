@@ -833,6 +833,30 @@ def _fit_platt(zs: list[float], ys: list[float]) -> tuple[float, float]:
     return a, b
 
 
+def _fit_isotonic(zs: list[float], ys: list[float]) -> list[list[float]]:
+    """Pure-Python PAVA (Pool Adjacent Violators).
+
+    Returns a monotone step table ``[[z, p], ...]`` suitable for JSON.
+    Each entry is ``[max_z_of_block, pooled_mean]``; p is non-decreasing.
+    Lookup: first entry where ``z_q <= boundary`` wins; clamp to last.
+    """
+    if len(zs) != len(ys):
+        raise ValueError("zs and ys must have equal length")
+    if not zs:
+        raise ValueError("cannot fit isotonic on empty (z, y) lists")
+    pairs = sorted(zip(zs, ys), key=lambda p: p[0])
+    # blocks: [sum_y, count, max_z]
+    blocks: list[list[float]] = []
+    for z, y in pairs:
+        blocks.append([y, 1, z])
+        while len(blocks) >= 2 and blocks[-2][0] / blocks[-2][1] > blocks[-1][0] / blocks[-1][1]:
+            blocks[-2][0] += blocks[-1][0]
+            blocks[-2][1] += blocks[-1][1]
+            blocks[-2][2] = blocks[-1][2]
+            blocks.pop()
+    return [[b[2], b[0] / b[1]] for b in blocks]
+
+
 CAL_FRAC = 0.2
 
 
@@ -938,7 +962,14 @@ def fit_scorer(
             ic = intercepts[mid]
             zs_cal.append(ic + sum(w[i] * x[i] for i in range(len(w))))
         ys_cal.append(1.0 if row.get("success") else 0.0)
-    a, b = _fit_platt(zs_cal, ys_cal)
+    n_cal = len(zs_cal)
+    if n_cal <= 1000:
+        a, b = _fit_platt(zs_cal, ys_cal)
+        calibrator: dict[str, Any] = {"mode": "platt", "a": a, "b": b}
+    else:
+        table = _fit_isotonic(zs_cal, ys_cal)
+        calibrator = {"mode": "isotonic", "table": table}
+        a, b = 1.0, 0.0
     bin_xs: list[list[float]] = []
     bin_ys: dict[str, list[float]] = {bn: [] for bn in BINS}
     for row in silver:
@@ -964,6 +995,7 @@ def fit_scorer(
         "intercepts": intercepts,
         "bin_weights": bin_weights,
         "platt": {"a": a, "b": b},
+        "calibrator": calibrator,
         "n_gold": len(gold),
         "n_cal": len(cal_gold),
         "n_silver": len(silver),

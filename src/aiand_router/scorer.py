@@ -144,6 +144,23 @@ def _calibrator_ab(artifact: dict[str, Any]) -> tuple[float, float]:
     return float(src.get("a", 1.0)), float(src.get("b", 0.0))
 
 
+def _isotonic_lookup(table: list[list[float]], z: float) -> float:
+    if not table:
+        return 0.5
+    for boundary, p in table:
+        if z <= boundary:
+            return p
+    return table[-1][1]
+
+
+def _calibrate(artifact: dict[str, Any], z: float) -> float:
+    cal = artifact.get("calibrator")
+    if isinstance(cal, dict) and cal.get("mode") == "isotonic":
+        return _isotonic_lookup(cal.get("table") or [], z)
+    a, b = _calibrator_ab(artifact)
+    return _sigmoid(a * z + b)
+
+
 def _gbdt_z(head: dict[str, Any], x: list[float]) -> float:
     z = float(head.get("intercept") or 0.0)
     for t in head.get("trees") or []:
@@ -174,7 +191,6 @@ def score_eligible(
             )
         )
         x = featurize(phase, needs_tools, tokens, bin_, text=text)
-        a, b = _calibrator_ab(artifact)
         intercepts = artifact.get("intercepts") or {}
         table = artifact.get("p_success") or {}
         p_success = {}
@@ -188,7 +204,7 @@ def score_eligible(
                 if i in table:
                     p_success[i] = float(table[i])
                 continue
-            p_success[i] = _sigmoid(a * _gbdt_z(head, x) + b)
+            p_success[i] = _calibrate(artifact, _gbdt_z(head, x))
         return bin_, p_success
     weights = artifact.get("weights")
     if isinstance(weights, dict) and weights:
@@ -200,7 +216,6 @@ def score_eligible(
             )
         )
         x = featurize(phase, needs_tools, tokens, bin_, text=text)
-        a, b = _calibrator_ab(artifact)
         intercepts = artifact.get("intercepts") or {}
         table = artifact.get("p_success") or {}
         p_success = {}
@@ -215,7 +230,7 @@ def score_eligible(
                     p_success[i] = float(table[i])
                 continue
             ic = float(intercepts.get(i, 0.0))
-            p_success[i] = _sigmoid(a * (ic + _dot([float(v) for v in w], x)) + b)
+            p_success[i] = _calibrate(artifact, ic + _dot([float(v) for v in w], x))
         return bin_, p_success
     raw = artifact.get("p_success") or {}
     p_success = {i: float(raw[i]) for i in eligible_ids if i in raw}
