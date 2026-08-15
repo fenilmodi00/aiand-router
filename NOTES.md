@@ -1,9 +1,11 @@
 - Shell is PowerShell: env vars are `$env:NAME="value"`, not `set NAME=value`.
 - User asked to go live for routing requests after trained-hop implementation.
-- Do not treat `TRAINED_PATH=trained` as the next click: there is no `data/scorer.json` yet (`data/` is gitignored and empty).
+- **Trained hop (hard-transfer, 2026-08-15):** local `.env` (gitignored) sets `TRAINED_PATH=trained` and `SCORER_PATH=data/scorer-hard-logistic.json` after dual replay `replay_gate_pass=true`. Language: shadow/trained hop looks like a real router on the local dual holdout — **not** SWE-bench Verified promotion; artifact stays `not_spec_floors`. Code still defaults to shadow if env unset. Revert: `TRAINED_PATH=shadow` (or unset). `apply_replay_gate` never auto-flips.
 - Distinct `ROUTER_API_KEY` vs `AIAND_API_KEY` — clients send only the router key.
 - Budget: code default $15; `.env` may differ; `$100` smoke is operator-only. Never change the code default.
 - Uncommitted Rec A upgrade (feature logistic + Platt in `train.py` / `scorer.py`) sits on top of the committed intercept-only fit; HTTP hop tests are green either way.
 - Learner is a frontend engineer at AAINML; not ML. Teach with fixtures / dist-artifact analogies. No backprop lectures until they ask.
 - They asked to generate the request dataset and walk the path to the AIand provider. First paid rehearsal should be `--limit 5`.
 - Paid smoke fit is **undone / blocked** (2026-08-13): catalog list 200, chat completions 404 `model_not_found` with `X-Model` still set (request id `54ba9110-3bdd-4772-9a00-2ac0f4938b31`, org `390e9b0f-f2c4-4dec-b36b-268f75bad708`). Resume when inference returns 200. Queries: `datasets/train-queries.jsonl` (2000). Do not treat missing `data/scorer.json` as a code bug.
+- Round 1 video (2026-08-14): ~3 min, lead with landing + dashboard + playground. Script in `lessons/0003-round-one-video-script.html`. ML trained hop = Round Two tease; don't oversell live trained picks.
+- Hackathon PDF/slides (2026-08-14): 6-page deck at `lessons/0004-hackathon-submission.html`. **PPT:** `lessons/0004-hackathon-submission.pptx` (regenerate: `python scripts/gen_hackathon_ppt.py`). One-page cheat sheet: `reference/hackathon-submission-cheatsheet.html`.

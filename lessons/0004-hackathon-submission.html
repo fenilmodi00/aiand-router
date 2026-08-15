@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>aiand/auto — Hackathon Submission</title>
+  <link rel="stylesheet" href="../assets/submission.css">
+</head>
+<body>
+
+<!-- PAGE 1 · COVER + PROBLEM -->
+<section class="slide cover">
+  <div class="badge-row">
+    <span class="badge">OpenAI-compatible</span>
+    <span class="badge">Coding agents</span>
+    <span class="badge">Cost-aware routing</span>
+    <span class="badge">ML-trained path</span>
+  </div>
+  <h1>aiand/auto</h1>
+  <p class="tagline">
+    A smart inference router that picks the cheapest aiand model per coding-agent step —
+    without breaking hard tasks.
+  </p>
+  <p class="small">Hackathon submission · Round One · 2026</p>
+  <div class="meta">
+    <strong>One endpoint:</strong> <code>model: router/auto</code><br>
+    Drop-in for OpenCode, Cursor, Claude Code, and any OpenAI client
+  </div>
+</section>
+
+<section class="slide">
+  <span class="slide-num">2 / 6</span>
+  <h2 class="slide-title">The Problem</h2>
+  <p class="subtitle">Problem fit &amp; real-world impact</p>
+
+  <p>
+    AI coding agents run dozens of inference hops per session — discover, plan, edit, debug, summarize.
+    Teams face a painful trade-off:
+  </p>
+
+  <div class="cols">
+    <div class="col-card bad">
+      <h3>Premium-only baseline</h3>
+      <ul>
+        <li>Every step hits frontier models (Kimi K3, GLM-5, etc.)</li>
+        <li>Simple grep-and-summarize steps cost 10–40× more than needed</li>
+        <li>Budget caps stop agents mid-task</li>
+      </ul>
+    </div>
+    <div class="col-card bad">
+      <h3>Cheap-only baseline</h3>
+      <ul>
+        <li>Flash on everything fails multi-file refactors</li>
+        <li>Tool-call accuracy drops on hard debug steps</li>
+        <li>Human time lost re-running failed agent loops</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout">
+    <strong>Who feels this?</strong> Engineering teams running OpenCode / Cursor agents against
+    multi-model catalogs (aiand, OpenRouter, Bedrock). Spend is measurable in dollars per session;
+    quality is measurable in tests-passed and patch-applied.
+  </div>
+
+  <h3>Our solution in one sentence</h3>
+  <p>
+    <strong>aiand/auto</strong> sits between the agent and aiand as an OpenAI-compatible gateway.
+    Each request carries phase context (<code>x-agent-phase</code>) and effort tier
+    (<code>x-routing-effort</code>). The router filters ineligible models, scores survivors,
+    and picks the <em>cheapest model that clears your quality bar</em>.
+  </p>
+
+  <p class="small source">
+    Primary source: <a href="https://docs.aiand.com/">aiand API docs</a> ·
+    <a href="../README.md">Project README</a>
+  </p>
+</section>
+
+<!-- PAGE 3 · WHAT WE BUILT -->
+<section class="slide">
+  <span class="slide-num">3 / 6</span>
+  <h2 class="slide-title">What We Built</h2>
+  <p class="subtitle">Functional prototype — backend, frontend, ML pipeline</p>
+
+  <div class="flow">
+    <div class="box"><strong>Agent</strong>OpenCode / Cursor / Flashlight</div>
+    <div class="arrow">→</div>
+    <div class="box"><strong>Gateway</strong>FastAPI · <code>/v1/chat/completions</code></div>
+    <div class="arrow">→</div>
+    <div class="box"><strong>Router</strong>Rules + trained shadow</div>
+    <div class="arrow">→</div>
+    <div class="box"><strong>aiand</strong>9-model catalog</div>
+  </div>
+
+  <h3>Backend (Python · FastAPI)</h3>
+  <ul class="small">
+    <li><strong>OpenAI-compatible proxy</strong> — streaming, tool calls, JSON schema; clients keep <code>model: router/auto</code></li>
+    <li><strong>Pioneer scoring</strong> — <code>0.40·success + 0.20·capability + 0.15·tools + 0.10·latency + 0.10·health − 0.05·cost</code></li>
+    <li><strong>Hard constraints first</strong> — tools, JSON mode, context window, budget cap, latency limit</li>
+    <li><strong>Telemetry</strong> — every hop logged to <code>data/requests.jsonl</code>; replay UI at <code>/replay</code></li>
+    <li><strong>Eval harness</strong> — seeded tasks vs premium-only, Kimi-only, and adaptive baselines</li>
+    <li><strong>70 automated tests</strong> — ASGI tests with fake upstream; CI never spends credits</li>
+  </ul>
+
+  <h3>Frontend (Next.js operator console + landing)</h3>
+  <ul class="small">
+    <li><strong>Landing page</strong> — live routing previews, interactive simulator, ROI calculator</li>
+    <li><strong>Dashboard</strong> (<code>/routers/auto</code>) — savings vs baseline, candidate mix, inference table</li>
+    <li><strong>Playground</strong> — live <code>router/auto</code> chat against the gateway</li>
+    <li><strong>Keys &amp; usage</strong> — API key management; spend charts from request log</li>
+  </ul>
+
+  <h3>ML training pipeline (opt-in, budget-capped)</h3>
+  <div class="pipeline">
+    <div class="step"><strong>Teacher</strong>Motif/GLM labels P(success) per model</div>
+    <div class="step"><strong>Gold</strong>Measured trio on real completions</div>
+    <div class="step"><strong>Fit</strong>Logistic + Platt calibration</div>
+    <div class="step"><strong>Shadow</strong>Log what trained <em>would</em> pick</div>
+    <div class="step"><strong>Trained</strong>Flip when shadow looks sane</div>
+  </div>
+
+  <p class="small">
+    <strong>Round One honesty:</strong> Live requests today use the rules path. Trained routing runs in
+    <code>TRAINED_PATH=shadow</code> — the gateway records <code>X-Router-Trained-Would</code> without
+    changing the client response. Scorer weights load from <code>data/scorer.json</code> when fitted.
+  </p>
+</section>
+
+<!-- PAGE 4 · WHY BETTER THAN RULES -->
+<section class="slide">
+  <span class="slide-num">4 / 6</span>
+  <h2 class="slide-title">Why We Beat Rule-Based Routers</h2>
+  <p class="subtitle">Innovation &amp; purposeful AI</p>
+
+  <div class="cols">
+    <div class="col-card bad">
+      <h3>Typical rule-based router</h3>
+      <ul>
+        <li>Hand-tuned if-else: <em>if phase=edit → use Model X</em></li>
+        <li>Static benchmark scores (AA index) not measured on <em>your</em> agent trajectories</li>
+        <li>Same quality bar for a 1-line typo fix and a 12-file migration</li>
+        <li>Adding a new catalog model = retune dozens of thresholds by hand</li>
+        <li>Uncalibrated “confidence” — no link to actual task success rate</li>
+      </ul>
+    </div>
+    <div class="col-card good">
+      <h3>aiand/auto (rules today → trained tomorrow)</h3>
+      <ul>
+        <li><strong>Per-request scoring</strong> — phase family, token count, tool schema → P(success)</li>
+        <li><strong>Cheapest-above-bar</strong> — effort tiers (low/medium/high/max) set threshold + max-regret</li>
+        <li><strong>Complexity bins</strong> — trivial / standard / hard / frontier from teacher labels</li>
+        <li><strong>Calibrated probabilities</strong> — Platt scaling on gold completions; ECE target ≤ 0.03</li>
+        <li><strong>&lt;10 ms scorer</strong> — in-process features-only head; no embedding API on live hop</li>
+        <li><strong>Graceful fallback</strong> — missing scorer → rules path with <code>scorer_down</code></li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>Three product pillars</h3>
+  <table class="compact">
+    <thead><tr><th>Pillar</th><th>What it means</th></tr></thead>
+    <tbody>
+      <tr><td>01 · Score every request</td><td>Multi-candidate P(success) in under 10 ms; no slow teacher on the hot path</td></tr>
+      <tr><td>02 · Clear your confidence bar</td><td>4 effort tiers; regret-bounded pool; dynamic list-price ranking</td></tr>
+      <tr><td>03 · One universal endpoint</td><td>Drop-in <code>/v1/chat/completions</code>; headers expose chosen model, score, savings</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <strong>AI used purposefully:</strong> Teacher models label offline training data; a tiny student classifier
+    serves live traffic. We do not call an LLM on every routing decision — that would add latency and cost
+    to the very problem we solve.
+  </div>
+</section>
+
+<!-- PAGE 5 · ROADMAP + PRODUCT -->
+<section class="slide">
+  <span class="slide-num">5 / 6</span>
+  <h2 class="slide-title">Product Potential &amp; Roadmap</h2>
+  <p class="subtitle">Scalability beyond the hackathon</p>
+
+  <h3>Target users</h3>
+  <ul class="small">
+    <li><strong>Platform teams</strong> — offer <code>router/auto</code> as a managed endpoint on aiand</li>
+    <li><strong>Agent builders</strong> — OpenCode / Cursor shops that want cost control without rewriting harnesses</li>
+    <li><strong>FinOps / eng leads</strong> — dashboard proves savings per phase with auditable JSONL logs</li>
+  </ul>
+
+  <h3>Near-term (post-hackathon)</h3>
+  <ul class="timeline">
+    <li><span class="when">Now</span><span>Rules path live · shadow mode logging trained picks · dashboard + playground demo</span></li>
+    <li><span class="when">Next</span><span>Complete smoke fit (<code>teacher → gold → fit</code>) · watch shadow vs rules on real traffic</span></li>
+    <li><span class="when">Flip</span><span>Set <code>TRAINED_PATH=trained</code> when shadow savings hold without quality regressions</span></li>
+    <li><span class="when">Gate</span><span>SWE-bench Verified + Terminal-Bench promotion criteria before “production” claim</span></li>
+  </ul>
+
+  <h3>Long-term vision</h3>
+  <div class="cols">
+    <div class="col-card">
+      <h3>Commercialization</h3>
+      <ul>
+        <li>SaaS router endpoint with per-org scorer retraining</li>
+        <li>Partnership with aiand as default smart-routing layer</li>
+        <li>Usage-based pricing on measured savings vs premium baseline</li>
+      </ul>
+    </div>
+    <div class="col-card">
+      <h3>Technical scale</h3>
+      <ul>
+        <li>Multi-tenant gateway · Nginx/Gunicorn production topology</li>
+        <li>Retrain cadence on growing request cache</li>
+        <li>Redaction + spend caps for enterprise agent fleets</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="small">
+    We never invent savings percentages — logged savings are vs <code>most_expensive_eligible</code>
+    on that specific request. Marketing previews use illustrative numbers; the dashboard uses real log data.
+  </p>
+</section>
+
+<!-- PAGE 6 · DEMO + EVAL CRITERIA -->
+<section class="slide">
+  <span class="slide-num">6 / 6</span>
+  <h2 class="slide-title">Demo Guide &amp; Evaluation Map</h2>
+  <p class="subtitle">How to present · how judges should read us</p>
+
+  <h3>5-minute live demo flow</h3>
+  <table class="compact">
+    <thead><tr><th>Step</th><th>Screen</th><th>Show</th></tr></thead>
+    <tbody>
+      <tr><td>1 · Hook</td><td>Title / face</td><td>Problem → one endpoint → aiand/auto</td></tr>
+      <tr><td>2 · Landing</td><td><code>localhost:3000</code></td><td>Hero previews · 3 pillars · simulator click</td></tr>
+      <tr><td>3 · Dashboard</td><td><code>/routers/auto</code></td><td>Savings · candidate mix · inference log</td></tr>
+      <tr><td>4 · Playground</td><td><code>/playground</code></td><td>One live message · <code>X-Router-Model</code> header</td></tr>
+      <tr><td>5 · Future</td><td>Architecture section</td><td>Shadow → trained · SWE-bench gate · rules fallback</td></tr>
+    </tbody>
+  </table>
+
+  <h3>How we map to judging criteria</h3>
+  <table class="compact criteria">
+    <tbody>
+      <tr>
+        <td>Problem fit &amp; impact (25%)</td>
+        <td>Clear agent cost/quality trade-off; measurable spend in JSONL; real aiand catalog prices</td>
+      </tr>
+      <tr>
+        <td>Innovation &amp; idea quality (20%)</td>
+        <td>Student-teacher distillation + cheapest-above-bar; AI offline not on hot path; beats static if-else</td>
+      </tr>
+      <tr>
+        <td>Technical implementation (20%)</td>
+        <td>Working gateway + dashboard + 70 tests; shadow/trained/scorer_down paths; opt-in train CLI</td>
+      </tr>
+      <tr>
+        <td>Product potential (20%)</td>
+        <td>Drop-in endpoint · identifiable users · roadmap to managed service · aiand partnership angle</td>
+      </tr>
+      <tr>
+        <td>Demo &amp; presentation (15%)</td>
+        <td>Landing + dashboard + playground tell the story in &lt;3 min; architecture section for depth</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>Ask your teacher (the agent)</strong> for help tailoring this deck, rehearsing the demo,
+    or exporting to PDF: <kbd>Ctrl+P</kbd> → Save as PDF · enable “Background graphics”.
+  </div>
+
+  <footer class="small">
+    Links:
+    <a href="../lessons/0003-round-one-video-script.html">Video script</a> ·
+    <a href="../reference/round-one-demo-flow.html">Demo flow card</a> ·
+    <a href="../reference/hackathon-submission-cheatsheet.html">One-page cheat sheet</a> ·
+    <a href="../ARCHITECTURE.md">Architecture</a>
+  </footer>
+</section>
+
+</body>
+</html>

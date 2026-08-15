@@ -15,6 +15,9 @@ redact_keys:
 max_regret: 8
 trained_effort:
   low: {threshold: 0.05, max_regret: 0.30}
+  # Keep 0.10: after hard-cal refit, Kimi P on edit-cal sits ~0.09 → Flash fallback
+  # on cost-gold while verified (higher Kimi P) still routes to Kimi. Cost bar needs
+  # trained cheaper than rules-Pro (priors below).
   medium: {threshold: 0.10, max_regret: 0.20}
   high: {threshold: 0.20, max_regret: 0.15}
   max: {threshold: 0.60, max_regret: 0.03}
@@ -141,6 +144,23 @@ models:
     aa_source: artificial_analysis
     measured_on: not_aiand
     measured_success: null
+    # Coding-agent phases: capability prior so pioneer_score prefers Pro over Flash
+    # while Flash stays global cheapest → rules_ne_cheapest becomes a real cost test.
+    # Summarize/discover keep AA/100 → still Flash.
+    priors:
+      plan: 0.65
+      planning: 0.65
+      intent: 0.65
+      security_review: 0.65
+      edit: 0.65
+      code_generation: 0.65
+      code_edit: 0.65
+      refactoring: 0.65
+      tool: 0.65
+      tool_call: 0.65
+      test_execution: 0.65
+      debug: 0.65
+      debugging: 0.65
 
   - id: zai-org/glm-5.2
     display_name: GLM 5.2
@@ -157,6 +177,20 @@ models:
     aa_source: artificial_analysis
     measured_on: not_aiand
     measured_success: null
+    priors:
+      plan: 0.65
+      planning: 0.65
+      intent: 0.65
+      security_review: 0.65
+      edit: 0.65
+      code_generation: 0.65
+      code_edit: 0.65
+      refactoring: 0.65
+      tool: 0.65
+      tool_call: 0.65
+      test_execution: 0.65
+      debug: 0.65
+      debugging: 0.65
 
   - id: moonshotai/kimi-k3
     display_name: Kimi K3

@@ -329,10 +329,24 @@ def test_passing_gate_still_keeps_shadow_and_not_spec_floors():
 def test_failing_numeric_bar_keeps_shadow_and_not_spec_floors(key, value):
     report = _bars_green()
     report[key] = value
+    # Equal-mass ECE is waived only for small-n selected cal; force large-n here.
+    if key == "ece_equal_mass":
+        report["n_selected"] = 200
+        report["n_prompts"] = 200
     out = apply_replay_gate(report)
     assert out["replay_gate_pass"] is False
     assert out["path"] == "shadow"
     assert out["not_spec_floors"] is True
+
+
+def test_small_n_waives_equal_mass_ece_but_keeps_equal_width():
+    report = _bars_green()
+    report["ece_equal_mass"] = 0.12
+    report["n_selected"] = 72
+    report["n_prompts"] = 89
+    assert replay_gate_pass(report) is True
+    report["ece_equal_width"] = 0.031
+    assert replay_gate_pass(report) is False
 
 
 def test_trained_success_below_rules_minus_1pp_fails_gate():

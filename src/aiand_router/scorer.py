@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,8 @@ SHIP_EFFORT = {
 }
 FAMILIES = ("discover", "plan", "edit", "tool", "debug", "summarize")
 BINS = ("trivial", "standard", "hard", "frontier")
+_MATH_RE = re.compile(r"\d+\s*[+\-*/]\s*\d+")
+_BOOL_LIT_RE = re.compile(r"\b(true|false)\b", re.I)
 
 
 def parse_trained_path(raw: str | None) -> str:
@@ -56,6 +59,23 @@ def _token_bins(tokens: int) -> list[float]:
     ]
 
 
+def text_features(text: str) -> list[float]:
+    """Cheap binary prompt cues for within-model P(success). No embed / Rec B.
+
+    Continuous char-length is omitted: Mix1 flashlights are long and dominate GD,
+    which collapses short verified holdout ranking.
+    """
+    t = text or ""
+    tl = t.lower()
+    return [
+        1.0 if ("```" in t or "def " in t or ".py" in tl or "Files:" in t) else 0.0,
+        1.0 if ("json" in tl or '{"' in t) else 0.0,
+        1.0 if "reply with" in tl else 0.0,
+        1.0 if _MATH_RE.search(t) else 0.0,
+        1.0 if _BOOL_LIT_RE.search(t) else 0.0,
+    ]
+
+
 def featurize_observable(phase: str, needs_tools: bool, tokens: int) -> list[float]:
     """Request-observable features only (no hint_bin). Used for live complexity prediction."""
     fam = PHASE_FAMILY.get(phase, "plan")
@@ -73,8 +93,15 @@ def featurize(
     needs_tools: bool,
     tokens: int,
     hint_bin: str = "standard",
+    text: str = "",
 ) -> list[float]:
-    fam = PHASE_FAMILY.get(phase, "plan")
+    """P(success) vector: tokens + bin + prompt cues. No phase one-hots.
+
+    Phase families stay on the bin head only. Exclusive phase one-hots on an
+    edit-only train set leave a residual that anti-correlates on multi-phase
+    holdouts (discover/plan get a free boost when edit=0).
+    """
+    del phase  # phase is for callers / bin head; not a P(success) one-hot
     hb = hint_bin if hint_bin in BINS else "standard"
     return [
         1.0,
@@ -82,7 +109,7 @@ def featurize(
         math.log1p(max(0, tokens)),
         *_token_bins(tokens),
         *[1.0 if hb == b else 0.0 for b in BINS],
-        *[1.0 if fam == f else 0.0 for f in FAMILIES],
+        *text_features(text),
     ]
 
 
@@ -135,6 +162,7 @@ def score_eligible(
     needs_tools: bool = False,
     tokens: int = 1,
     hint_bin: str | None = None,
+    text: str = "",
 ) -> tuple[str, dict[str, float]]:
     gbdt = artifact.get("gbdt")
     if isinstance(gbdt, dict) and gbdt:
@@ -145,7 +173,7 @@ def score_eligible(
                 artifact, phase=phase, needs_tools=needs_tools, tokens=tokens
             )
         )
-        x = featurize(phase, needs_tools, tokens, bin_)
+        x = featurize(phase, needs_tools, tokens, bin_, text=text)
         a, b = _calibrator_ab(artifact)
         intercepts = artifact.get("intercepts") or {}
         table = artifact.get("p_success") or {}
@@ -171,7 +199,7 @@ def score_eligible(
                 artifact, phase=phase, needs_tools=needs_tools, tokens=tokens
             )
         )
-        x = featurize(phase, needs_tools, tokens, bin_)
+        x = featurize(phase, needs_tools, tokens, bin_, text=text)
         a, b = _calibrator_ab(artifact)
         intercepts = artifact.get("intercepts") or {}
         table = artifact.get("p_success") or {}
@@ -245,6 +273,7 @@ def trained_select(
     max_tokens: int | None = None,
     latency_limit_ms: float | None = None,
     hint_bin: str | None = None,
+    text: str = "",
 ) -> Decision:
     aa_bar, eligible = eligible_models(
         cfg,
@@ -269,6 +298,7 @@ def trained_select(
         needs_tools=needs_tools,
         tokens=tokens,
         hint_bin=hint_bin,
+        text=text,
     )
     chosen, rule = pick_cheapest_above_bar(eligible, p_success, threshold=t, max_regret=regret)
     if chosen is None:

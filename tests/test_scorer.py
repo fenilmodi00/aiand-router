@@ -4,14 +4,18 @@ from aiand_router.scorer import BINS, FAMILIES, featurize
 
 
 def test_featurize_dim_and_hint_bin_one_hot():
-    x = featurize("edit", True, 600, "hard")
-    # bias + needs_tools + log1p + 4 token bins + 4 hint bins + len(FAMILIES)
-    assert len(x) == 3 + 4 + len(BINS) + len(FAMILIES)
+    x = featurize("edit", True, 600, "hard", text="Reply with JSON only: {\"id\": 1}")
+    # bias + needs_tools + log1p + 4 token bins + 4 hint bins + text_features
+    from aiand_router.scorer import text_features
+
+    assert len(x) == 3 + 4 + len(BINS) + len(text_features(""))
     assert x[0] == 1.0
     assert x[1] == 1.0
     hint_start = 3 + 4
     assert x[hint_start + list(BINS).index("hard")] == 1.0
     assert sum(x[hint_start : hint_start + len(BINS)]) == 1.0
+    # phase one-hots are not in the P(success) vector
+    assert len(x) == hint_start + len(BINS) + len(text_features(""))
 
 
 def test_featurize_observable_omits_hint_bin():
@@ -19,6 +23,26 @@ def test_featurize_observable_omits_hint_bin():
 
     x = featurize_observable("edit", True, 600)
     assert len(x) == 3 + 4 + len(FAMILIES)
+
+
+def test_text_features_vary_within_short_prompts():
+    from aiand_router.scorer import text_features
+
+    a = text_features("Reply with the single word alpha.")
+    b = text_features("Files: reverse.py: def reverse(s): return s")
+    assert a != b
+    assert a[2] == 1.0  # reply with
+    assert b[0] == 1.0  # code cue
+
+
+def _full_dim() -> int:
+    from aiand_router.scorer import text_features
+
+    return 3 + 4 + len(BINS) + len(text_features(""))
+
+
+def _obs_dim() -> int:
+    return 3 + 4 + len(FAMILIES)
 
 
 def test_predict_complexity_bin_and_intercepts():
@@ -53,14 +77,6 @@ def test_featurize_unknown_hint_defaults_standard():
     x = featurize("plan", False, 100, "nope")
     hint_start = 3 + 4
     assert x[hint_start + list(BINS).index("standard")] == 1.0
-
-
-def _full_dim() -> int:
-    return 3 + 4 + len(BINS) + len(FAMILIES)
-
-
-def _obs_dim() -> int:
-    return 3 + 4 + len(FAMILIES)
 
 
 def _zeros(n: int) -> list[float]:

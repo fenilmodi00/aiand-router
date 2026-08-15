@@ -60,6 +60,7 @@ Spec: `.scratch/scorer-pioneer-lift/spec.md`
 
 ## Next path
 
+- Next cycle spec: `.scratch/scorer-hard-transfer/spec.md` (ready-for-agent; real credits OK).
 - Decision: `.scratch/scorer-pioneer-lift/next-path-decision.md` — **Option A** (verified-like train/cal gold + dual shadow eval). Not bar-rewrite, not more easy n, not leak/flip.
 - Goal is transfer ranking + hard-cal P(success) + a slice where rules ≠ Flash so cost_delta is real; frozen `gold-verified.jsonl` stays eval-only. Restore logistic until labels transfer; do not serve length-stump GBDT.
 - Issue 07 still not taken. Legitimate only after AUC ≥ 0.65 / BSS>0 / ECE on an unused hard holdout **and** a real cost comparison (or an explicit H3 waiver). No `TRAINED_PATH` flip, no fake pass.

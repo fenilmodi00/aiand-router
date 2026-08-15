@@ -14,6 +14,7 @@ from aiand_router.train import (
     MIN_REASONING_EFFORT,
     OPT_IN_ENV,
     SPARSE_ANCHORS,
+    _expected_match,
     _fit_binary_intercept,
     _fit_platt,
     _gold_label,
@@ -187,11 +188,11 @@ def test_gold_sparse_skips_k3_and_fit_writes_not_spec_floors(tmp_path, monkeypat
     )
     assert main(["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1"], **kwargs) == 0
     by_id = {c["model"]: c for c in provider.calls}
-    assert by_id["deepseek-ai/deepseek-v4-flash"]["max_tokens"] == 512
+    assert by_id["deepseek-ai/deepseek-v4-flash"]["max_tokens"] == 1024
     assert by_id["deepseek-ai/deepseek-v4-flash"]["reasoning_effort"] == "none"
     assert by_id["qwen/qwen3.6-27b"]["reasoning_effort"] == "none"
     assert by_id["moonshotai/kimi-k2.7-code"]["reasoning_effort"] == "high"
-    assert by_id["moonshotai/kimi-k2.7-code"]["max_tokens"] == 1024
+    assert by_id["moonshotai/kimi-k2.7-code"]["max_tokens"] == 4096
     rows = [json.loads(line) for line in gold.read_text(encoding="utf-8").splitlines() if line.strip()]
     models = {r["model_id"] for r in rows}
     assert "moonshotai/kimi-k3" not in models
@@ -1032,6 +1033,111 @@ def test_gold_expected_beats_tool_calls_proxy():
         "What is 2+2?",
         {},
         meta={"expected": "4"},
+    )
+    assert ok is False and tier == "verified"
+
+
+def test_gold_expected_matches_tool_call_arguments():
+    """Hard expected is searched in tool-call args, not only message content."""
+    ok, tier = _gold_label(
+        {
+            "content": "",
+            "tool_calls": [
+                {
+                    "function": {
+                        "name": "str_replace",
+                        "arguments": '{"new": "terms_present[term_so_far] = current_dict[key]"}',
+                    }
+                }
+            ],
+        },
+        "fix the spend log deadlock",
+        {},
+        meta={"expected": "terms_present[term_so_far] = current_dict[key]"},
+    )
+    assert ok is True and tier == "verified"
+    miss, mtier = _gold_label(
+        {
+            "content": "",
+            "tool_calls": [{"function": {"name": "read", "arguments": '{"path": "spend.py"}'}}],
+        },
+        "fix the spend log deadlock",
+        {},
+        meta={"expected": "terms_present[term_so_far] = current_dict[key]"},
+    )
+    assert miss is False and mtier == "verified"
+
+
+def test_gold_soft_expected_partial_line_without_invented_schema():
+    """Soft-y marks near-miss gold-revert lines; no schema invent from the word json."""
+    exp = "terms_present[term_so_far] = current_dict[key]"
+    # Whitespace / minor formatting drift still verified success.
+    ok, tier = _gold_label(
+        {
+            "content": (
+                "```python\n"
+                "terms_present[ term_so_far ] = current_dict[ key ]\n"
+                "```"
+            )
+        },
+        "This Python snippet is broken. Write the corrected snippet only.",
+        {},
+        meta={"expected": exp},
+    )
+    assert ok is True and tier == "verified"
+    assert _expected_match(exp, "terms_present[term_so_far]=current_dict[key]") is True
+    # Identifier soup without the assignment structure must fail.
+    assert (
+        _expected_match(
+            exp,
+            "mention terms_present and current_dict and key in a blog post about json",
+        )
+        is False
+    )
+    # Unrelated reply fails even if it says json.
+    bad, btier = _gold_label(
+        {"content": "here is some json: {\"status\": \"ok\"}"},
+        "This Python snippet is broken. Write the corrected snippet only.",
+        {},
+        meta={"expected": exp},
+    )
+    assert bad is False and btier == "verified"
+
+
+def test_gold_soft_expected_includes_reasoning_haystack():
+    """Probe D soft-y: empty content + gold line in reasoning_content still matches."""
+    exp = "arr = arr.to_numpy(dtype=object)"
+    ok, etier = _gold_label(
+        {
+            "content": None,
+            "reasoning_content": (
+                "The fix should restore dtype. Correct line:\n"
+                "arr = arr.to_numpy(dtype=object)\n"
+                "then wrap in fence."
+            ),
+        },
+        "This Python snippet is broken.",
+        {"finish_reason": "length"},
+        meta={"expected": exp},
+    )
+    assert ok is True and etier == "verified"
+    # Real content still soft-matches.
+    ok2, tier = _gold_label(
+        {"content": "```python\narr = arr.to_numpy(dtype=object)\n```"},
+        "This Python snippet is broken.",
+        {},
+        meta={"expected": exp},
+    )
+    assert ok2 is True and tier == "verified"
+
+
+def test_gold_fail_closed_names_only_fail_to_pass():
+    """FAIL_TO_PASS names without runnable tests / expected stay verified-fail."""
+    ok, tier = _gold_label(
+        {"content": "looks fixed"},
+        "fix the failing tests",
+        {},
+        meta={"FAIL_TO_PASS": ["tests/test_foo.py::test_bar"]},
     )
     assert ok is False and tier == "verified"
 

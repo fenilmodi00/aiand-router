@@ -48,6 +48,7 @@ from .router import (
     stronger_than,
     tool_calls_valid,
     wants_json,
+    _text,
 )
 
 load_dotenv()
@@ -375,6 +376,11 @@ def create_app(
             max_tokens=req_max_i,
             latency_limit_ms=_latency_limit(cfg, headers),
         )
+        prompt_text = "\n".join(
+            _text(m.get("content"))
+            for m in (body.get("messages") or [])
+            if isinstance(m, dict)
+        )
 
         tip_msg: str | None = None
         if requested not in VIRTUAL_MODELS and requested in by_id:
@@ -403,7 +409,13 @@ def create_app(
             if hop_path != "off":
                 trained = None
                 if scorer_artifact is not None:
-                    trained = trained_select(select_cfg, models, scorer_artifact, **pick_kwargs)
+                    trained = trained_select(
+                        select_cfg,
+                        models,
+                        scorer_artifact,
+                        text=prompt_text,
+                        **pick_kwargs,
+                    )
                 decision = apply_trained_path(
                     hop_path, decision, trained, tokens=tokens, by_id=by_id
                 )
@@ -585,6 +597,11 @@ def create_app(
             max_tokens=req_max_i,
             latency_limit_ms=_latency_limit(cfg, headers),
         )
+        prompt_text = "\n".join(
+            _text(m.get("content"))
+            for m in (openai_body.get("messages") or [])
+            if isinstance(m, dict)
+        )
 
         if requested not in VIRTUAL_MODELS and requested in by_id:
             decision = Decision(
@@ -602,7 +619,13 @@ def create_app(
             if hop_path != "off":
                 trained = None
                 if scorer_artifact is not None:
-                    trained = trained_select(select_cfg, models, scorer_artifact, **pick_kwargs)
+                    trained = trained_select(
+                        select_cfg,
+                        models,
+                        scorer_artifact,
+                        text=prompt_text,
+                        **pick_kwargs,
+                    )
                 decision = apply_trained_path(
                     hop_path, decision, trained, tokens=tokens, by_id=by_id
                 )

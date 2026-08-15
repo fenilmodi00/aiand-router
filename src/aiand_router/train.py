@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import difflib
 import json
 import math
 import os
@@ -17,15 +18,16 @@ import httpx
 
 from .cache import RequestCache, request_cache_key
 from .provider import HttpAiandProvider
+from .pool import run_pool, sample_stratum
 from .router import (
     SpendLog,
+    _text,
     estimate_cost,
     estimate_tokens,
     load_config,
     load_models,
     Model,
 )
-from .pool import run_pool, sample_stratum
 from .scorer import BINS, _gbdt_z, featurize, featurize_observable
 
 _TEACHER_SYS = (
@@ -61,11 +63,12 @@ MIN_REASONING_EFFORT = {
     ESCALATE_TEACHER: "none",
     CHEAP_TEACHER: "low",
     "openai/gpt-oss-120b": "low",
+    # high = catalog min; pair with GOLD_REASONING_MAX_TOKENS so content can finish after reasoning.
     "moonshotai/kimi-k2.7-code": "high",
     K3: "low",
 }
-GOLD_MAX_TOKENS = 512
-GOLD_REASONING_MAX_TOKENS = 1024
+GOLD_MAX_TOKENS = 1024
+GOLD_REASONING_MAX_TOKENS = 4096
 
 _SCHEMA = {
     "type": "json_schema",
@@ -401,6 +404,128 @@ def _pytest_verify(text: str, meta: dict[str, Any]) -> bool | None:
         return proc.returncode == 0
 
 
+_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_IDENT_STOP = frozenset(
+    {
+        "self",
+        "return",
+        "None",
+        "True",
+        "False",
+        "if",
+        "else",
+        "elif",
+        "for",
+        "while",
+        "def",
+        "class",
+        "import",
+        "from",
+        "and",
+        "or",
+        "not",
+        "in",
+        "is",
+        "with",
+        "as",
+        "try",
+        "except",
+        "raise",
+        "pass",
+        "break",
+        "continue",
+        "lambda",
+        "yield",
+        "async",
+        "await",
+        "str",
+        "int",
+        "list",
+        "dict",
+        "set",
+        "tuple",
+        "Any",
+        "Optional",
+        "len",
+        "print",
+    }
+)
+# Soft expected vs gold-revert: near-exact line, or high edit + full identifier overlap.
+_SOFT_NEAR_RATIO = 0.92
+_SOFT_EDIT_RATIO = 0.85
+
+
+def _code_idents(text: str) -> set[str]:
+    return {
+        t
+        for t in _IDENT_RE.findall(text)
+        if t not in _IDENT_STOP and len(t) > 1
+    }
+
+
+def _norm_ws(text: str) -> str:
+    return re.sub(r"\s+", " ", text.strip())
+
+
+def _best_line_ratio(expected: str, hay: str) -> float:
+    en = _norm_ws(expected)
+    if not en:
+        return 0.0
+    best = 0.0
+    for line in hay.splitlines():
+        line = _norm_ws(line)
+        if len(line) < 8:
+            continue
+        best = max(best, difflib.SequenceMatcher(None, en, line).ratio())
+    return best
+
+
+def _expected_match(expected: str, hay: str) -> bool:
+    """Verified soft-y: exact / ws-normalized substring, else edit + identifier overlap.
+
+    Does not invent schemas. Partial near-misses can succeed; unrelated keyword spam cannot
+    (requires full non-trivial identifier overlap when below near-exact).
+    """
+    exp = str(expected)
+    if not exp or not hay:
+        return False
+    if exp in hay or _norm_ws(exp) in _norm_ws(hay):
+        return True
+    best = _best_line_ratio(exp, hay)
+    if best >= _SOFT_NEAR_RATIO:
+        return True
+    ei = _code_idents(exp)
+    if len(ei) < 2:
+        return False
+    ov = len(ei & _code_idents(hay)) / len(ei)
+    return best >= _SOFT_EDIT_RATIO and ov >= 1.0
+
+
+def _label_haystack(message: dict[str, Any]) -> str:
+    """Content, tool args, and reasoning_content (Probe D soft-y).
+
+    Kimi often finishes length with empty content but gold line in reasoning; content-only
+    zeros Kimi and inverts Spearman vs holdout. Soft thresholds stay fixed — do not game them.
+    """
+    parts: list[str] = []
+    content = message.get("content")
+    if isinstance(content, str) and content.strip():
+        parts.append(content.strip())
+    reasoning = message.get("reasoning_content")
+    if isinstance(reasoning, str) and reasoning.strip():
+        parts.append(reasoning.strip())
+    for tc in message.get("tool_calls") or []:
+        if not isinstance(tc, dict):
+            continue
+        fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+        args = fn.get("arguments") if fn else tc.get("arguments")
+        if isinstance(args, dict):
+            args = json.dumps(args)
+        if args:
+            parts.append(str(args))
+    return "\n".join(parts)
+
+
 def _gold_label(
     message: dict[str, Any],
     prompt: str,
@@ -412,22 +537,27 @@ def _gold_label(
     meta = meta or {}
     content = message.get("content")
     text = content.strip() if isinstance(content, str) else ""
+    hay = _label_haystack(message)
     pytest_ok = _pytest_verify(text, meta)
     if pytest_ok is not None:
         return pytest_ok, "verified"
     expected = meta.get("expected")
     if expected is not None:
-        return str(expected) in text, "verified"
+        return _expected_match(str(expected), hay), "verified"
     schema = meta.get("json_schema") or meta.get("schema")
     if schema is not None:
+        body = _strip_fences(text) if text else hay
         try:
-            obj = json.loads(_strip_fences(text) if text else "")
+            obj = json.loads(body if body else "")
         except json.JSONDecodeError:
             return False, "verified"
         req = schema.get("required") or [] if isinstance(schema, dict) else []
         if req and (not isinstance(obj, dict) or any(k not in obj for k in req)):
             return False, "verified"
         return True, "verified"
+    tests = meta.get("tests")
+    if meta.get("FAIL_TO_PASS") or (isinstance(tests, list) and tests):
+        return False, "verified"
     if message.get("tool_calls"):
         return True, "proxy"
     if meta.get("needs_tools"):
@@ -579,7 +709,10 @@ def _row_x(row: dict[str, Any]) -> list[float]:
     messages = row.get("messages") or [{"role": "user", "content": row.get("prompt") or ""}]
     tokens = int(row.get("tokens") or estimate_tokens(messages))
     hint = str(row.get("hint_bin") or row.get("complexity_bin") or "standard")
-    return featurize(str(row.get("phase") or "plan"), bool(row.get("needs_tools")), tokens, hint)
+    text = str(row.get("prompt") or "")
+    if not text and messages:
+        text = "\n".join(_text(m.get("content")) for m in messages if isinstance(m, dict))
+    return featurize(str(row.get("phase") or "plan"), bool(row.get("needs_tools")), tokens, hint, text=text)
 
 
 def _logit(p: float) -> float:
@@ -961,10 +1094,26 @@ def main(
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("pool")
-    p.add_argument("--smith")
+    p.add_argument(
+        "--smith",
+        help=(
+            "SWE-smith-trajectories tool-split JSONL (messages + tool_calls + "
+            "instance_id/traj_id). Not datasets/train-queries.jsonl. Export: "
+            "load_dataset('SWE-bench/SWE-smith-trajectories', split='tool')"
+            ".to_json('data/smith-tool.jsonl')"
+        ),
+    )
     p.add_argument("--bfcl")
     p.add_argument("--gym")
     p.add_argument("--r2e")
+    p.add_argument(
+        "--tasks",
+        help=(
+            "SWE-smith tasks JSONL joined by instance_id. Copies FAIL_TO_PASS and "
+            "expected from reverting the bug patch. Not Verified/Lite/TB; dump "
+            "resolved is never y. Never invents json_schema."
+        ),
+    )
     p.add_argument("--eval", nargs="*", default=[])
     p.add_argument("--out", required=True)
     p.add_argument("--n", type=int, default=4000)
@@ -972,7 +1121,37 @@ def main(
     p.add_argument(
         "--verified-like",
         action="store_true",
-        help="Short hard/JSON train pool with expected/schema checks; not Verified eval",
+        help=(
+            "Prefer short + hard/frontier with copied expected/schema/tests; "
+            "refuse an empty hard-check mix (proxy-only tools cannot dominate). "
+            "Never invent json_schema from the word json. Not Verified eval"
+        ),
+    )
+    p.add_argument(
+        "--verified-like-max-tokens",
+        type=int,
+        default=450,
+        help="Max prompt tokens for verified-like flashlight/issue rows (mix length knob)",
+    )
+    p.add_argument(
+        "--prompt-family",
+        choices=("flashlight", "issue", "any"),
+        default="flashlight",
+        help="Verified-like prompt family filter (default flashlight; issue was H2 kill)",
+    )
+    p.add_argument("--min-expected-len", type=int, default=0)
+    p.add_argument("--max-expected-len", type=int, default=0)
+    p.add_argument(
+        "--near-miss-lo",
+        type=float,
+        default=0.0,
+        help="Min buggy↔expected line ratio (prefer small-fix flashlights when set)",
+    )
+    p.add_argument(
+        "--near-miss-hi",
+        type=float,
+        default=1.0,
+        help="Max buggy↔expected line ratio (exclude near-identical / too-easy)",
     )
     t = sub.add_parser("teacher")
     t.add_argument("--queries", required=True)

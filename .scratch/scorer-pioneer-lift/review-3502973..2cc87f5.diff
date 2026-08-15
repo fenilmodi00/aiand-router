@@ -1,0 +1,435 @@
+# Review package: 3502973fe2efe1ca1a01f4cce1c498954477ebc7..2cc87f59d77777839f8ef19cf654eebf542b50c0
+
+## Commits
+2cc87f5 Hold out dense/cal gold so Platt and new-id P(success) have measured cells unused for train weights.
+
+## Files changed
+ src/aiand_router/train.py |  67 +++++++++++++++------  tests/test_train.py       | 150 +++++++++++++++++++++++++++++++++++++++++++++-  2 files changed, 199 insertions(+), 18 deletions(-)
+
+## Diff
+
+diff --git a/src/aiand_router/train.py b/src/aiand_router/train.py
+index fe200e1..09e3178 100644
+--- a/src/aiand_router/train.py
++++ b/src/aiand_router/train.py
+@@ -509,46 +509,52 @@ async def run_gold(
+     async def one(
+         messages: list[dict[str, Any]], model_id: str, q: dict[str, Any]
+     ) -> dict[str, Any]:
+         async with sem:
+             body = _gold_body(model_id, messages, needs_tools=bool(q.get("needs_tools")))
+             result = await _complete(
+                 provider, body, cache=cache, spend=spend, models_by_id=models_by_id
+             )
+             status = result.get("status", 200)
+             if status == 429:
+-                return {
++                row = {
+                     "prompt": _prompt_of(messages),
+                     "model_id": model_id,
+                     "unobserved": True,
+                     "tokens": estimate_tokens(messages),
+                     "needs_tools": bool(q.get("needs_tools")),
+                     "phase": str(q.get("phase") or "plan"),
+                     "hint_bin": str(q.get("hint_bin") or "standard"),
+                 }
++                if dense:
++                    row["dense"] = True
++                return row
+             if status < 400 and result.get("json"):
+                 cache.put(request_cache_key(body, model_id), result["json"])
+             choice = ((result.get("json") or {}).get("choices") or [{}])[0]
+             message = choice.get("message") or {}
+             success, tier = _gold_label(message, _prompt_of(messages), choice, meta=q)
+             success = status < 400 and success
+-            return {
++            row = {
+                 "prompt": _prompt_of(messages),
+                 "model_id": model_id,
+                 "success": success,
+                 "success_tier": tier,
+                 "unobserved": False,
+                 "tokens": estimate_tokens(messages),
+                 "needs_tools": bool(q.get("needs_tools")),
+                 "phase": str(q.get("phase") or "plan"),
+                 "hint_bin": str(q.get("hint_bin") or "standard"),
+             }
++            if dense:
++                row["dense"] = True
++            return row
+ 
+     rows: list[dict[str, Any]] = []
+     for coro in asyncio.as_completed([one(*j) for j in jobs]):
+         rows.append(await coro)
+         if len(rows) % 20 == 0:
+             out.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+             print(f"gold {len(rows)} cells spend={spend.total():.4f}", flush=True)
+     print(f"gold done cells={len(rows)} spend={spend.total():.4f} -> {out}", flush=True)
+     out.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+ 
+@@ -636,39 +642,56 @@ CAL_FRAC = 0.2
+ def _split_cal_prompts(prompts: list[str], frac: float = CAL_FRAC) -> tuple[set[str], set[str]]:
+     """Hold out a sorted tail of unique prompts as the gold cal slice."""
+     uniq = sorted({p for p in prompts if p})
+     if len(uniq) < 2:
+         return set(uniq), set()
+     n_cal = max(1, int(round(len(uniq) * frac)))
+     cal = set(uniq[-n_cal:])
+     return set(uniq) - cal, cal
+ 
+ 
+-def fit_scorer(gold_path: Path, silver_path: Path | None, out: Path) -> None:
+-    gold = [
++def _jsonl_rows(path: Path) -> list[dict[str, Any]]:
++    return [
+         json.loads(line)
+-        for line in gold_path.read_text(encoding="utf-8").splitlines()
++        for line in path.read_text(encoding="utf-8").splitlines()
+         if line.strip()
+     ]
+-    silver = []
+-    if silver_path and silver_path.exists():
+-        silver = [
+-            json.loads(line)
+-            for line in silver_path.read_text(encoding="utf-8").splitlines()
+-            if line.strip()
+-        ]
+-    observed = [r for r in gold if not r.get("unobserved") and "model_id" in r]
++
++
++def _observed_gold(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
++    return [r for r in rows if not r.get("unobserved") and "model_id" in r]
++
++
++def fit_scorer(
++    gold_path: Path, silver_path: Path | None, out: Path, cal_path: Path | None = None
++) -> None:
++    gold = _jsonl_rows(gold_path)
++    silver = _jsonl_rows(silver_path) if silver_path and silver_path.exists() else []
++    observed = _observed_gold(gold)
++    cal_file = _observed_gold(_jsonl_rows(cal_path)) if cal_path and cal_path.exists() else []
++    tagged_cal = [r for r in observed if r.get("dense")]
++    tagged_train = [r for r in observed if not r.get("dense")]
++    if cal_file:
++        train_gold = tagged_train
++        cal_gold = cal_file
++    elif tagged_cal:
++        train_gold = tagged_train
++        cal_gold = tagged_cal
++    else:
++        train_prompts, cal_prompts = _split_cal_prompts(
++            [str(r.get("prompt") or "") for r in observed]
++        )
++        train_gold = [r for r in observed if str(r.get("prompt") or "") in train_prompts]
++        cal_gold = [r for r in observed if str(r.get("prompt") or "") in cal_prompts]
++    observed = train_gold + cal_gold
+     gold_cells = {(str(r.get("prompt")), r["model_id"]) for r in observed}
+     gold_ids = {mid for _, mid in gold_cells}
+-    train_prompts, cal_prompts = _split_cal_prompts([str(r.get("prompt") or "") for r in observed])
+-    train_gold = [r for r in observed if str(r.get("prompt") or "") in train_prompts]
+-    cal_gold = [r for r in observed if str(r.get("prompt") or "") in cal_prompts]
+     by_model_x: dict[str, list[list[float]]] = {mid: [] for mid in gold_ids}
+     by_model_y: dict[str, list[float]] = {mid: [] for mid in gold_ids}
+     train_counts: dict[str, int] = {mid: 0 for mid in gold_ids}
+     for row in train_gold:
+         mid = row["model_id"]
+         by_model_x[mid].append(_row_x(row))
+         by_model_y[mid].append(1.0 if row.get("success") else 0.0)
+         train_counts[mid] += 1
+     for row in silver:
+         if row.get("unlabeled"):
+@@ -868,22 +891,24 @@ def main(
+     p.add_argument("--seed", type=int, default=0)
+     t = sub.add_parser("teacher")
+     t.add_argument("--queries", required=True)
+     t.add_argument("--out", required=True)
+     t.add_argument("--limit", type=int, default=TEACHER_LIMIT)
+     g = sub.add_parser("gold")
+     g.add_argument("--queries", required=True)
+     g.add_argument("--out", required=True)
+     g.add_argument("--limit", type=int, default=None)
+     g.add_argument("--dense", action="store_true")
++    g.add_argument("--exclude")
+     f = sub.add_parser("fit")
+     f.add_argument("--gold", required=True)
++    f.add_argument("--cal")
+     f.add_argument("--silver")
+     f.add_argument("--out", required=True)
+     r = sub.add_parser("relabel")
+     r.add_argument("--gold", required=True)
+     r.add_argument("--queries", required=True)
+     r.add_argument("--out", required=True)
+     s = sub.add_parser("salvage")
+     s.add_argument("--silver", required=True)
+     s.add_argument("--queries", required=True)
+     args = parser.parse_args(argv)
+@@ -894,21 +919,26 @@ def main(
+     cfg = load_config(models_path or root / "config" / "models.yaml")
+     models = load_models(cfg)
+     by_id = {m.id: m for m in models}
+     spend_log = spend or SpendLog(root / "data" / "spend.txt", float(os.getenv("BUDGET_LIMIT_USD", "15")))
+     cache = RequestCache(cache_dir or root / "data" / "cache")
+     key = os.getenv("AIAND_API_KEY", "")
+     base = os.getenv("AIAND_BASE_URL", "https://api.aiand.com/v1")
+     upstream = provider or HttpAiandProvider(base, key)
+ 
+     if args.cmd == "fit":
+-        fit_scorer(Path(args.gold), Path(args.silver) if args.silver else None, Path(args.out))
++        fit_scorer(
++            Path(args.gold),
++            Path(args.silver) if args.silver else None,
++            Path(args.out),
++            Path(args.cal) if args.cal else None,
++        )
+         return 0
+     if args.cmd == "relabel":
+         relabel_gold(
+             Path(args.gold),
+             Path(args.queries),
+             Path(args.out),
+             cache=cache,
+             models_by_id=by_id,
+         )
+         return 0
+@@ -922,20 +952,23 @@ def main(
+                 cache=cache,
+                 models_by_id=by_id,
+             )
+         )
+         return 0
+     if args.cmd == "gold":
+         limit = args.limit if args.limit is not None else (DENSE_LIMIT if args.dense else SPARSE_LIMIT)
+     else:
+         limit = args.limit
+     queries = _read_queries(Path(args.queries), limit)
++    if getattr(args, "exclude", None):
++        blocked = {str(r.get("prompt") or "") for r in _jsonl_rows(Path(args.exclude))}
++        queries = [q for q in queries if _prompt_of(_messages(q)) not in blocked]
+     if args.cmd == "teacher":
+         asyncio.run(
+             run_teacher(
+                 queries,
+                 Path(args.out),
+                 provider=upstream,
+                 spend=spend_log,
+                 cache=cache,
+                 models_by_id=by_id,
+             )
+diff --git a/tests/test_train.py b/tests/test_train.py
+index ce4ca43..fff8158 100644
+--- a/tests/test_train.py
++++ b/tests/test_train.py
+@@ -1,22 +1,23 @@
+ from __future__ import annotations
+ 
+ import asyncio
+ import json
+ import os
+ from pathlib import Path
+ 
+ import httpx
+-from aiand_router.router import SpendLog
++from aiand_router.router import SpendLog, load_config, load_models
+ from aiand_router.cache import RequestCache
+ from aiand_router.train import (
+     ESCALATE_TEACHER,
++    K3,
+     MIN_REASONING_EFFORT,
+     OPT_IN_ENV,
+     SPARSE_ANCHORS,
+     _fit_binary_intercept,
+     _fit_platt,
+     _gold_label,
+     _gold_success,
+     _logit,
+     _row_x,
+     _split_cal_prompts,
+@@ -324,20 +325,95 @@ def test_dense_gold_excludes_k3(tmp_path, monkeypatch):
+     )
+     models = {
+         json.loads(line)["model_id"]
+         for line in gold.read_text(encoding="utf-8").splitlines()
+         if line.strip()
+     }
+     assert "moonshotai/kimi-k3" not in models
+     assert "google/gemma-4-31b-it" in models
+ 
+ 
++def test_dense_gold_runs_every_eligible_id_except_k3(tmp_path, monkeypatch):
++    """Dense/cal slice runs every enabled catalog id except K3; JSONL marks dense."""
++    monkeypatch.setenv(OPT_IN_ENV, "1")
++    provider = FakeProvider()
++    spend = SpendLog(tmp_path / "spend.txt", 15)
++    queries = tmp_path / "q.jsonl"
++    queries.write_text(json.dumps({"prompt": "cal slice prompt"}) + "\n", encoding="utf-8")
++    gold = tmp_path / "gold.jsonl"
++    assert (
++        main(
++            ["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1", "--dense"],
++            provider=provider,
++            spend=spend,
++            cache_dir=tmp_path / "cache",
++            models_path=Path("config/models.yaml"),
++        )
++        == 0
++    )
++    rows = [json.loads(line) for line in gold.read_text(encoding="utf-8").splitlines() if line.strip()]
++    assert rows
++    assert all(r.get("dense") is True for r in rows)
++    models = {r["model_id"] for r in rows}
++    cfg = load_config(Path("config/models.yaml"))
++    eligible = {m.id for m in load_models(cfg) if m.enabled and m.id != K3}
++    assert models == eligible
++    assert K3 not in models
++    assert K3 not in {c["model"] for c in provider.calls}
++    for r in rows:
++        if not r.get("unobserved"):
++            assert "success" in r and "success_tier" in r
++
++
++def test_dense_gold_excludes_sparse_train_prompts(tmp_path, monkeypatch):
++    """Dense/cal queries are disjoint from sparse train prompts used for feature fit."""
++    monkeypatch.setenv(OPT_IN_ENV, "1")
++    provider = FakeProvider()
++    spend = SpendLog(tmp_path / "spend.txt", 15)
++    train_q = tmp_path / "train.jsonl"
++    train_q.write_text(json.dumps({"prompt": "sparse train prompt"}) + "\n", encoding="utf-8")
++    queries = tmp_path / "q.jsonl"
++    queries.write_text(
++        json.dumps({"prompt": "sparse train prompt"})
++        + "\n"
++        + json.dumps({"prompt": "held out cal prompt"})
++        + "\n",
++        encoding="utf-8",
++    )
++    gold = tmp_path / "dense.jsonl"
++    assert (
++        main(
++            [
++                "gold",
++                "--queries",
++                str(queries),
++                "--out",
++                str(gold),
++                "--dense",
++                "--exclude",
++                str(train_q),
++            ],
++            provider=provider,
++            spend=spend,
++            cache_dir=tmp_path / "cache",
++            models_path=Path("config/models.yaml"),
++        )
++        == 0
++    )
++    rows = [json.loads(line) for line in gold.read_text(encoding="utf-8").splitlines() if line.strip()]
++    prompts = {r["prompt"] for r in rows}
++    assert prompts == {"held out cal prompt"}
++    assert "sparse train prompt" not in prompts
++    assert all(r.get("dense") is True for r in rows)
++    assert K3 not in {r["model_id"] for r in rows}
++
++
+ def test_gold_success_json_and_one_word():
+     assert _gold_success({"content": '{"ok": true}'}, "Reply with JSON only.", {}) is True
+     assert _gold_success({"content": "not json"}, "Reply with JSON only.", {}) is False
+     assert _gold_success({"content": "yes"}, "Reply with the single word yes.", {}) is True
+     assert _gold_success({"content": "no"}, "Reply with the single word yes.", {}) is False
+     assert _gold_success({"content": ""}, "hello", {"finish_reason": "length"}) is False
+     assert _gold_success({"tool_calls": [{"id": "1"}]}, "hello", {}) is True
+     assert _gold_success({"content": "receive"}, "Fix the typo 'recieve' to 'receive'.", {}) is True
+     assert _gold_success({"content": "recieve"}, "Fix the typo 'recieve' to 'receive'.", {}) is False
+     assert _gold_success({"content": '```json\n{"a":1}\n```'}, "Reply with JSON only.", {}) is True
+@@ -429,20 +505,92 @@ def test_fit_calibrates_on_held_out_gold_cal_slice_only(tmp_path, monkeypatch):
+     zs, ys = [], []
+     for r in cal_gold:
+         x = _row_x(r)
+         zs.append(ic + sum(w[i] * x[i] for i in range(len(w))))
+         ys.append(1.0 if r["success"] else 0.0)
+     a, b = _fit_platt(zs, ys)
+     assert data["platt"]["a"] == a
+     assert data["platt"]["b"] == b
+ 
+ 
++def test_fit_dense_cal_unused_for_train_weights(tmp_path, monkeypatch):
++    """Dense/cal JSONL is Platt + new-id onboard only ΓÇö not train intercepts/weights."""
++    monkeypatch.setenv(OPT_IN_ENV, "1")
++    flash = "deepseek-ai/deepseek-v4-flash"
++    gemma = "google/gemma-4-31b-it"
++    train_rows = [_gold_cell(f"train prompt {i}", flash, True) for i in range(4)]
++    cal_rows = [_gold_cell(f"zz cal prompt {i}", flash, False) for i in range(2)]
++    cal_rows += [_gold_cell(r["prompt"], gemma, True) for r in cal_rows[:2]]
++    for r in cal_rows:
++        r["dense"] = True
++    gold = tmp_path / "sparse.jsonl"
++    gold.write_text("".join(json.dumps(r) + "\n" for r in train_rows), encoding="utf-8")
++    cal = tmp_path / "dense.jsonl"
++    cal.write_text("".join(json.dumps(r) + "\n" for r in cal_rows), encoding="utf-8")
++    artifact = tmp_path / "scorer.json"
++    assert (
++        main(
++            ["fit", "--gold", str(gold), "--cal", str(cal), "--out", str(artifact)],
++            provider=FakeProvider(),
++            spend=SpendLog(tmp_path / "spend.txt", 15),
++            cache_dir=tmp_path / "cache",
++            models_path=Path("config/models.yaml"),
++        )
++        == 0
++    )
++    data = json.loads(artifact.read_text(encoding="utf-8"))
++    assert data["not_spec_floors"] is True
++    assert data["intercepts"][flash] == _logit(1.0)
++    assert gemma not in data.get("weights", {})
++    assert gemma not in data.get("intercepts", {})
++    assert data["p_success"][gemma] == 1.0
++    assert data["n_cal"] == len(cal_rows)
++    w = data["weights"][flash]
++    ic = data["intercepts"][flash]
++    zs, ys = [], []
++    for r in cal_rows:
++        if r["model_id"] != flash:
++            continue
++        x = _row_x(r)
++        zs.append(ic + sum(w[i] * x[i] for i in range(len(w))))
++        ys.append(1.0 if r["success"] else 0.0)
++    a, b = _fit_platt(zs, ys)
++    assert data["platt"]["a"] == a
++    assert data["platt"]["b"] == b
++
++
++def test_fit_dense_tagged_rows_unused_for_train_weights(tmp_path, monkeypatch):
++    """dense=true gold cells stay out of train weights even in a concatenated --gold file."""
++    monkeypatch.setenv(OPT_IN_ENV, "1")
++    flash = "deepseek-ai/deepseek-v4-flash"
++    train_rows = [_gold_cell(f"zz train {i}", flash, True) for i in range(8)]
++    cal_rows = [_gold_cell(f"aa cal {i}", flash, False) for i in range(2)]
++    for r in cal_rows:
++        r["dense"] = True
++    gold = tmp_path / "gold.jsonl"
++    gold.write_text("".join(json.dumps(r) + "\n" for r in train_rows + cal_rows), encoding="utf-8")
++    artifact = tmp_path / "scorer.json"
++    assert (
++        main(
++            ["fit", "--gold", str(gold), "--out", str(artifact)],
++            provider=FakeProvider(),
++            spend=SpendLog(tmp_path / "spend.txt", 15),
++            cache_dir=tmp_path / "cache",
++            models_path=Path("config/models.yaml"),
++        )
++        == 0
++    )
++    data = json.loads(artifact.read_text(encoding="utf-8"))
++    assert data["intercepts"][flash] == _logit(1.0)
++    assert data["n_cal"] == len(cal_rows)
++
++
+ def test_fit_silver_only_regularizes_unobserved_not_observed_gold(tmp_path, monkeypatch):
+     """Silver on an observed gold cell must not dilute gold y; missing gold stays missing."""
+     monkeypatch.setenv(OPT_IN_ENV, "1")
+     mid = "deepseek-ai/deepseek-v4-flash"
+     gold = tmp_path / "gold.jsonl"
+     gold.write_text(json.dumps(_gold_cell("only cell", mid, False)) + "\n", encoding="utf-8")
+     silver = tmp_path / "silver.jsonl"
+     silver.write_text(
+         json.dumps(
+             {
