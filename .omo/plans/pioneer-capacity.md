@@ -44,7 +44,7 @@
 ### Phase D — Dense/cal + threshold-tune (cap $8)
 
 - [x] 13. Dense/cal slice n≈300 × eligible-except-K3 → `data/gold_dense.jsonl`
-- [ ] 14. Threshold-tune split n≈300 × anchors with bootstrap resolve → `data/tune.jsonl`
+- [x] 14. Threshold-tune split n≈300 × anchors with bootstrap resolve → `data/tune.jsonl`
 
 ### Phase E — Fit → shadow → bounded gate (cap $4)
 
