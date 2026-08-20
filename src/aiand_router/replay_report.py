@@ -7,6 +7,20 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
+from .metrics import (
+    ECE_MAX,
+    QUALITY_TOLERANCE,
+    SMALL_N_ECE_MASS,
+    VERIFIED_N_FLOOR,
+    brier_score,
+    brier_skill_score,
+    bss_passes,
+    ece_equal_mass,
+    ece_equal_width,
+    ece_mass_is_gated,
+    ece_mass_passes,
+    ece_passes,
+)
 from .router import (
     Model,
     eligible_models,
@@ -18,14 +32,9 @@ from .router import (
 from .scorer import load_scorer, score_eligible, trained_select
 
 COMPLETION_TOKENS = 800
-VERIFIED_N_FLOOR = 300
 SPARSE_N_FLOOR = 4000
 BUDGET = 1_000_000.0
 EFFORT = "medium"
-# Equal-mass ECE with m=10 on n≈90 selected hops has a high noise floor when
-# within-selected P has few distinct levels (oracle phase rates still ECE_m≈0.19).
-# Keep equal-width + Brier skill; report equal-mass but do not gate on it below this n.
-SMALL_N_ECE_MASS = 150
 
 
 def _load_gold(path: Path) -> tuple[list[dict[str, Any]], dict[tuple[str, str], bool]]:
@@ -138,51 +147,16 @@ def _rank_auc(pairs: list[tuple[float, int]]) -> float:
     return wins / (len(pos) * len(neg))
 
 
-def _brier(pairs: list[tuple[float, float]]) -> float:
+def _selected_cal(pairs: list[tuple[float, float]]) -> tuple[float, float, float, float]:
+    """Brier / BSS / dual ECE via metrics.py. Empty selected -> zeros (no raise)."""
     if not pairs:
-        return 0.0
-    return sum((p - y) ** 2 for p, y in pairs) / len(pairs)
-
-
-def _brier_skill(pairs: list[tuple[float, float]]) -> float:
-    if not pairs:
-        return 0.0
-    ybar = sum(y for _, y in pairs) / len(pairs)
-    bs_ref = sum((ybar - y) ** 2 for _, y in pairs) / len(pairs)
-    if bs_ref == 0.0:
-        return 0.0
-    return 1.0 - _brier(pairs) / bs_ref
-
-
-def _ece_equal_width(pairs: list[tuple[float, float]], m: int = 10) -> float:
-    if not pairs:
-        return 0.0
-    bins: list[list[tuple[float, float]]] = [[] for _ in range(m)]
-    for p, y in pairs:
-        bins[min(int(p * m), m - 1)].append((p, y))
-    n = len(pairs)
-    return sum(
-        (len(b) / n) * abs(sum(y for _, y in b) / len(b) - sum(p for p, _ in b) / len(b))
-        for b in bins
-        if b
+        return 0.0, 0.0, 0.0, 0.0
+    return (
+        brier_score(pairs),
+        brier_skill_score(pairs),
+        ece_equal_width(pairs),
+        ece_equal_mass(pairs),
     )
-
-
-def _ece_equal_mass(pairs: list[tuple[float, float]], m: int = 10) -> float:
-    if not pairs:
-        return 0.0
-    ordered = sorted(pairs, key=lambda py: py[0])
-    n = len(ordered)
-    m = min(m, n)
-    ece = 0.0
-    for i in range(m):
-        b = ordered[i * n // m : (i + 1) * n // m]
-        if not b:
-            continue
-        acc = sum(y for _, y in b) / len(b)
-        conf = sum(p for p, _ in b) / len(b)
-        ece += (len(b) / n) * abs(acc - conf)
-    return ece
 
 
 def replay_report(
@@ -276,6 +250,7 @@ def replay_report(
         "always_strong": _policy_stats(strong_picks, success),
         "always_most_expensive": _policy_stats(expensive_picks, success),
     }
+    brier, brier_skill, ece_w, ece_m = _selected_cal(selected)
     out = {
         "n_prompts": n,
         "n_selected": len(selected),
@@ -284,10 +259,10 @@ def replay_report(
         "disagreement_rate": (disagree / n) if n else 0.0,
         "rank_auc": _rank_auc(auc_pairs),
         "mean_p_spread": (sum(spreads) / len(spreads)) if spreads else 0.0,
-        "brier": _brier(selected),
-        "brier_skill": _brier_skill(selected),
-        "ece_equal_width": _ece_equal_width(selected),
-        "ece_equal_mass": _ece_equal_mass(selected),
+        "brier": brier,
+        "brier_skill": brier_skill,
+        "ece_equal_width": ece_w,
+        "ece_equal_mass": ece_m,
         "rules_cost_delta": policies["trained"]["list_price_cost"]
         - policies["rules"]["list_price_cost"],
         "rules_ne_cheapest_rate": (rules_ne_cheapest / n) if n else 0.0,
@@ -317,10 +292,10 @@ def _always_cheap_without_quality(report: dict[str, Any]) -> bool:
         return False
     rules_s = report["policies"]["rules"]["success_rate"]
     cheap_s = cheap["success_rate"]
-    if cheap_s < rules_s - 0.01:
+    if cheap_s < rules_s - QUALITY_TOLERANCE:
         return True
     strong = report["policies"].get("always_strong")
-    if strong and strong["success_rate"] > cheap_s + 0.01:
+    if strong and strong["success_rate"] > cheap_s + QUALITY_TOLERANCE:
         return True
     return False
 
@@ -342,9 +317,9 @@ def parity_blockers(report: dict[str, Any]) -> list[str]:
     if float(report.get("rules_cost_delta") or 0.0) >= 0.0:
         blockers.append("rules_cost_delta_not_negative")
     ece_mass = float(report.get("ece_equal_mass") or 0.0)
-    if report.get("ece_equal_mass_gated") and ece_mass > 0.03:
+    if report.get("ece_equal_mass_gated") and ece_mass > ECE_MAX:
         blockers.append("ece_equal_mass_above_bar")
-    elif not report.get("ece_equal_mass_gated") and ece_mass > 0.03:
+    elif not report.get("ece_equal_mass_gated") and ece_mass > ECE_MAX:
         blockers.append("ece_equal_mass_waived_small_n")
     blockers.append("no_session_gold_promotion_gate")
     return blockers
@@ -366,14 +341,13 @@ def replay_gate_pass(report: dict[str, Any]) -> bool:
     trained_s = report["policies"]["trained"]["success_rate"]
     rules_s = report["policies"]["rules"]["success_rate"]
     n_cal = int(report.get("n_selected") or report.get("n_prompts") or 10**9)
-    ece_mass_ok = report["ece_equal_mass"] <= 0.03 or n_cal < SMALL_N_ECE_MASS
     return (
         report["rank_auc"] >= 0.65
         and report["mean_p_spread"] >= 0.10
-        and report["brier_skill"] > 0
-        and report["ece_equal_width"] <= 0.03
-        and ece_mass_ok
-        and trained_s >= rules_s - 0.01
+        and bss_passes(float(report["brier_skill"]))
+        and ece_passes(float(report["ece_equal_width"]))
+        and ece_mass_passes(float(report["ece_equal_mass"]), n_selected=n_cal)
+        and trained_s >= rules_s - QUALITY_TOLERANCE
         and _cost_ok(report)
         and not _always_cheap_without_quality(report)
     )
@@ -383,7 +357,7 @@ def apply_replay_gate(report: dict[str, Any]) -> dict[str, Any]:
     """Failing any bar keeps shadow and not_spec_floors. Never stamps Verified or flips path."""
     out = dict(report)
     n_cal = int(out.get("n_selected") or out.get("n_prompts") or 10**9)
-    out["ece_equal_mass_gated"] = n_cal >= SMALL_N_ECE_MASS
+    out["ece_equal_mass_gated"] = ece_mass_is_gated(n_cal)
     out["replay_gate_pass"] = replay_gate_pass(out)
     out["path"] = "shadow"
     out["not_spec_floors"] = True

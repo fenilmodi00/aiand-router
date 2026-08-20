@@ -12,17 +12,24 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from .metrics import brier_skill_score, ece_equal_mass, ece_equal_width, reliability
+from .metrics import (
+    BSS_PASS_MIN,
+    ECE_MAX,
+    brier_skill_score,
+    ece_equal_mass,
+    ece_equal_width,
+    reliability,
+)
 from .scorer import score_eligible
-from .train import GEOMETRY_OVERRIDE_ENV, _geometry_gate, fit_scorer
+from .fit import GEOMETRY_OVERRIDE_ENV, _geometry_gate, fit_scorer
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "data"
 CANDIDATE_PATH = DATA / "scorer.candidate.json"
 REPORT_PATH = DATA / "retrain_report.md"
 
-GATE_BSS_MIN = 0.0
-GATE_ECE_MAX = 0.03
+GATE_BSS_MIN = BSS_PASS_MIN
+GATE_ECE_MAX = ECE_MAX
 
 _FIXTURE_MID = "deepseek-ai/deepseek-v4-flash"
 
@@ -147,7 +154,7 @@ def _write_report(
         "",
         f"- gate_check: {gate_verdict}",
         f"- BSS > 0: {'pass' if bss > GATE_BSS_MIN else 'fail'} ({bss:.6f})",
-        f"- ECE <= 0.03: {'pass' if ece_w <= GATE_ECE_MAX and ece_m <= GATE_ECE_MAX else 'fail'}"
+        f"- ECE <= {ECE_MAX}: {'pass' if ece_w <= GATE_ECE_MAX and ece_m <= GATE_ECE_MAX else 'fail'}"
         f" ({ece_w:.6f} / {ece_m:.6f})",
         "",
     ]

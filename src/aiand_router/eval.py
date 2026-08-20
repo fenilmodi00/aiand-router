@@ -8,13 +8,18 @@ from typing import Any
 
 import yaml
 
-from .metrics import brier_skill_score, ece_equal_mass, ece_equal_width
-from .replay_report import SMALL_N_ECE_MASS, VERIFIED_N_FLOOR
+from .metrics import (
+    ECE_MAX,
+    QUALITY_TOLERANCE,
+    VERIFIED_N_FLOOR,
+    brier_skill_score,
+    ece_equal_mass,
+    ece_equal_width,
+    ece_mass_is_gated,
+)
 from .router import VIRTUAL_MODELS
 
 ROOT = Path(__file__).resolve().parents[2]
-QUALITY_TOLERANCE = 0.01
-ECE_GATE = 0.03
 
 
 def load_tasks(path: Path | None = None) -> dict[str, Any]:
@@ -262,7 +267,7 @@ def promotion_gate_verdict(
     bss = brier_skill_score(cal_rows) if cal_rows else None
     ece_w = ece_equal_width(cal_rows) if cal_rows else None
     ece_m = ece_equal_mass(cal_rows) if cal_rows else None
-    ece_mass_gated = bool(cal_rows and len(cal_rows) >= SMALL_N_ECE_MASS)
+    ece_mass_gated = bool(cal_rows and ece_mass_is_gated(len(cal_rows)))
 
     live_session_gold = any(s.get("session_gold") for s in sessions)
     floor_ok = n_sessions >= n_floor
@@ -274,10 +279,10 @@ def promotion_gate_verdict(
     quality_escalate_ok = escalate_rate is not None  # baseline compare needs rules-only run
     cost_ok = rules_cost_delta is not None and rules_cost_delta < 0.0
     cal_bss_ok = bss is not None and bss > 0.0
-    cal_ece_w_ok = ece_w is not None and ece_w <= ECE_GATE
+    cal_ece_w_ok = ece_w is not None and ece_w <= ECE_MAX
     cal_ece_m_ok = (
         not ece_mass_gated
-        or (ece_m is not None and ece_m <= ECE_GATE)
+        or (ece_m is not None and ece_m <= ECE_MAX)
     )
 
     bars = {

@@ -20,12 +20,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from .metrics import brier_skill_score, ece_equal_width, ece_equal_mass
+from .metrics import ECE_MAX, QUALITY_TOLERANCE, brier_skill_score, ece_equal_width, ece_equal_mass
 
 MIN_ROWS = 300
 MIN_DAYS = 7
-ESCALATE_DELTA = 0.01  # 1 percentage point
-ECE_LIMIT = 0.03
+ESCALATE_DELTA = QUALITY_TOLERANCE  # 1 pp — same as promotion quality bar
+ECE_LIMIT = ECE_MAX  # alias: promotion-gate ECE bar
 
 
 def _default_log_path() -> Path:

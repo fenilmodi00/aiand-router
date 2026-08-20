@@ -19,7 +19,7 @@ from typing import Any, Callable
 
 import httpx
 
-from .train import _pytest_verify
+from .gold_label import _pytest_verify
 
 ROOT = Path(__file__).resolve().parents[2]
 CAP = 50  # hard cap on instance count

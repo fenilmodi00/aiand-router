@@ -1,12 +1,15 @@
 """Calibration gate metrics for the trained router.
 
-Reused by eval and drift canary. Stdlib-only.
+Reused by eval, drift canary, replay, and promotion readiness. Stdlib-only.
 
-Gate bars (spec .scratch/trained-router/spec.md, Calibration section):
+Gate bars (runbook §(a) / .scratch/trained-router/spec.md, Calibration section):
   - Brier skill score > 0
   - equal-width ECE M=10 AND equal-mass ECE <= 0.03
   - reliability diagram attached
   - report M=15 + MCE; do not gate on them alone
+
+Numeric bars live here so consumers cannot drift. Pass predicates for quality/cost
+stay in promotion_gate / eval; this module owns calibration numbers + computation.
 
 Rows are (p_success, y_success) pairs where p in [0, 1] and y in {0, 1}.
 """
@@ -18,6 +21,33 @@ from pathlib import Path
 from typing import Any, Sequence
 
 Row = tuple[float, float]
+
+# Runbook §(a) / promotion floors — single numeric source.
+ECE_MAX = 0.03
+BSS_PASS_MIN = 0.0  # require bss > this
+QUALITY_TOLERANCE = 0.01
+VERIFIED_N_FLOOR = 300
+# Equal-mass ECE noise floor; report but do not gate below this n_selected.
+SMALL_N_ECE_MASS = 150
+
+
+def bss_passes(bss: float) -> bool:
+    return bss > BSS_PASS_MIN
+
+
+def ece_passes(ece: float) -> bool:
+    return ece <= ECE_MAX
+
+
+def ece_mass_is_gated(n_selected: int) -> bool:
+    return n_selected >= SMALL_N_ECE_MASS
+
+
+def ece_mass_passes(ece: float, *, n_selected: int) -> bool:
+    """Equal-mass bar: waived when n_selected < SMALL_N_ECE_MASS."""
+    if not ece_mass_is_gated(n_selected):
+        return True
+    return ece_passes(ece)
 
 
 def _validate(rows: Sequence[Row]) -> tuple[list[float], list[int]]:

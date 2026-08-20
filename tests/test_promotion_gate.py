@@ -124,6 +124,37 @@ def test_gate_checklist_cost_proxy_from_local_snapshot():
     assert by_id["cost_rules_delta"]["status"] == "proxy_fail"
 
 
+def test_checklist_from_live_bars_maps_eval_verdict():
+    from aiand_router.promotion_gate import PROMOTION_BARS, checklist_from_live_bars
+
+    bars = {
+        "quality_session_gold": {
+            "pass": True,
+            "rules_resolve_rate": 0.5,
+            "trained_resolve_rate": 0.51,
+            "detail": "trained ok",
+        },
+        "quality_escalate": {"pass": True, "escalate_rate": 0.1},
+        "cost_rules_delta": {"pass": False, "rules_cost_delta": 0.01},
+        "calibration_bss": {"pass": True, "brier_skill": 0.2},
+        "calibration_ece_width": {"pass": True, "ece_equal_width": 0.01},
+        "calibration_ece_mass": {
+            "pass": None,
+            "ece_equal_mass": 0.05,
+            "waived_small_n": True,
+        },
+        "floor_session_gold_n": {"pass": False, "n_sessions": 10, "floor": 300},
+    }
+    rows = checklist_from_live_bars(bars)
+    assert [r["id"] for r in rows] == [s["id"] for s in PROMOTION_BARS]
+    by_id = {r["id"]: r for r in rows}
+    assert by_id["quality_session_gold"]["status"] == "pass"
+    assert by_id["cost_rules_delta"]["status"] == "fail"
+    assert by_id["calibration_ece_mass"]["status"] == "waived_small_n"
+    assert by_id["floor_session_gold_n"]["status"] == "fail"
+    assert by_id["quality_session_gold"]["source"].startswith("docs/runbook-production.md")
+
+
 def test_promotion_readiness_report_honesty(tmp_path):
     scaffold_path = tmp_path / "scaffold.json"
     scaffold_path.write_text(json.dumps(_minimal_scaffold()), encoding="utf-8")

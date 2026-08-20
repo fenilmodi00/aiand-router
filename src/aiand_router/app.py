@@ -30,18 +30,14 @@ from .console import (
     proxy_aiand,
     redact as _redact,
 )
-from .learn import learned_enabled, learned_select
+from .hop_orchestrator import ConversationSticky, route_hop
 from .provider import HttpAiandProvider
 from .scorer import (
-    apply_trained_path,
-    cascade_select,
     load_scorer,
     parse_trained_path,
-    trained_select,
 )
 from .router import (
     DEBUG_PHASES,
-    VIRTUAL_MODELS,
     Decision,
     SpendLog,
     append_jsonl,
@@ -51,7 +47,6 @@ from .router import (
     json_content_valid,
     load_config,
     load_models,
-    select_model,
     stronger_than,
     tool_calls_valid,
     wants_json,
@@ -167,34 +162,7 @@ def create_app(
     # FireRouter-style: reuse the auto-route pick within a conversation (existing
     # x-session-id / session_id / prompt-cache-key). Re-score if effort, allowlist,
     # or hop path change, or the prior model is no longer a candidate.
-    route_sticky: dict[tuple[str, str, str, str], str] = {}
-
-    def apply_conversation_sticky(
-        decision: Decision,
-        *,
-        session_id: str,
-        effort: str,
-        allowed: set[str] | None,
-        pinned: bool,
-        req_hop_path: str,
-    ) -> bool:
-        if pinned or not session_id:
-            return False
-        key = (session_id, effort, ",".join(sorted(allowed or ())), req_hop_path)
-        prev = route_sticky.get(key)
-        if prev and prev in by_id and (allowed is None or prev in allowed):
-            if prev != decision.model.id:
-                decision.model = by_id[prev]
-                # Fresh score's savings belong to a different pick; avoid lying
-                # in X-Router-Savings-Usd until post-call recompute.
-                decision.savings_usd = None
-            codes = list(decision.reason_codes or [])
-            if "conversation_sticky" not in codes:
-                codes.append("conversation_sticky")
-            decision.reason_codes = codes
-            return True
-        route_sticky[key] = decision.model.id
-        return False
+    sticky = ConversationSticky(by_id)
 
     app = FastAPI(title="AIand Coding Router", version="0.1.0")
     app.add_middleware(
@@ -421,64 +389,28 @@ def create_app(
             if isinstance(m, dict)
         )
 
-        tip_msg: str | None = None
         session_id = _conversation_id(headers)
-        pinned = requested not in VIRTUAL_MODELS and requested in by_id
-        if pinned:
-            decision_model = by_id[requested]
-            decision = Decision(
-                model=decision_model,
-                phase=phase,
-                threshold=0,
-                reason=f"client pinned {requested}",
-                candidates=[requested],
-            )
-            # Calculate what auto-routing would have chosen
-            auto_dec = select_model(select_cfg, models, **pick_kwargs)
-            if auto_dec.model.unit_cost < decision_model.unit_cost:
-                pot_savings = max(
-                    0.0,
-                    estimate_cost(decision_model, tokens, 800)
-                    - estimate_cost(auto_dec.model, tokens, 800),
-                )
-                tip_msg = f"Using router/auto would have saved ${pot_savings:.4f} (routed to {auto_dec.model.id})"
-        else:
-            use_learned = req_hop_path == "off" and learned_enabled(flag_path)
-            picker = learned_select if use_learned else select_model
-            decision = picker(select_cfg, models, **pick_kwargs)
-            decision.effort = effort
-            if req_hop_path == "off" and scorer_artifact is not None:
-                cascade = cascade_select(
-                    select_cfg,
-                    models,
-                    scorer_artifact,
-                    text=prompt_text,
-                    **pick_kwargs,
-                )
-                if cascade is not None:
-                    decision = cascade
-            elif req_hop_path != "off":
-                trained = None
-                if scorer_artifact is not None:
-                    trained = trained_select(
-                        select_cfg,
-                        models,
-                        scorer_artifact,
-                        text=prompt_text,
-                        **pick_kwargs,
-                    )
-                decision = apply_trained_path(
-                    req_hop_path, decision, trained, tokens=tokens, by_id=by_id
-                )
-
-        sticky_hit = apply_conversation_sticky(
-            decision,
-            session_id=session_id,
+        hop = route_hop(
+            requested=requested,
+            phase=phase,
             effort=effort,
-            allowed=allowed,
-            pinned=pinned,
             req_hop_path=req_hop_path,
+            select_cfg=select_cfg,
+            models=models,
+            by_id=by_id,
+            pick_kwargs=pick_kwargs,
+            prompt_text=prompt_text,
+            tokens=tokens,
+            scorer_artifact=scorer_artifact,
+            flag_path=flag_path,
+            session_id=session_id,
+            allowed=allowed,
+            sticky=sticky,
+            with_pin_tip=True,
         )
+        decision = hop.decision
+        sticky_hit = hop.sticky_hit
+        tip_msg = hop.tip_msg
         meta = _router_headers(decision)
         if sticky_hit:
             meta["X-Router-Conversation-Sticky"] = "1"
@@ -661,52 +593,26 @@ def create_app(
         )
 
         session_id = _conversation_id(headers)
-        pinned = requested not in VIRTUAL_MODELS and requested in by_id
-        if pinned:
-            decision = Decision(
-                model=by_id[requested],
-                phase=phase,
-                threshold=0,
-                reason=f"client pinned {requested}",
-                candidates=[requested],
-            )
-        else:
-            use_learned = req_hop_path == "off" and learned_enabled(flag_path)
-            picker = learned_select if use_learned else select_model
-            decision = picker(select_cfg, models, **pick_kwargs)
-            decision.effort = effort
-            if req_hop_path == "off" and scorer_artifact is not None:
-                cascade = cascade_select(
-                    select_cfg,
-                    models,
-                    scorer_artifact,
-                    text=prompt_text,
-                    **pick_kwargs,
-                )
-                if cascade is not None:
-                    decision = cascade
-            elif req_hop_path != "off":
-                trained = None
-                if scorer_artifact is not None:
-                    trained = trained_select(
-                        select_cfg,
-                        models,
-                        scorer_artifact,
-                        text=prompt_text,
-                        **pick_kwargs,
-                    )
-                decision = apply_trained_path(
-                    req_hop_path, decision, trained, tokens=tokens, by_id=by_id
-                )
-
-        sticky_hit = apply_conversation_sticky(
-            decision,
-            session_id=session_id,
+        hop = route_hop(
+            requested=requested,
+            phase=phase,
             effort=effort,
-            allowed=allowed,
-            pinned=pinned,
             req_hop_path=req_hop_path,
+            select_cfg=select_cfg,
+            models=models,
+            by_id=by_id,
+            pick_kwargs=pick_kwargs,
+            prompt_text=prompt_text,
+            tokens=tokens,
+            scorer_artifact=scorer_artifact,
+            flag_path=flag_path,
+            session_id=session_id,
+            allowed=allowed,
+            sticky=sticky,
+            with_pin_tip=False,
         )
+        decision = hop.decision
+        sticky_hit = hop.sticky_hit
         meta = _router_headers(decision)
         if sticky_hit:
             meta["X-Router-Conversation-Sticky"] = "1"

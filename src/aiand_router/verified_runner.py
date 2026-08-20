@@ -44,7 +44,7 @@ from .lite_runner import (
 )
 from .promotion_gate import VERIFIED_PRIMARY_N, estimate_gate_budget, load_ids_scaffold
 from .router import SpendLog, load_config, load_models
-from .train import _pytest_verify
+from .gold_label import _pytest_verify
 
 VERIFIED_CAP = VERIFIED_PRIMARY_N
 DEFAULT_SCAFFOLD = ROOT / "data" / "verified_ids_scaffold.json"

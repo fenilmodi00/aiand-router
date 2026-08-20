@@ -1,8 +1,14 @@
 """Unpaid Verified session-gold promotion gate scaffolding (runbook §(a)).
 
-Maps promotion bars to checklist items, validates id scaffolds, snapshots local
-replay posture, and emits a dual-policy run plan with budget estimates. Does not
-run paid HTTP or flip TRAINED_PATH.
+Facade for readiness / checklist / live-verdict consumers:
+
+- ``promotion_readiness`` / ``build_gate_checklist`` — unpaid local-replay + scaffold
+- ``checklist_from_live_bars`` — adapts ``eval.promotion_gate_verdict`` bars onto the
+  same PROMOTION_BARS surface (session-gold / shadow-log)
+- ``local_replay_snapshot`` — thin adapter over offline replay
+
+Numeric calibration bars and Brier/ECE computation live in ``metrics.py``.
+Does not run paid HTTP or flip TRAINED_PATH.
 
 Floor scaling distinguishes two resolve paths that both honor §(a) spirit:
 
@@ -19,13 +25,17 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from .replay_report import (
+from .metrics import (
+    ECE_MAX,
+    QUALITY_TOLERANCE,
     SMALL_N_ECE_MASS,
     VERIFIED_N_FLOOR,
-    apply_replay_gate,
-    parity_blockers,
-    replay_report,
+    bss_passes,
+    ece_mass_is_gated,
+    ece_mass_passes,
+    ece_passes,
 )
+from .replay_report import apply_replay_gate, parity_blockers, replay_report
 from .router import estimate_cost, load_config, load_models
 from .scorer import load_scorer
 
@@ -44,16 +54,18 @@ SESSION_JOINED_SAMPLE_DOC = (
 )
 LIVE_FILECTX_SESSIONS = ROOT / "data" / "verified_session_filectx_all.jsonl"
 
-# Runbook §(a) pass bars (medium only; all must hold).
+# Runbook §(a) pass bars (medium only; all must hold). Numbers from metrics.py.
 PROMOTION_BARS: tuple[dict[str, str], ...] = (
     {
         "id": "quality_session_gold",
-        "bar": "session gold (tests_passed / resolve) >= rules - 0.01 absolute",
+        "bar": (
+            f"session gold (tests_passed / resolve) >= rules - {QUALITY_TOLERANCE} absolute"
+        ),
         "source": "docs/runbook-production.md §(a) pass bars #1",
     },
     {
         "id": "quality_escalate",
-        "bar": "per-request escalate rate >= rules - 0.01 absolute",
+        "bar": f"per-request escalate rate >= rules - {QUALITY_TOLERANCE} absolute",
         "source": "docs/runbook-production.md §(a) pass bars #1",
     },
     {
@@ -68,12 +80,14 @@ PROMOTION_BARS: tuple[dict[str, str], ...] = (
     },
     {
         "id": "calibration_ece_width",
-        "bar": "equal-width ECE (M=10) <= 0.03",
+        "bar": f"equal-width ECE (M=10) <= {ECE_MAX}",
         "source": "docs/runbook-production.md §(a) pass bars #3",
     },
     {
         "id": "calibration_ece_mass",
-        "bar": "equal-mass ECE (M=10) <= 0.03 when n_selected >= 150",
+        "bar": (
+            f"equal-mass ECE (M=10) <= {ECE_MAX} when n_selected >= {SMALL_N_ECE_MASS}"
+        ),
         "source": "docs/runbook-production.md §(a) pass bars #3",
     },
     {
@@ -323,9 +337,7 @@ def local_replay_snapshot(
     report = replay_report(gold_path, artifact, models, cfg)
     if cost_gold_path and cost_gold_path.exists():
         report["cost_slice"] = replay_report(cost_gold_path, artifact, models, cfg)
-        report = apply_replay_gate(report)
-    else:
-        report = apply_replay_gate(report)
+    report = apply_replay_gate(report)
     trained = report["policies"]["trained"]
     rules = report["policies"]["rules"]
     return {
@@ -348,6 +360,16 @@ def local_replay_snapshot(
         "label_type": "gateway_success_gold_proxy",
         "session_gold": False,
     }
+
+
+def cost_delta_passes(delta: float) -> bool:
+    """Runbook §(a) cost bar: rules_cost_delta < 0."""
+    return delta < 0.0
+
+
+def quality_noninferior(trained_rate: float, rules_rate: float) -> bool:
+    """Runbook §(a) quality bar: trained >= rules - QUALITY_TOLERANCE."""
+    return trained_rate >= rules_rate - QUALITY_TOLERANCE
 
 
 def _bar_status(
@@ -433,7 +455,7 @@ def _bar_status(
         if local is None:
             return {"status": "not_started", "detail": "no local replay snapshot"}
         delta = float(local.get("rules_cost_delta") or 0.0)
-        if delta < 0:
+        if cost_delta_passes(delta):
             return {
                 "status": "proxy_pass",
                 "detail": f"gateway proxy rules_cost_delta={delta:.6f} (not session gold)",
@@ -448,7 +470,7 @@ def _bar_status(
             return {"status": "not_started", "detail": "no local replay snapshot"}
         bss = float(local.get("brier_skill") or 0.0)
         return {
-            "status": "proxy_pass" if bss > 0 else "proxy_fail",
+            "status": "proxy_pass" if bss_passes(bss) else "proxy_fail",
             "detail": f"gateway proxy BSS={bss:.6f} on n={local.get('n_prompts')} (not flywheel hops)",
         }
 
@@ -457,7 +479,7 @@ def _bar_status(
             return {"status": "not_started", "detail": "no local replay snapshot"}
         ece = float(local.get("ece_equal_width") or 0.0)
         return {
-            "status": "proxy_pass" if ece <= 0.03 else "proxy_fail",
+            "status": "proxy_pass" if ece_passes(ece) else "proxy_fail",
             "detail": f"gateway proxy equal-width ECE={ece:.6f}",
         }
 
@@ -465,15 +487,15 @@ def _bar_status(
         if local is None:
             return {"status": "not_started", "detail": "no local replay snapshot"}
         ece = float(local.get("ece_equal_mass") or 0.0)
-        gated = bool(local.get("ece_equal_mass_gated"))
         n_sel = int(local.get("n_prompts") or 0)
-        if not gated and n_sel < SMALL_N_ECE_MASS:
+        gated = bool(local.get("ece_equal_mass_gated", ece_mass_is_gated(n_sel)))
+        if not gated:
             return {
                 "status": "waived_small_n",
                 "detail": f"equal-mass ECE={ece:.3f} waived (n={n_sel} < {SMALL_N_ECE_MASS})",
             }
         return {
-            "status": "proxy_pass" if ece <= 0.03 else "proxy_fail",
+            "status": "proxy_pass" if ece_mass_passes(ece, n_selected=n_sel) else "proxy_fail",
             "detail": f"equal-mass ECE={ece:.6f} gated={gated}",
         }
 
@@ -488,6 +510,7 @@ def build_gate_checklist(
     resolve_posture: dict[str, Any] | None = None,
     live_sessions: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
+    """Checklist surface for unpaid readiness (local-replay / scaffold adapters)."""
     rows: list[dict[str, Any]] = []
     for spec in PROMOTION_BARS:
         status = _bar_status(
@@ -500,6 +523,56 @@ def build_gate_checklist(
         )
         rows.append({**spec, **status})
     return rows
+
+
+def checklist_from_live_bars(bars: dict[str, Any]) -> list[dict[str, Any]]:
+    """Adapt eval.promotion_gate_verdict['bars'] onto the PROMOTION_BARS checklist.
+
+    Session-gold / shadow-log verdict consumers share this surface with unpaid
+    readiness so bar ids and §(a) wording stay in one module.
+    """
+    rows: list[dict[str, Any]] = []
+    for spec in PROMOTION_BARS:
+        bar = bars.get(spec["id"]) or {}
+        passed = bar.get("pass")
+        if passed is True:
+            status = "pass"
+        elif passed is False:
+            status = "fail"
+        elif bar.get("waived_small_n"):
+            status = "waived_small_n"
+        else:
+            status = "not_started"
+        detail = bar.get("detail")
+        if not detail:
+            detail = _live_bar_detail(spec["id"], bar)
+        row = {**spec, "status": status, "detail": detail}
+        for key, val in bar.items():
+            if key in {"pass", "detail"}:
+                continue
+            row[key] = val
+        rows.append(row)
+    return rows
+
+
+def _live_bar_detail(bar_id: str, bar: dict[str, Any]) -> str:
+    if bar_id == "calibration_bss":
+        return f"BSS={bar.get('brier_skill')}"
+    if bar_id == "calibration_ece_width":
+        return f"equal-width ECE={bar.get('ece_equal_width')}"
+    if bar_id == "calibration_ece_mass":
+        return f"equal-mass ECE={bar.get('ece_equal_mass')}"
+    if bar_id == "cost_rules_delta":
+        return f"rules_cost_delta={bar.get('rules_cost_delta')}"
+    if bar_id == "floor_session_gold_n":
+        return f"n_sessions={bar.get('n_sessions')} floor={bar.get('floor')}"
+    if bar_id == "quality_session_gold":
+        return (
+            f"trained={bar.get('trained_resolve_rate')} rules={bar.get('rules_resolve_rate')}"
+        )
+    if bar_id == "quality_escalate":
+        return f"escalate_rate={bar.get('escalate_rate')}"
+    return bar_id
 
 
 def dual_policy_run_plan(

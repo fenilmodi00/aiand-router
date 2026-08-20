@@ -12,8 +12,9 @@ from typing import Any
 from .router import (
     PHASE_FAMILY,
     Decision,
+    EligibleSet,
     Model,
-    eligible_models,
+    build_eligible_set,
     estimate_cost,
     fallback_decision,
     stamp_baseline,
@@ -420,9 +421,9 @@ def pick_cheapest_above_bar(
     return within[0][0], rule
 
 
-def cascade_select(
+def cascade_select_from_eligible(
     cfg: dict[str, Any],
-    models: list[Model],
+    eligible_set: EligibleSet,
     artifact: dict[str, Any],
     *,
     phase: str,
@@ -430,12 +431,6 @@ def cascade_select(
     tokens: int,
     effort: str,
     allowed: set[str] | None,
-    spend_usd: float,
-    budget_usd: float,
-    needs_json: bool = False,
-    streaming: bool = False,
-    max_tokens: int | None = None,
-    latency_limit_ms: float | None = None,
     hint_bin: str | None = None,
     text: str = "",
 ) -> Decision | None:
@@ -447,21 +442,7 @@ def cascade_select(
         lane_allowed &= allowed
     if lane["strong_model"] not in lane_allowed:
         return None
-    _, eligible = eligible_models(
-        cfg,
-        models,
-        phase=phase,
-        needs_tools=needs_tools,
-        tokens=tokens,
-        effort=effort,
-        allowed=lane_allowed,
-        spend_usd=spend_usd,
-        budget_usd=budget_usd,
-        needs_json=needs_json,
-        streaming=streaming,
-        max_tokens=max_tokens,
-        latency_limit_ms=latency_limit_ms,
-    )
+    eligible = [m for m in eligible_set.models if m.id in lane_allowed]
     by_id = {m.id: m for m in eligible}
     strong = by_id.get(lane["strong_model"])
     if strong is None:
@@ -516,7 +497,7 @@ def cascade_select(
     return decision
 
 
-def trained_select(
+def cascade_select(
     cfg: dict[str, Any],
     models: list[Model],
     artifact: dict[str, Any],
@@ -534,8 +515,8 @@ def trained_select(
     latency_limit_ms: float | None = None,
     hint_bin: str | None = None,
     text: str = "",
-) -> Decision:
-    aa_bar, eligible = eligible_models(
+) -> Decision | None:
+    eligible_set = build_eligible_set(
         cfg,
         models,
         phase=phase,
@@ -550,6 +531,37 @@ def trained_select(
         max_tokens=max_tokens,
         latency_limit_ms=latency_limit_ms,
     )
+    return cascade_select_from_eligible(
+        cfg,
+        eligible_set,
+        artifact,
+        phase=phase,
+        needs_tools=needs_tools,
+        tokens=tokens,
+        effort=effort,
+        allowed=allowed,
+        hint_bin=hint_bin,
+        text=text,
+    )
+
+
+
+
+def trained_select_from_eligible(
+    cfg: dict[str, Any],
+    eligible_set: EligibleSet,
+    artifact: dict[str, Any],
+    *,
+    phase: str,
+    needs_tools: bool,
+    tokens: int,
+    effort: str,
+    catalog: list[Model],
+    hint_bin: str | None = None,
+    text: str = "",
+) -> Decision:
+    aa_bar = eligible_set.threshold
+    eligible = list(eligible_set.models)
     t, regret = effort_knobs(cfg, effort)
     bin_, p_success = score_eligible(
         artifact,
@@ -562,7 +574,7 @@ def trained_select(
     )
     chosen, rule = pick_cheapest_above_bar(eligible, p_success, threshold=t, max_regret=regret)
     if chosen is None:
-        fb = fallback_decision(cfg, models, phase, aa_bar)
+        fb = fallback_decision(cfg, catalog, phase, aa_bar)
         fb.path = "trained"
         fb.effort = effort
         fb.rule = "fallback_declined"
@@ -595,6 +607,56 @@ def trained_select(
     )
     stamp_baseline(decision, eligible, tokens)
     return decision
+
+
+def trained_select(
+    cfg: dict[str, Any],
+    models: list[Model],
+    artifact: dict[str, Any],
+    *,
+    phase: str,
+    needs_tools: bool,
+    tokens: int,
+    effort: str,
+    allowed: set[str] | None,
+    spend_usd: float,
+    budget_usd: float,
+    needs_json: bool = False,
+    streaming: bool = False,
+    max_tokens: int | None = None,
+    latency_limit_ms: float | None = None,
+    hint_bin: str | None = None,
+    text: str = "",
+) -> Decision:
+    eligible_set = build_eligible_set(
+        cfg,
+        models,
+        phase=phase,
+        needs_tools=needs_tools,
+        tokens=tokens,
+        effort=effort,
+        allowed=allowed,
+        spend_usd=spend_usd,
+        budget_usd=budget_usd,
+        needs_json=needs_json,
+        streaming=streaming,
+        max_tokens=max_tokens,
+        latency_limit_ms=latency_limit_ms,
+    )
+    return trained_select_from_eligible(
+        cfg,
+        eligible_set,
+        artifact,
+        phase=phase,
+        needs_tools=needs_tools,
+        tokens=tokens,
+        effort=effort,
+        catalog=models,
+        hint_bin=hint_bin,
+        text=text,
+    )
+
+
 
 
 def apply_trained_path(

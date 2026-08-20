@@ -390,7 +390,7 @@ def test_fit_bilinear_uses_feature_dim_identity(tmp_path, monkeypatch):
 
 
 def test_fit_platt_rejects_inverted_slope():
-    from aiand_router.train import _fit_platt
+    from aiand_router.fit import _fit_platt
 
     # High z, low y (anti-ranked) must not ship a negative Platt a.
     zs = [2.0, 2.1, -2.0, -2.1]

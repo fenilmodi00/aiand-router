@@ -290,6 +290,48 @@ def eligible_models(
     return threshold, eligible
 
 
+@dataclass(frozen=True)
+class EligibleSet:
+    """Models that survive hard constraints for one hop (CONTEXT: Eligible set)."""
+
+    threshold: float
+    models: list[Model]
+
+
+def build_eligible_set(
+    cfg: dict[str, Any],
+    models: list[Model],
+    *,
+    phase: str,
+    needs_tools: bool,
+    tokens: int,
+    effort: str,
+    allowed: set[str] | None,
+    spend_usd: float,
+    budget_usd: float,
+    needs_json: bool = False,
+    streaming: bool = False,
+    max_tokens: int | None = None,
+    latency_limit_ms: float | None = None,
+) -> EligibleSet:
+    threshold, models_ = eligible_models(
+        cfg,
+        models,
+        phase=phase,
+        needs_tools=needs_tools,
+        tokens=tokens,
+        effort=effort,
+        allowed=allowed,
+        spend_usd=spend_usd,
+        budget_usd=budget_usd,
+        needs_json=needs_json,
+        streaming=streaming,
+        max_tokens=max_tokens,
+        latency_limit_ms=latency_limit_ms,
+    )
+    return EligibleSet(threshold=threshold, models=list(models_))
+
+
 def fallback_decision(
     cfg: dict[str, Any], models: list[Model], phase: str, threshold: float, *, learned: bool = False
 ) -> Decision:
@@ -305,39 +347,19 @@ def fallback_decision(
     )
 
 
-def select_model(
+def select_from_eligible(
     cfg: dict[str, Any],
-    models: list[Model],
+    eligible_set: EligibleSet,
     *,
     phase: str,
-    needs_tools: bool,
-    tokens: int,
     effort: str,
-    allowed: set[str] | None,
-    spend_usd: float,
-    budget_usd: float,
-    needs_json: bool = False,
-    streaming: bool = False,
-    max_tokens: int | None = None,
-    latency_limit_ms: float | None = None,
+    tokens: int,
+    catalog: list[Model],
 ) -> Decision:
-    threshold, eligible = eligible_models(
-        cfg,
-        models,
-        phase=phase,
-        needs_tools=needs_tools,
-        tokens=tokens,
-        effort=effort,
-        allowed=allowed,
-        spend_usd=spend_usd,
-        budget_usd=budget_usd,
-        needs_json=needs_json,
-        streaming=streaming,
-        max_tokens=max_tokens,
-        latency_limit_ms=latency_limit_ms,
-    )
+    threshold = eligible_set.threshold
+    eligible = list(eligible_set.models)
     if not eligible:
-        decision = fallback_decision(cfg, models, phase, threshold)
+        decision = fallback_decision(cfg, catalog, phase, threshold)
         stamp_baseline(decision, [decision.model], tokens)
         return decision
     max_regret = 0.0 if effort == "low" else float(cfg.get("max_regret") or 0)
@@ -371,6 +393,42 @@ def select_model(
     )
     stamp_baseline(decision, eligible, tokens)
     return decision
+
+
+def select_model(
+    cfg: dict[str, Any],
+    models: list[Model],
+    *,
+    phase: str,
+    needs_tools: bool,
+    tokens: int,
+    effort: str,
+    allowed: set[str] | None,
+    spend_usd: float,
+    budget_usd: float,
+    needs_json: bool = False,
+    streaming: bool = False,
+    max_tokens: int | None = None,
+    latency_limit_ms: float | None = None,
+) -> Decision:
+    eligible_set = build_eligible_set(
+        cfg,
+        models,
+        phase=phase,
+        needs_tools=needs_tools,
+        tokens=tokens,
+        effort=effort,
+        allowed=allowed,
+        spend_usd=spend_usd,
+        budget_usd=budget_usd,
+        needs_json=needs_json,
+        streaming=streaming,
+        max_tokens=max_tokens,
+        latency_limit_ms=latency_limit_ms,
+    )
+    return select_from_eligible(
+        cfg, eligible_set, phase=phase, effort=effort, tokens=tokens, catalog=models
+    )
 
 
 def stamp_baseline(decision: Decision, eligible: list[Model], tokens: int) -> None:

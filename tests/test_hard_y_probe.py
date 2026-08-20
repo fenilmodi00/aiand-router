@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 
 from aiand_router.geometry import FLASH, KIMI, PRO, QWEN, geometry_report, main as geometry_main
-from aiand_router.train import GEOMETRY_OVERRIDE_ENV, OPT_IN_ENV, main as train_main
+from aiand_router.fit import GEOMETRY_OVERRIDE_ENV
+from aiand_router.train import OPT_IN_ENV, main as train_main
 
 FIXTURE = Path(__file__).parent / "fixtures" / "hard_y_probe"
 TRAIN_FIX = FIXTURE / "gold-sparse-hard-fixture.jsonl"
