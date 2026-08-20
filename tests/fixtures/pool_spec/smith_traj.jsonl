@@ -1,0 +1,10 @@
+{"instance_id": "django__django-11099", "messages": [{"role": "user", "content": "Fix the ORM query optimization bug in django."}, {"role": "assistant", "tool_calls": [{"function": {"name": "str_replace"}}]}]}
+{"instance_id": "astropy__astropy-12907", "messages": [{"role": "user", "content": "Fix the coordinates transform regression in astropy."}, {"role": "assistant", "tool_calls": [{"function": {"name": "str_replace"}}]}]}
+{"instance_id": "acme__web-100", "messages": [{"role": "user", "content": "Rename tmp to tmp2 in the config file."}, {"role": "assistant", "tool_calls": [{"function": {"name": "str_replace"}}]}]}
+{"instance_id": "acme__web-101", "messages": [{"role": "user", "content": "Call grep for eligible_models then stop."}, {"role": "assistant", "tool_calls": [{"function": {"name": "grep"}}]}]}
+{"instance_id": "acme__web-102", "messages": [{"role": "user", "content": "Refactor the spend log deadlock across cache and gold."}, {"role": "assistant", "tool_calls": [{"function": {"name": "str_replace"}}]}]}
+{"instance_id": "acme__web-103", "messages": [{"role": "user", "content": "Design a flywheel refit that never trains on SWE-bench Verified."}, {"role": "assistant", "tool_calls": [{"function": {"name": "read_file"}}]}]}
+{"instance_id": "acme__web-104", "messages": [{"role": "user", "content": "Locate every call site that writes requests.jsonl."}, {"role": "assistant", "tool_calls": [{"function": {"name": "glob"}}]}]}
+{"instance_id": "acme__web-105", "messages": [{"role": "user", "content": "Summarize the scorer_down fallback in two sentences."}, {"role": "assistant", "tool_calls": [{"function": {"name": "read"}}]}]}
+{this is a corrupt json line that should be skipped}
+{"instance_id": "acme__web-106", "messages": [{"role": "user", "content": "Debug the pytest AssertionError in the eligible_models test."}, {"role": "assistant", "tool_calls": [{"function": {"name": "bash"}}]}]}

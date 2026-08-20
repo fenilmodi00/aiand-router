@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Round 1 demo flow — quick reference</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+  <style>
+    .grid { display: grid; gap: 0.75rem; margin: 1rem 0; }
+    .card { background: var(--card); border: 1px solid var(--rule); padding: 0.75rem 1rem; }
+    .card h3 { margin: 0 0 0.25rem; font-size: 0.95rem; }
+    .card p { margin: 0; font-size: 0.85rem; color: var(--muted); }
+    code { font-family: var(--mono); font-size: 0.82rem; }
+  </style>
+</head>
+<body>
+  <article class="page">
+    <header>
+      <h1>Round 1 demo flow</h1>
+      <p class="lede">Print this. Keep it beside your monitor while recording.</p>
+    </header>
+
+    <div class="grid">
+      <div class="card"><h3>1 · Hook (20s)</h3><p>Problem → one endpoint → aiand/auto</p></div>
+      <div class="card"><h3>2 · Landing <code>/</code> (30s)</h3><p>Hero previews · 3 pillars · OpenAI-compatible</p></div>
+      <div class="card"><h3>3 · Simulator <code>#simulator</code> (25s)</h3><p>Pick phase → run → show winner + savings</p></div>
+      <div class="card"><h3>4 · Dashboard <code>/routers/auto</code> (45s)</h3><p>Savings · mix chart · inferences table · snippet</p></div>
+      <div class="card"><h3>5 · Playground <code>/playground</code> (25s)</h3><p>One live router/auto message · mention X-Router-Model</p></div>
+      <div class="card"><h3>6 · Future (25s)</h3><p>Shadow → trained · SWE-bench gate · rules fallback</p></div>
+      <div class="card"><h3>7 · Close (10s)</h3><p>“Round Two goes deeper”</p></div>
+    </div>
+
+    <h2>Stack (one sentence each)</h2>
+    <ul>
+      <li><strong>Backend</strong> — FastAPI, OpenAI-compatible proxy, Pioneer scoring, JSONL log</li>
+      <li><strong>Frontend</strong> — Next.js landing + operator console (routers, playground, usage, keys)</li>
+      <li><strong>ML</strong> — teacher/gold/fit pipeline; shadow mode today; trained flip next</li>
+    </ul>
+
+    <p><a href="../lessons/0003-round-one-video-script.html">Full script →</a></p>
+  </article>
+</body>
+</html>

@@ -1,0 +1,2 @@
+{"instance_id": "acme__web-100", "problem_statement": "Rename tmp to tmp2 in the config file.", "patch": "@@ -1,3 +1,3 @@\n-tmp = value\n+tmp2 = value\n", "FAIL_TO_PASS": ["test_rename"]}
+{"instance_id": "acme__web-102", "problem_statement": "Refactor the spend log deadlock across cache and gold.", "patch": "@@ -10,3 +10,3 @@\n-    lock = threading.Lock()\n+    lock = threading.RLock()\n", "FAIL_TO_PASS": ["test_deadlock_fix"]}

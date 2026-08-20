@@ -1,0 +1,89 @@
+{"prompt": "Reply with the single word yes.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false}
+{"prompt": "Reply with only no.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false}
+{"prompt": "Respond with only ok.", "phase": "summarize", "hint_bin": "trivial", "needs_tools": false}
+{"prompt": "Reply with the single word true.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false}
+{"prompt": "Reply with only false.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false}
+{"prompt": "Reply with the single word done.", "phase": "summarize", "hint_bin": "trivial", "needs_tools": false}
+{"prompt": "Reply with only pass.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false}
+{"prompt": "Reply with the single word router.", "phase": "discover", "hint_bin": "trivial", "needs_tools": false}
+{"prompt": "Reply with JSON only: {\"status\": \"ok\"}.", "phase": "edit", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "Return valid JSON with keys model and path only.", "phase": "edit", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "Reply with JSON only: {\"count\": 0}.", "phase": "tool", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "Return a JSON object with key threshold and numeric value 0.1.", "phase": "plan", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "Reply with valid json: {\"enabled\": true}.", "phase": "edit", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "What is 2+2? Reply with only the digit 4.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false, "expected": "4"}
+{"prompt": "Name the HTTP method for creating a resource. Reply must contain POST.", "phase": "discover", "hint_bin": "trivial", "needs_tools": false, "expected": "POST"}
+{"prompt": "Which env gates train CLI? Answer must contain AIAND_TRAIN.", "phase": "discover", "hint_bin": "standard", "needs_tools": false, "expected": "AIAND_TRAIN"}
+{"prompt": "Default TRAINED_PATH for smoke? Include the word shadow.", "phase": "debug", "hint_bin": "standard", "needs_tools": false, "expected": "shadow"}
+{"prompt": "Paths allowed on hops rows? Must contain trained.", "phase": "discover", "hint_bin": "standard", "needs_tools": false, "expected": "trained"}
+{"prompt": "Savings baseline id when eligible? Include K3.", "phase": "plan", "hint_bin": "hard", "needs_tools": false, "expected": "K3"}
+{"prompt": "Platt params live under which key in scorer.json? Include platt.", "phase": "discover", "hint_bin": "standard", "needs_tools": false, "expected": "platt"}
+{"prompt": "Cheapest-above-bar fallback rule name? Include fallback_declined.", "phase": "debug", "hint_bin": "hard", "needs_tools": false, "expected": "fallback_declined"}
+{"prompt": "Fix the typo 'recieve' to 'receive' in one word.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false, "expected": "receive"}
+{"prompt": "Correct spelling: change 'occured' to 'occurred'. One word only.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false, "expected": "occurred"}
+{"prompt": "Fix the typo 'seperate' to 'separate'. Reply with the correct word only.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false, "expected": "separate"}
+{"prompt": "Write a YAML snippet for trained_effort medium: threshold 0.10, max_regret 0.20.", "phase": "edit", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "Write a yaml snippet with key path set to shadow.", "phase": "plan", "hint_bin": "standard", "needs_tools": false, "expected": "shadow"}
+{"prompt": "Files:\nparity.py:\ndef is_even(n: int) -> bool:\n    return n % 2 == 1\n\nWrite the corrected Python module only, inside a ```python fence.", "phase": "edit", "hint_bin": "standard", "needs_tools": false, "verify_pytest": true, "module": "parity.py", "tests": "from parity import is_even\n\n\ndef test_even():\n    assert is_even(2) is True\n\n\ndef test_odd():\n    assert is_even(3) is False\n"}
+{"prompt": "Files:\nclamp.py:\ndef clamp(n: int, lo: int, hi: int) -> int:\n    if n < lo:\n        return hi\n    if n > hi:\n        return lo\n    return n\n\nWrite the corrected Python module only, inside a ```python fence.", "phase": "edit", "hint_bin": "hard", "needs_tools": false, "verify_pytest": true, "module": "clamp.py", "tests": "from clamp import clamp\n\n\ndef test_inside():\n    assert clamp(5, 0, 10) == 5\n\n\ndef test_below():\n    assert clamp(-2, 0, 10) == 0\n\n\ndef test_above():\n    assert clamp(99, 0, 10) == 10\n"}
+{"prompt": "Files:\nreverse.py:\ndef reverse(s: str) -> str:\n    return s\n\nWrite the corrected Python module only, inside a ```python fence.", "phase": "edit", "hint_bin": "standard", "needs_tools": false, "verify_pytest": true, "module": "reverse.py", "tests": "from reverse import reverse\n\n\ndef test_basic():\n    assert reverse(\"abc\") == \"cba\"\n"}
+{"prompt": "Reply with the single word alpha. Query vq-000.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false}
+{"prompt": "Reply with JSON only: {\"id\": 1}. Query vq-001.", "phase": "edit", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "What is 2+2? Reply with only the number 4. Query vq-002.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false, "expected": "4"}
+{"prompt": "Name the router path for shadow mode. Must contain shadow. Query vq-003.", "phase": "discover", "hint_bin": "standard", "needs_tools": false, "expected": "shadow"}
+{"prompt": "Write a yaml snippet: effort4: threshold: 0.4. Query vq-004.", "phase": "plan", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "Reply with the single word foxtrot. Query vq-005.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false}
+{"prompt": "Reply with JSON only: {\"id\": 6}. Query vq-006.", "phase": "edit", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "What is 7+7? Reply with only the number 14. Query vq-007.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false, "expected": "14"}
+{"prompt": "Name the router path for shadow mode. Must contain shadow. Query vq-008.", "phase": "discover", "hint_bin": "standard", "needs_tools": true, "expected": "shadow"}
+{"prompt": "Write a yaml snippet: effort9: threshold: 0.9. Query vq-009.", "phase": "plan", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "Reply with the single word echo. Query vq-010.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false}
+{"prompt": "Reply with JSON only: {\"id\": 11}. Query vq-011.", "phase": "edit", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "What is 12+12? Reply with only the number 24. Query vq-012.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false, "expected": "24"}
+{"prompt": "Name the router path for shadow mode. Must contain shadow. Query vq-013.", "phase": "discover", "hint_bin": "standard", "needs_tools": false, "expected": "shadow"}
+{"prompt": "Write a yaml snippet: effort14: threshold: 0.4. Query vq-014.", "phase": "plan", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "Reply with the single word delta. Query vq-015.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false}
+{"prompt": "Reply with JSON only: {\"id\": 16}. Query vq-016.", "phase": "edit", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "What is 17+17? Reply with only the number 34. Query vq-017.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false, "expected": "34"}
+{"prompt": "Name the router path for shadow mode. Must contain shadow. Query vq-018.", "phase": "discover", "hint_bin": "standard", "needs_tools": true, "expected": "shadow"}
+{"prompt": "Write a yaml snippet: effort19: threshold: 0.9. Query vq-019.", "phase": "plan", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "Reply with the single word gamma. Query vq-020.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false}
+{"prompt": "Reply with JSON only: {\"id\": 21}. Query vq-021.", "phase": "edit", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "What is 22+22? Reply with only the number 44. Query vq-022.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false, "expected": "44"}
+{"prompt": "Name the router path for shadow mode. Must contain shadow. Query vq-023.", "phase": "discover", "hint_bin": "standard", "needs_tools": false, "expected": "shadow"}
+{"prompt": "Write a yaml snippet: effort24: threshold: 0.4. Query vq-024.", "phase": "plan", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "Reply with the single word beta. Query vq-025.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false}
+{"prompt": "Reply with JSON only: {\"id\": 26}. Query vq-026.", "phase": "edit", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "What is 27+27? Reply with only the number 54. Query vq-027.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false, "expected": "54"}
+{"prompt": "Name the router path for shadow mode. Must contain shadow. Query vq-028.", "phase": "discover", "hint_bin": "standard", "needs_tools": true, "expected": "shadow"}
+{"prompt": "Write a yaml snippet: effort29: threshold: 0.9. Query vq-029.", "phase": "plan", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "Reply with the single word alpha. Query vq-030.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false}
+{"prompt": "Reply with JSON only: {\"id\": 31}. Query vq-031.", "phase": "edit", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "What is 32+32? Reply with only the number 64. Query vq-032.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false, "expected": "64"}
+{"prompt": "Name the router path for shadow mode. Must contain shadow. Query vq-033.", "phase": "discover", "hint_bin": "standard", "needs_tools": false, "expected": "shadow"}
+{"prompt": "Write a yaml snippet: effort34: threshold: 0.4. Query vq-034.", "phase": "plan", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "Reply with the single word foxtrot. Query vq-035.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false}
+{"prompt": "Reply with JSON only: {\"id\": 36}. Query vq-036.", "phase": "edit", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "What is 37+37? Reply with only the number 74. Query vq-037.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false, "expected": "74"}
+{"prompt": "Name the router path for shadow mode. Must contain shadow. Query vq-038.", "phase": "discover", "hint_bin": "standard", "needs_tools": true, "expected": "shadow"}
+{"prompt": "Write a yaml snippet: effort39: threshold: 0.9. Query vq-039.", "phase": "plan", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "Reply with the single word echo. Query vq-040.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false}
+{"prompt": "Reply with JSON only: {\"id\": 41}. Query vq-041.", "phase": "edit", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "What is 42+42? Reply with only the number 84. Query vq-042.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false, "expected": "84"}
+{"prompt": "Name the router path for shadow mode. Must contain shadow. Query vq-043.", "phase": "discover", "hint_bin": "standard", "needs_tools": false, "expected": "shadow"}
+{"prompt": "Write a yaml snippet: effort44: threshold: 0.4. Query vq-044.", "phase": "plan", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "Reply with the single word delta. Query vq-045.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false}
+{"prompt": "Reply with JSON only: {\"id\": 46}. Query vq-046.", "phase": "edit", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "What is 47+47? Reply with only the number 94. Query vq-047.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false, "expected": "94"}
+{"prompt": "Name the router path for shadow mode. Must contain shadow. Query vq-048.", "phase": "discover", "hint_bin": "standard", "needs_tools": true, "expected": "shadow"}
+{"prompt": "Write a yaml snippet: effort49: threshold: 0.9. Query vq-049.", "phase": "plan", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "Reply with the single word gamma. Query vq-050.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false}
+{"prompt": "Reply with JSON only: {\"id\": 51}. Query vq-051.", "phase": "edit", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "What is 52+52? Reply with only the number 104. Query vq-052.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false, "expected": "104"}
+{"prompt": "Name the router path for shadow mode. Must contain shadow. Query vq-053.", "phase": "discover", "hint_bin": "standard", "needs_tools": false, "expected": "shadow"}
+{"prompt": "Write a yaml snippet: effort54: threshold: 0.4. Query vq-054.", "phase": "plan", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "Reply with the single word beta. Query vq-055.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false}
+{"prompt": "Reply with JSON only: {\"id\": 56}. Query vq-056.", "phase": "edit", "hint_bin": "standard", "needs_tools": false}
+{"prompt": "What is 57+57? Reply with only the number 114. Query vq-057.", "phase": "edit", "hint_bin": "trivial", "needs_tools": false, "expected": "114"}
+{"prompt": "Name the router path for shadow mode. Must contain shadow. Query vq-058.", "phase": "discover", "hint_bin": "standard", "needs_tools": true, "expected": "shadow"}
+{"prompt": "Write a yaml snippet: effort59: threshold: 0.9. Query vq-059.", "phase": "plan", "hint_bin": "standard", "needs_tools": false}

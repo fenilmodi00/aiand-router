@@ -1,0 +1,10 @@
+{"instance_id": "synth_cmp__add", "label_type": "harness_proxy", "comparison_mode": "fixture_replay", "policies": {"rules": {"resolved": true}, "trained": {"resolved": true}}}
+{"instance_id": "synth_cmp__clamp", "label_type": "harness_proxy", "comparison_mode": "fixture_replay", "policies": {"rules": {"resolved": false}, "trained": {"resolved": true}}}
+{"instance_id": "synth_cmp__palindrome", "label_type": "harness_proxy", "comparison_mode": "fixture_replay", "policies": {"rules": {"resolved": false}, "trained": {"resolved": true}}}
+{"instance_id": "synth_cmp__fizz", "label_type": "harness_proxy", "comparison_mode": "fixture_replay", "policies": {"rules": {"resolved": false}, "trained": {"resolved": false}}}
+{"instance_id": "synth_cmp__median", "label_type": "harness_proxy", "comparison_mode": "fixture_replay", "policies": {"rules": {"resolved": true}, "trained": {"resolved": false}}}
+{"instance_id": "synth_cmp__unique", "label_type": "harness_proxy", "comparison_mode": "fixture_replay", "policies": {"rules": {"resolved": false}, "trained": {"resolved": true}}}
+{"instance_id": "synth_cmp__stack", "label_type": "harness_proxy", "comparison_mode": "fixture_replay", "policies": {"rules": {"resolved": true}, "trained": {"resolved": true}}}
+{"instance_id": "synth_cmp__gcd", "label_type": "harness_proxy", "comparison_mode": "fixture_replay", "policies": {"rules": {"resolved": false}, "trained": {"resolved": true}}}
+{"instance_id": "synth_cmp__anagram", "label_type": "harness_proxy", "comparison_mode": "fixture_replay", "policies": {"rules": {"resolved": false}, "trained": {"resolved": false}}}
+{"instance_id": "synth_cmp__normalize", "label_type": "harness_proxy", "comparison_mode": "fixture_replay", "policies": {"rules": {"resolved": false}, "trained": {"resolved": true}}}

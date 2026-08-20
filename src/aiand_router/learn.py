@@ -11,8 +11,9 @@ from .cache import RequestCache, request_cache_key
 from .eval import load_tasks
 from .router import (
     Decision,
+    EligibleSet,
     Model,
-    eligible_models,
+    build_eligible_set,
     estimate_cost,
     fallback_decision,
     load_config,
@@ -21,6 +22,27 @@ from .router import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def learned_select_from_eligible(
+    cfg: dict[str, Any],
+    eligible_set: EligibleSet,
+    *,
+    phase: str,
+    catalog: list[Model],
+) -> Decision:
+    eligible = list(eligible_set.models)
+    if not eligible:
+        return fallback_decision(cfg, catalog, phase, eligible_set.threshold, learned=True)
+    eligible.sort(key=lambda m: (-m.quality, m.unit_cost))
+    chosen = eligible[0]
+    return Decision(
+        model=chosen,
+        phase=phase,
+        threshold=eligible_set.threshold,
+        reason=f"learned (untrained) picked {chosen.id} aa={chosen.quality:g} bar={eligible_set.threshold}",
+        candidates=[m.id for m in eligible],
+    )
 
 
 def learned_select(
@@ -39,8 +61,7 @@ def learned_select(
     max_tokens: int | None = None,
     latency_limit_ms: float | None = None,
 ) -> Decision:
-    # ponytail: untrained stub — highest AA among eligible; no embeddings.
-    threshold, eligible = eligible_models(
+    eligible_set = build_eligible_set(
         cfg,
         models,
         phase=phase,
@@ -55,17 +76,7 @@ def learned_select(
         max_tokens=max_tokens,
         latency_limit_ms=latency_limit_ms,
     )
-    if not eligible:
-        return fallback_decision(cfg, models, phase, threshold, learned=True)
-    eligible.sort(key=lambda m: (-m.quality, m.unit_cost))
-    chosen = eligible[0]
-    return Decision(
-        model=chosen,
-        phase=phase,
-        threshold=threshold,
-        reason=f"learned (untrained) picked {chosen.id} aa={chosen.quality:g} bar={threshold}",
-        candidates=[m.id for m in eligible],
-    )
+    return learned_select_from_eligible(cfg, eligible_set, phase=phase, catalog=models)
 
 
 def compare_on_cache(

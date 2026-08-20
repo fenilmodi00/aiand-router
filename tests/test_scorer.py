@@ -4,14 +4,18 @@ from aiand_router.scorer import BINS, FAMILIES, featurize
 
 
 def test_featurize_dim_and_hint_bin_one_hot():
-    x = featurize("edit", True, 600, "hard")
-    # bias + needs_tools + log1p + 4 token bins + 4 hint bins + len(FAMILIES)
-    assert len(x) == 3 + 4 + len(BINS) + len(FAMILIES)
+    x = featurize("edit", True, 600, "hard", text="Reply with JSON only: {\"id\": 1}")
+    # bias + needs_tools + log1p + 4 token bins + 4 hint bins + text_features
+    from aiand_router.scorer import text_features
+
+    assert len(x) == 3 + 4 + len(BINS) + len(text_features(""))
     assert x[0] == 1.0
     assert x[1] == 1.0
     hint_start = 3 + 4
     assert x[hint_start + list(BINS).index("hard")] == 1.0
     assert sum(x[hint_start : hint_start + len(BINS)]) == 1.0
+    # phase one-hots are not in the P(success) vector
+    assert len(x) == hint_start + len(BINS) + len(text_features(""))
 
 
 def test_featurize_observable_omits_hint_bin():
@@ -19,6 +23,26 @@ def test_featurize_observable_omits_hint_bin():
 
     x = featurize_observable("edit", True, 600)
     assert len(x) == 3 + 4 + len(FAMILIES)
+
+
+def test_text_features_vary_within_short_prompts():
+    from aiand_router.scorer import text_features
+
+    a = text_features("Reply with the single word alpha.")
+    b = text_features("Files: reverse.py: def reverse(s): return s")
+    assert a != b
+    assert a[2] == 1.0  # reply with
+    assert b[0] == 1.0  # code cue
+
+
+def _full_dim() -> int:
+    from aiand_router.scorer import text_features
+
+    return 3 + 4 + len(BINS) + len(text_features(""))
+
+
+def _obs_dim() -> int:
+    return 3 + 4 + len(FAMILIES)
 
 
 def test_predict_complexity_bin_and_intercepts():
@@ -55,14 +79,6 @@ def test_featurize_unknown_hint_defaults_standard():
     assert x[hint_start + list(BINS).index("standard")] == 1.0
 
 
-def _full_dim() -> int:
-    return 3 + 4 + len(BINS) + len(FAMILIES)
-
-
-def _obs_dim() -> int:
-    return 3 + 4 + len(FAMILIES)
-
-
 def _zeros(n: int) -> list[float]:
     return [0.0] * n
 
@@ -88,6 +104,24 @@ def test_intercepts_change_p_success():
     )
     _, missing = score_eligible(base, ["m/a"], phase="plan", needs_tools=False, tokens=100)
     assert high["m/a"] > missing["m/a"] > low["m/a"]
+
+
+def test_score_eligible_omits_ids_with_silver_weights_but_no_gold_intercept():
+    """Ids without success gold get no live calibrated P(success) from silver alone."""
+    from aiand_router.scorer import score_eligible
+
+    zeros = _zeros(_full_dim())
+    artifact = {
+        "weights": {"m/gold": zeros, "m/silver": zeros},
+        "intercepts": {"m/gold": 0.5},
+        "p_success": {"m/gold": 0.8},
+        "platt": {"a": 1.0, "b": 0.0},
+    }
+    _, ps = score_eligible(
+        artifact, ["m/gold", "m/silver"], phase="plan", needs_tools=False, tokens=100
+    )
+    assert "m/gold" in ps
+    assert "m/silver" not in ps
 
 
 def test_score_eligible_uses_predicted_bin_when_hint_bin_is_none():
@@ -251,3 +285,26 @@ def test_load_scorer_corrupt_is_none_and_scorer_down_does_not_invent_p(tmp_path)
     assert out.complexity_bin is None
     assert "scorer_down" in (out.reason_codes or [])
     assert out.p_success is None
+
+
+def test_score_eligible_uses_gbdt_when_present():
+    """GBDT artifact scores from trees + Platt, not the logistic weights path."""
+    from aiand_router.scorer import score_eligible
+
+    zeros = _zeros(_full_dim())
+    artifact = {
+        "not_spec_floors": True,
+        "weights": {"m/a": zeros},
+        "intercepts": {"m/a": 0.0},
+        "gbdt": {
+            "m/a": {
+                "intercept": 0.0,
+                "trees": [{"feature": 1, "threshold": 0.5, "left": -2.0, "right": 2.0}],
+            }
+        },
+        "platt": {"a": 1.0, "b": 0.0},
+    }
+    _, no_tools = score_eligible(artifact, ["m/a"], phase="plan", needs_tools=False, tokens=100)
+    _, with_tools = score_eligible(artifact, ["m/a"], phase="plan", needs_tools=True, tokens=100)
+    assert no_tools["m/a"] < 0.5 < with_tools["m/a"]
+    assert artifact["not_spec_floors"] is True

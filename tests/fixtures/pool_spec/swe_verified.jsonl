@@ -1,0 +1,2 @@
+{"instance_id": "django__django-11099", "problem_statement": "Fix the ORM query optimization bug in django."}
+{"instance_id": "astropy__astropy-12907", "problem_statement": "Fix the coordinates transform regression in astropy."}

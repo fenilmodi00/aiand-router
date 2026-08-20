@@ -120,6 +120,24 @@ def test_shadow_serves_rules_pick_and_records_trained_would(tmp_path):
     assert row["trained_selected"] == PRO
 
 
+def test_shadow_gateway_hop_path_header_serves_trained_counterfactual(tmp_path):
+    yaml_path = _tiny_catalog(tmp_path)
+    scorer = _write_scorer(tmp_path, {"cheap/ok": 0.85, "mid/ok": 0.90, "dear/ok": 0.91})
+    client, provider = _client(
+        tmp_path, trained_path="shadow", scorer_path=scorer, config_path=yaml_path
+    )
+    response = client.post(
+        "/v1/chat/completions",
+        json=CHAT,
+        headers={**AUTH, "x-agent-phase": "summarize", "x-router-hop-path": "trained"},
+    )
+    assert response.status_code == 200
+    assert provider.calls[0]["model"] == "cheap/ok"
+    assert response.headers["x-router-path"] == "trained"
+    row = _last_row(tmp_path)
+    assert row["path"] == "trained"
+
+
 def test_invalid_trained_path_is_shadow(tmp_path):
     scorer = _write_scorer(tmp_path, {PRO: 0.95, FLASH: 0.40})
     client, provider = _client(tmp_path, trained_path="nope", scorer_path=scorer)
@@ -548,3 +566,96 @@ def test_fitted_artifact_serves_trained_and_corrupt_is_scorer_down(tmp_path):
     )
     assert response.headers["x-router-path"] == "rules"
     assert "scorer_down" in (response.headers.get("x-router-reason-codes") or "")
+
+
+def test_shadow_loads_rec_a_and_predicts_bin_without_hint_bin(tmp_path):
+    """Fitted Rec A artifact loads on shadow; complexity bin from request features, not hint_bin."""
+    from aiand_router.scorer import BINS, FAMILIES
+
+    yaml_path = _tiny_catalog(tmp_path)
+    obs = 3 + 4 + len(FAMILIES)
+    full = obs + len(BINS)
+    zeros = [0.0] * full
+    obs_z = [0.0] * obs
+    fam_summarize = 3 + 4 + list(FAMILIES).index("summarize")
+    frontier = list(obs_z)
+    frontier[fam_summarize] = 8.0
+    artifact = tmp_path / "scorer.json"
+    artifact.write_text(
+        json.dumps(
+            {
+                "not_spec_floors": True,
+                "complexity_bin": "trivial",
+                "weights": {"cheap/ok": zeros, "mid/ok": zeros, "dear/ok": zeros},
+                "intercepts": {"cheap/ok": -1.0, "mid/ok": 0.5, "dear/ok": 1.5},
+                "p_success": {"cheap/ok": 0.3, "mid/ok": 0.6, "dear/ok": 0.9},
+                "bin_weights": {
+                    "trivial": obs_z,
+                    "standard": obs_z,
+                    "hard": obs_z,
+                    "frontier": frontier,
+                },
+                "platt": {"a": 1.0, "b": 0.0},
+            }
+        ),
+        encoding="utf-8",
+    )
+    client, provider = _client(tmp_path, scorer_path=artifact, config_path=yaml_path)
+    response = client.post(
+        "/v1/chat/completions",
+        json=CHAT,
+        headers={**AUTH, "x-agent-phase": "summarize"},
+    )
+    assert response.status_code == 200
+    assert response.headers["x-router-path"] == "shadow"
+    assert provider.calls[0]["model"] == "cheap/ok"
+    assert response.headers["x-router-complexity-bin"] == "frontier"
+    assert "x-router-trained-would" in response.headers
+    row = _last_row(tmp_path)
+    assert row["path"] == "shadow"
+    assert row["complexity_bin"] == "frontier"
+
+
+def test_shadow_loads_gbdt_and_does_not_auto_flip(tmp_path):
+    """GBDT Rec A still serves rules under default shadow; JSONL/headers show path. No Verified stamp."""
+    from aiand_router.scorer import BINS, FAMILIES
+
+    yaml_path = _tiny_catalog(tmp_path)
+    obs = 3 + 4 + len(FAMILIES)
+    obs_z = [0.0] * obs
+    artifact = tmp_path / "scorer.json"
+    artifact.write_text(
+        json.dumps(
+            {
+                "not_spec_floors": True,
+                "complexity_bin": "standard",
+                "gbdt": {
+                    "cheap/ok": {"intercept": -1.0, "trees": []},
+                    "mid/ok": {"intercept": 0.5, "trees": []},
+                    "dear/ok": {"intercept": 1.5, "trees": []},
+                },
+                "intercepts": {"cheap/ok": -1.0, "mid/ok": 0.5, "dear/ok": 1.5},
+                "p_success": {"cheap/ok": 0.3, "mid/ok": 0.6, "dear/ok": 0.9},
+                "bin_weights": {
+                    "trivial": obs_z,
+                    "standard": obs_z,
+                    "hard": obs_z,
+                    "frontier": obs_z,
+                },
+                "platt": {"a": 1.0, "b": 0.0},
+            }
+        ),
+        encoding="utf-8",
+    )
+    client, provider = _client(tmp_path, scorer_path=artifact, config_path=yaml_path)
+    response = client.post("/v1/chat/completions", json=CHAT, headers=AUTH)
+    assert response.status_code == 200
+    assert response.headers["x-router-path"] == "shadow"
+    assert provider.calls[0]["model"] == "cheap/ok"
+    # GBDT intercepts: cheap 0.27 / mid 0.62 / dear 0.82 → cheapest-above-bar is mid.
+    # Table-only p_success would pick dear. Live hop stays rules (cheap).
+    assert response.headers["x-router-trained-would"] == "mid/ok"
+    row = _last_row(tmp_path)
+    assert row["path"] == "shadow"
+    data = json.loads(artifact.read_text(encoding="utf-8"))
+    assert data["not_spec_floors"] is True

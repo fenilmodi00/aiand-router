@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Round 1 — 3-minute demo script</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+  <style>
+    .beat { border-left: 3px solid var(--accent); padding-left: 1rem; margin: 1.25rem 0; }
+    .beat time { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); }
+    .beat h3 { margin: 0.15rem 0 0.35rem; font-size: 1rem; }
+    .script { background: var(--card); border: 1px solid var(--rule); padding: 0.85rem 1rem; margin: 0.5rem 0; font-size: 0.95rem; }
+    .screen { font-family: var(--mono); font-size: 0.82rem; color: var(--accent); margin-bottom: 0.35rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin: 1rem 0; }
+    th, td { border: 1px solid var(--rule); padding: 0.45rem 0.6rem; text-align: left; vertical-align: top; }
+    th { background: #eee8df; }
+  </style>
+</head>
+<body>
+  <article class="page">
+    <nav class="crumbs">
+      <a href="../MISSION.md">Mission</a> ·
+      <a href="../reference/round-one-demo-flow.html">Demo flow card</a> ·
+      <a href="0001-go-live-ladder.html">Go-live ladder</a>
+    </nav>
+
+    <header>
+      <h1>Round 1 video script (~3 minutes)</h1>
+      <p class="lede">A word-for-word script plus screen flow for showcasing <strong>aiand/auto</strong> — the coding router, landing page, and operator dashboard you built.</p>
+    </header>
+
+    <div class="callout">
+      <strong>Before you record.</strong> Start both servers: gateway on <code>:8000</code>, Next.js on <code>:3000</code>. Have at least a few routed requests in the log so the dashboard shows real numbers. Practice once with this script open on a second monitor.
+    </div>
+
+    <h2>One-line pitch (memorize this)</h2>
+    <p class="script">
+      “I built <strong>aiand/auto</strong> — an OpenAI-compatible router that picks the cheapest aiand model for each coding-agent step, with a landing page, live dashboard, and a trained-ML path ready to flip on.”
+    </p>
+
+    <h2>Screen flow at a glance</h2>
+    <table>
+      <thead><tr><th>When</th><th>URL / screen</th><th>What to show</th></tr></thead>
+      <tbody>
+        <tr><td>0:00–0:20</td><td>Face cam or title slide</td><td>Hook + problem</td></tr>
+        <tr><td>0:20–0:50</td><td><code>http://127.0.0.1:3000/</code></td><td>Landing hero + 3 pillars</td></tr>
+        <tr><td>0:50–1:15</td><td>Scroll → #simulator</td><td>Click one agent phase; show winner + savings</td></tr>
+        <tr><td>1:15–2:00</td><td><code>/routers/auto</code></td><td>Stats, candidate mix, recent inferences</td></tr>
+        <tr><td>2:00–2:25</td><td><code>/playground</code></td><td>One live <code>router/auto</code> message</td></tr>
+        <tr><td>2:25–2:50</td><td>Dashboard or architecture section</td><td>What’s built + future scope</td></tr>
+        <tr><td>2:50–3:00</td><td>Face cam or landing CTA</td><td>Close + Round 2 tease</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Full script (≈430 words · ~2:50 at conversational pace)</h2>
+
+    <div class="beat">
+      <time>0:00 – 0:20 · HOOK</time>
+      <div class="screen">Title slide or face cam</div>
+      <h3>Opening</h3>
+      <div class="script">
+        “Hi — I’m [name]. For Round One I built <strong>aiand/auto</strong>: a smart inference router for coding agents.
+        The problem is simple — when an agent runs discover, plan, edit, and debug steps, one premium model for everything burns budget. But going cheap everywhere breaks hard tasks.
+        My router sits in the middle: one endpoint, <code>model: router/auto</code>, and it picks the right aiand model per step.”
+      </div>
+    </div>
+
+    <div class="beat">
+      <time>0:20 – 0:50 · LANDING PAGE</time>
+      <div class="screen">http://127.0.0.1:3000/</div>
+      <h3>Marketing site</h3>
+      <div class="script">
+        “This is the product landing page — Pioneer-inspired, built in Next.js.
+        The hero shows live routing previews: for a trivial discover step, Flash wins at a fraction of frontier cost.
+        Scroll to the three pillars — score every request, clear a confidence bar, one universal endpoint compatible with OpenCode, Cursor, and any OpenAI client.”
+      </div>
+    </div>
+
+    <div class="beat">
+      <time>0:50 – 1:15 · SIMULATOR</time>
+      <div class="screen">Landing → #simulator</div>
+      <h3>Interactive demo</h3>
+      <div class="script">
+        “Here’s the interactive simulator. I pick an agent phase — say, edit — set effort to medium, and run it.
+        You see candidates scored, the quality bar applied, and the cheapest eligible model selected.
+        That’s the same Pioneer formula running in the backend: success, capability, tools, latency, health, minus cost.”
+      </div>
+    </div>
+
+    <div class="beat">
+      <time>1:15 – 2:00 · DASHBOARD</time>
+      <div class="screen">http://127.0.0.1:3000/routers/auto</div>
+      <h3>Operator console</h3>
+      <div class="script">
+        “Behind the marketing site is the operator dashboard.
+        This is where you actually run the router — savings versus baseline, request count, candidate mix across DeepSeek Flash, Kimi, GLM, and the rest.
+        Every hop is logged: phase, chosen model, Pioneer score, and cost. You can filter inferences, copy the integration snippet, and jump to the playground.
+        The API key never hits the browser — Next.js talks to the FastAPI gateway, which holds the aiand key.”
+      </div>
+    </div>
+
+    <div class="beat">
+      <time>2:00 – 2:25 · PLAYGROUND</time>
+      <div class="screen">http://127.0.0.1:3000/playground</div>
+      <h3>Live request</h3>
+      <div class="script">
+        “Let me send one live request. Model is <code>router/auto</code> — same wire format as OpenAI chat completions.
+        The response keeps <code>router/auto</code> in the body; the real model is in the <code>X-Router-Model</code> header and the request log.
+        Streaming, tool calls, JSON mode — all pass through unchanged.”
+      </div>
+    </div>
+
+    <div class="beat">
+      <time>2:25 – 2:50 · IMPLEMENTATION + FUTURE</time>
+      <div class="screen">Dashboard routing pipeline or landing #architecture</div>
+      <h3>What’s built &amp; what’s next</h3>
+      <div class="script">
+        “What’s implemented today: a production-shaped FastAPI gateway with rules-based routing, shadow mode for the ML scorer, a training pipeline — teacher, gold, fit — and two thousand training queries ready.
+        The frontend is the full stack — landing, dashboard, playground, usage, and keys.
+        Round Two is flipping the trained path live once the scorer artifact is fit, running shadow comparisons, and hitting production promotion gates on SWE-bench Verified.
+        The rules path stays as fallback — we never ship a black box.”
+      </div>
+    </div>
+
+    <div class="beat">
+      <time>2:50 – 3:00 · CLOSE</time>
+      <div class="screen">Face cam or landing footer CTA</div>
+      <h3>Sign-off</h3>
+      <div class="script">
+        “That’s aiand/auto — cheaper agentic coding without giving up quality. Thanks — happy to go deeper in Round Two.”
+      </div>
+    </div>
+
+    <h2>What to emphasize (judges care about these)</h2>
+    <ul>
+      <li><strong>Real product, not a slide deck</strong> — you have a working gateway + UI, not just a concept.</li>
+      <li><strong>Drop-in compatibility</strong> — <code>/v1/chat/completions</code>, no new protocol.</li>
+      <li><strong>Observable routing</strong> — headers, JSONL log, dashboard inferences table.</li>
+      <li><strong>Cost intelligence</strong> — phase-aware picks, effort tiers, savings vs baseline.</li>
+      <li><strong>ML path is architected</strong> — shadow → trained flip, scorer fallback to rules.</li>
+    </ul>
+
+    <h2>What NOT to oversell (stay honest)</h2>
+    <ul>
+      <li>Trained routing is <em>implemented</em> but not yet the live pick — default is <code>shadow</code> (rules serve, ML records what it would have chosen).</li>
+      <li>Benchmark numbers on the landing page are illustrative / Pioneer-shaped — cite measured eval when you have cache data.</li>
+      <li>Don’t invent savings percentages — point at the dashboard’s logged numbers.</li>
+    </ul>
+
+    <h2>Recording checklist</h2>
+    <ol>
+      <li>Gateway running: <code>uvicorn aiand_router.app:app --app-dir src --host 127.0.0.1 --port 8000</code></li>
+      <li>Web running: <code>cd web &amp;&amp; npm run dev</code></li>
+      <li>Pre-seed 3–5 playground requests so dashboard isn’t empty</li>
+      <li>1080p, zoom browser to 110% so text is readable</li>
+      <li>Hide bookmarks bar; close unrelated tabs</li>
+      <li>Record system audio off unless you want typing sounds</li>
+    </ol>
+
+    <h2>Primary source</h2>
+    <p>Product README: <a href="https://github.com/">repo README.md</a> — routing table, headers, and trained-path docs.</p>
+
+    <footer class="callout ok">
+      <strong>Stuck on a beat?</strong> Ask your agent — it knows this codebase and can rehearse Q&amp;A for Round Two with you.
+    </footer>
+  </article>
+</body>
+</html>

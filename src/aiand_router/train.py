@@ -5,10 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import math
 import os
-import re
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -17,15 +14,25 @@ import httpx
 
 from .cache import RequestCache, request_cache_key
 from .provider import HttpAiandProvider
+from .pool import run_pool, sample_stratum
 from .router import (
     SpendLog,
+    eligible_models,
     estimate_cost,
     estimate_tokens,
     load_config,
     load_models,
     Model,
+    select_model,
 )
-from .scorer import BINS, featurize, featurize_observable
+from .scorer import (
+    BINS,
+    load_scorer,
+    pick_cheapest_above_bar,
+    score_eligible,
+)
+from .fit import GEOMETRY_OVERRIDE_ENV, _geometry_gate, _jsonl_rows, fit_scorer
+from .gold_label import _gold_label
 
 _TEACHER_SYS = (
     "Label this coding-agent request for a model router. Do not solve the task. "
@@ -60,11 +67,12 @@ MIN_REASONING_EFFORT = {
     ESCALATE_TEACHER: "none",
     CHEAP_TEACHER: "low",
     "openai/gpt-oss-120b": "low",
+    # high = catalog min; pair with GOLD_REASONING_MAX_TOKENS so content can finish after reasoning.
     "moonshotai/kimi-k2.7-code": "high",
     K3: "low",
 }
-GOLD_MAX_TOKENS = 512
-GOLD_REASONING_MAX_TOKENS = 1024
+GOLD_MAX_TOKENS = 1024
+GOLD_REASONING_MAX_TOKENS = 4096
 
 _SCHEMA = {
     "type": "json_schema",
@@ -94,15 +102,33 @@ def _refuse() -> int:
     return 2
 
 
-def _read_queries(path: Path, limit: int) -> list[dict[str, Any]]:
+def _read_queries(
+    path: Path,
+    limit: int,
+    exclude: set[str] | None = None,
+    exclude_ids: set[str] | None = None,
+    seed: int = 0,
+) -> list[dict[str, Any]]:
     rows = []
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         rows.append(json.loads(line))
-        if len(rows) >= limit:
-            break
-    return rows
+    if exclude or exclude_ids:
+        blocked_p = exclude or set()
+        blocked_i = {x.lower() for x in (exclude_ids or set()) if x}
+        filtered = []
+        for q in rows:
+            if _prompt_of(_messages(q)) in blocked_p:
+                continue
+            iid = str(q.get("instance_id") or "").lower()
+            if iid and iid in blocked_i:
+                continue
+            filtered.append(q)
+        rows = filtered
+    if limit >= len(rows):
+        return rows
+    return sample_stratum(rows, limit, seed=seed)
 
 
 def _messages(row: dict[str, Any]) -> list[dict[str, Any]]:
@@ -324,7 +350,24 @@ async def run_teacher(
 SPARSE_ANCHORS = (FLASH, *MEASURED_TRIO)
 
 
-def _gold_body(model_id: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
+def _gold_ids(q: dict[str, Any], models_by_id: dict[str, Model], *, dense: bool) -> list[str]:
+    ids = list(SPARSE_ANCHORS)
+    if dense:
+        ids = [i for i in models_by_id if i != K3 and models_by_id[i].enabled]
+    out = []
+    for model_id in ids:
+        m = models_by_id.get(model_id)
+        if m is None or not m.enabled or model_id == K3:
+            continue
+        if q.get("needs_tools") and not m.supports_tools:
+            continue
+        out.append(model_id)
+    return out
+
+
+def _gold_body(
+    model_id: str, messages: list[dict[str, Any]], *, needs_tools: bool = False
+) -> dict[str, Any]:
     effort = MIN_REASONING_EFFORT.get(model_id)
     max_tokens = GOLD_REASONING_MAX_TOKENS if effort and effort != "none" else GOLD_MAX_TOKENS
     body: dict[str, Any] = {
@@ -335,125 +378,11 @@ def _gold_body(model_id: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
     }
     if effort:
         body["reasoning_effort"] = effort
+    if needs_tools:
+        body["tools"] = [{"type": "function", "function": {"name": "read", "parameters": {}}}]
     return body
 
 
-def _strip_fences(text: str) -> str:
-    t = text.strip()
-    if "```" not in t:
-        return t
-    inner = t.split("```", 2)[1]
-    if inner.startswith(("json", "python", "yaml")):
-        inner = inner.split("\n", 1)[-1] if "\n" in inner else inner[3:]
-    return inner.strip()
-
-
-def _pytest_verify(text: str, meta: dict[str, Any]) -> bool | None:
-    if not meta.get("verify_pytest"):
-        return None
-    module = str(meta.get("module") or "fix.py")
-    tests = meta.get("tests")
-    if not tests or "```" not in text:
-        return False
-    inner = text.split("```", 2)[1]
-    if inner.startswith("python"):
-        inner = inner[len("python") :].lstrip("\n")
-    code = inner.strip()
-    if not code:
-        return False
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as td:
-        root = Path(td)
-        (root / module).write_text(code + "\n", encoding="utf-8")
-        test_name = f"test_{Path(module).stem}.py"
-        (root / test_name).write_text(str(tests).strip() + "\n", encoding="utf-8")
-        proc = subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", "--noconftest", "-o", f"testpaths={root}"],
-            cwd=root,
-            capture_output=True,
-            text=True,
-        )
-        return proc.returncode == 0
-
-
-def _gold_label(
-    message: dict[str, Any],
-    prompt: str,
-    choice: dict[str, Any],
-    *,
-    meta: dict[str, Any] | None = None,
-) -> tuple[bool, str]:
-    """Return (success, tier). verified > proxy > weak."""
-    meta = meta or {}
-    content = message.get("content")
-    text = content.strip() if isinstance(content, str) else ""
-    pytest_ok = _pytest_verify(text, meta)
-    if pytest_ok is not None:
-        return pytest_ok, "verified"
-    expected = meta.get("expected")
-    if expected is not None:
-        return str(expected) in text, "verified"
-    if message.get("tool_calls"):
-        return True, "proxy"
-    finish = str(choice.get("finish_reason") or "")
-    if finish == "length" and not text:
-        return False, "weak"
-    if not text:
-        return False, "weak"
-    pl = prompt.lower()
-    body = _strip_fences(text)
-    used_proxy = False
-    if any(k in pl for k in ("reply with json", "json_schema", "valid json", "json only")):
-        used_proxy = True
-        try:
-            json.loads(body)
-        except json.JSONDecodeError:
-            return False, "proxy"
-    elif "json object" in pl and ("return" in pl or "parse" in pl):
-        used_proxy = True
-        if "{" in body:
-            try:
-                json.loads(body[body.index("{") : body.rindex("}") + 1])
-            except (json.JSONDecodeError, ValueError):
-                return False, "proxy"
-    for pat in (
-        r"reply with the single word (\w+)",
-        r"reply with only (\w+)",
-        r"respond with only (\w+)",
-        r"single word (\w+)",
-    ):
-        m = re.search(pat, pl, re.I)
-        if m:
-            used_proxy = True
-            if body.lower().split()[0] != m.group(1).lower():
-                return False, "proxy"
-    m = re.search(r"(?:must contain|include the (?:string|substring)) [`'\"]?([^`'\".\n]+)", pl, re.I)
-    if m:
-        used_proxy = True
-        if m.group(1).lower() not in text.lower():
-            return False, "proxy"
-    m = re.search(r"typo ['\"](\w+)['\"] to ['\"](\w+)['\"]", pl, re.I)
-    if m:
-        used_proxy = True
-        wrong, right = m.group(1).lower(), m.group(2).lower()
-        if wrong in text.lower() or right not in text.lower():
-            return False, "proxy"
-    if "yaml snippet" in pl or "write a yaml" in pl:
-        used_proxy = True
-        if ":" not in body or body.lstrip().startswith("{"):
-            return False, "proxy"
-    return True, "proxy" if used_proxy else "weak"
-
-
-def _gold_success(
-    message: dict[str, Any],
-    prompt: str,
-    choice: dict[str, Any],
-    *,
-    meta: dict[str, Any] | None = None,
-) -> bool:
-    return _gold_label(message, prompt, choice, meta=meta)[0]
 
 
 async def run_gold(
@@ -466,15 +395,10 @@ async def run_gold(
     models_by_id: dict[str, Model],
     dense: bool = False,
 ) -> None:
-    ids = list(SPARSE_ANCHORS)
-    if dense:
-        ids = [i for i in models_by_id if i != K3 and models_by_id[i].enabled]
     jobs: list[tuple[list[dict[str, Any]], str, dict[str, Any]]] = []
     for q in queries:
         messages = _messages(q)
-        for model_id in ids:
-            if model_id not in models_by_id or model_id == K3:
-                continue
+        for model_id in _gold_ids(q, models_by_id, dense=dense):
             jobs.append((messages, model_id, q))
     spend._async_lock = asyncio.Lock()
     sem = asyncio.Semaphore(_concurrency())
@@ -483,13 +407,13 @@ async def run_gold(
         messages: list[dict[str, Any]], model_id: str, q: dict[str, Any]
     ) -> dict[str, Any]:
         async with sem:
-            body = _gold_body(model_id, messages)
+            body = _gold_body(model_id, messages, needs_tools=bool(q.get("needs_tools")))
             result = await _complete(
                 provider, body, cache=cache, spend=spend, models_by_id=models_by_id
             )
             status = result.get("status", 200)
             if status == 429:
-                return {
+                row = {
                     "prompt": _prompt_of(messages),
                     "model_id": model_id,
                     "unobserved": True,
@@ -498,13 +422,18 @@ async def run_gold(
                     "phase": str(q.get("phase") or "plan"),
                     "hint_bin": str(q.get("hint_bin") or "standard"),
                 }
+                if dense:
+                    row["dense"] = True
+                if q.get("instance_id"):
+                    row["instance_id"] = q["instance_id"]
+                return row
             if status < 400 and result.get("json"):
                 cache.put(request_cache_key(body, model_id), result["json"])
             choice = ((result.get("json") or {}).get("choices") or [{}])[0]
             message = choice.get("message") or {}
             success, tier = _gold_label(message, _prompt_of(messages), choice, meta=q)
             success = status < 400 and success
-            return {
+            row = {
                 "prompt": _prompt_of(messages),
                 "model_id": model_id,
                 "success": success,
@@ -515,6 +444,11 @@ async def run_gold(
                 "phase": str(q.get("phase") or "plan"),
                 "hint_bin": str(q.get("hint_bin") or "standard"),
             }
+            if dense:
+                row["dense"] = True
+            if q.get("instance_id"):
+                row["instance_id"] = q["instance_id"]
+            return row
 
     rows: list[dict[str, Any]] = []
     for coro in asyncio.as_completed([one(*j) for j in jobs]):
@@ -531,183 +465,6 @@ def _prompt_of(messages: list[dict[str, Any]]) -> str:
     content = last.get("content")
     return content if isinstance(content, str) else str(content or "")
 
-
-def _row_x_observable(row: dict[str, Any]) -> list[float]:
-    messages = row.get("messages") or [{"role": "user", "content": row.get("prompt") or ""}]
-    tokens = int(row.get("tokens") or estimate_tokens(messages))
-    return featurize_observable(str(row.get("phase") or "plan"), bool(row.get("needs_tools")), tokens)
-
-
-def _row_x(row: dict[str, Any]) -> list[float]:
-    messages = row.get("messages") or [{"role": "user", "content": row.get("prompt") or ""}]
-    tokens = int(row.get("tokens") or estimate_tokens(messages))
-    hint = str(row.get("hint_bin") or row.get("complexity_bin") or "standard")
-    return featurize(str(row.get("phase") or "plan"), bool(row.get("needs_tools")), tokens, hint)
-
-
-def _logit(p: float) -> float:
-    p = max(1e-6, min(1.0 - 1e-6, p))
-    return math.log(p / (1.0 - p))
-
-
-def _fit_binary(xs: list[list[float]], ys: list[float], steps: int = 80, lr: float = 0.35) -> list[float]:
-    dim = len(xs[0])
-    w = [0.0] * dim
-    n = max(1, len(xs))
-    for _ in range(steps):
-        grad = [0.0] * dim
-        for x, y in zip(xs, ys):
-            z = sum(w[i] * x[i] for i in range(dim))
-            z = max(-30.0, min(30.0, z))
-            err = (1.0 / (1.0 + math.exp(-z))) - y
-            for i in range(dim):
-                grad[i] += err * x[i]
-        for i in range(dim):
-            w[i] -= lr * grad[i] / n
-    return w
-
-
-def _fit_binary_intercept(
-    xs: list[list[float]], ys: list[float], intercept: float, steps: int = 80, lr: float = 0.35
-) -> list[float]:
-    dim = len(xs[0])
-    w = [0.0] * dim
-    n = max(1, len(xs))
-    for _ in range(steps):
-        grad = [0.0] * dim
-        for x, y in zip(xs, ys):
-            z = intercept + sum(w[i] * x[i] for i in range(dim))
-            z = max(-30.0, min(30.0, z))
-            err = (1.0 / (1.0 + math.exp(-z))) - y
-            for i in range(1, dim):
-                grad[i] += err * x[i]
-        for i in range(1, dim):
-            w[i] -= lr * grad[i] / n
-    return w
-
-
-def _fit_platt(zs: list[float], ys: list[float]) -> tuple[float, float]:
-    if len(zs) < 2:
-        return 1.0, 0.0
-    a, b = 1.0, 0.0
-    n = len(zs)
-    for _ in range(60):
-        ga = gb = 0.0
-        for z, y in zip(zs, ys):
-            p = 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, a * z + b))))
-            err = p - y
-            ga += err * z
-            gb += err
-        a -= 0.2 * ga / n
-        b -= 0.2 * gb / n
-    return a, b
-
-
-CAL_FRAC = 0.2
-
-
-def _split_cal_prompts(prompts: list[str], frac: float = CAL_FRAC) -> tuple[set[str], set[str]]:
-    """Hold out a sorted tail of unique prompts as the gold cal slice."""
-    uniq = sorted({p for p in prompts if p})
-    if len(uniq) < 2:
-        return set(uniq), set()
-    n_cal = max(1, int(round(len(uniq) * frac)))
-    cal = set(uniq[-n_cal:])
-    return set(uniq) - cal, cal
-
-
-def fit_scorer(gold_path: Path, silver_path: Path | None, out: Path) -> None:
-    gold = [
-        json.loads(line)
-        for line in gold_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    silver = []
-    if silver_path and silver_path.exists():
-        silver = [
-            json.loads(line)
-            for line in silver_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-    observed = [r for r in gold if not r.get("unobserved") and "model_id" in r]
-    gold_cells = {(str(r.get("prompt")), r["model_id"]) for r in observed}
-    gold_ids = {mid for _, mid in gold_cells}
-    train_prompts, cal_prompts = _split_cal_prompts([str(r.get("prompt") or "") for r in observed])
-    train_gold = [r for r in observed if str(r.get("prompt") or "") in train_prompts]
-    cal_gold = [r for r in observed if str(r.get("prompt") or "") in cal_prompts]
-    by_model_x: dict[str, list[list[float]]] = {mid: [] for mid in gold_ids}
-    by_model_y: dict[str, list[float]] = {mid: [] for mid in gold_ids}
-    train_counts: dict[str, int] = {mid: 0 for mid in gold_ids}
-    for row in train_gold:
-        mid = row["model_id"]
-        by_model_x[mid].append(_row_x(row))
-        by_model_y[mid].append(1.0 if row.get("success") else 0.0)
-        train_counts[mid] += 1
-    for row in silver:
-        if row.get("unlabeled"):
-            continue
-        x = _row_x(row)
-        prompt = str(row.get("prompt") or "")
-        for mid, p in (row.get("p_success") or {}).items():
-            if mid not in gold_ids:
-                continue
-            if (prompt, mid) in gold_cells:
-                continue
-            by_model_x[mid].append(x)
-            by_model_y[mid].append(float(p))
-    weights = {}
-    intercepts = {}
-    for mid, xs in by_model_x.items():
-        if not xs:
-            continue
-        n_train = train_counts[mid]
-        gold_ys = by_model_y[mid][:n_train]
-        rate = sum(gold_ys) / len(gold_ys) if gold_ys else 0.5
-        ic = _logit(rate)
-        intercepts[mid] = ic
-        weights[mid] = _fit_binary_intercept(xs, by_model_y[mid], ic)
-    zs_cal: list[float] = []
-    ys_cal: list[float] = []
-    for row in cal_gold:
-        mid = row["model_id"]
-        w = weights.get(mid)
-        if not w:
-            continue
-        ic = intercepts[mid]
-        x = _row_x(row)
-        zs_cal.append(ic + sum(w[i] * x[i] for i in range(len(w))))
-        ys_cal.append(1.0 if row.get("success") else 0.0)
-    a, b = _fit_platt(zs_cal, ys_cal)
-    bin_xs: list[list[float]] = []
-    bin_ys: dict[str, list[float]] = {bn: [] for bn in BINS}
-    for row in silver:
-        if row.get("unlabeled") or row.get("complexity_bin") not in BINS:
-            continue
-        x = _row_x_observable(row)
-        bin_xs.append(x)
-        for bn in BINS:
-            bin_ys[bn].append(1.0 if row["complexity_bin"] == bn else 0.0)
-    bin_weights = {bn: _fit_binary(bin_xs, bin_ys[bn]) for bn in BINS} if bin_xs else {}
-    p_success = {}
-    for mid in gold_ids:
-        gold_ys = [1.0 if r.get("success") else 0.0 for r in observed if r["model_id"] == mid]
-        if gold_ys:
-            p_success[mid] = sum(gold_ys) / len(gold_ys)
-    bins = [str(r.get("complexity_bin")) for r in silver if r.get("complexity_bin") in BINS]
-    bin_ = max(set(bins), key=bins.count) if bins else "standard"
-    artifact = {
-        "not_spec_floors": True,
-        "complexity_bin": bin_,
-        "p_success": p_success,
-        "weights": weights,
-        "intercepts": intercepts,
-        "bin_weights": bin_weights,
-        "platt": {"a": a, "b": b},
-        "n_gold": len(gold),
-        "n_cal": len(cal_gold),
-        "n_silver": len(silver),
-    }
-    out.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
 
 
 def _query_map(queries_path: Path) -> dict[str, dict[str, Any]]:
@@ -741,7 +498,7 @@ def relabel_gold(
             continue
         q = qmap.get(row["prompt"], {})
         messages = _messages(q) if q else [{"role": "user", "content": row["prompt"]}]
-        body = _gold_body(row["model_id"], messages)
+        body = _gold_body(row["model_id"], messages, needs_tools=bool(q.get("needs_tools")))
         hit = cache.get(request_cache_key(body, row["model_id"]))
         if not hit:
             continue
@@ -816,6 +573,207 @@ async def run_salvage_silver(
     print(f"salvage +{salvaged} labeled={labeled} spend={spend.total():.4f}", flush=True)
 
 
+def run_retune(
+    dense_path: Path,
+    scorer_path: Path | None = None,
+    models_path: Path | None = None,
+) -> str:
+    """Search (threshold, max_regret) on a held-out tune split.
+
+    Loads dense gold rows (n >= 300), runs a grid search over threshold
+    [0, 1] step 0.01 and max_regret [0, 0.2] step 0.01, and picks the
+    (t, r) that minimizes total list USD subject to:
+
+        resolve_rate   >= rules_resolve_rate   - 0.01
+        escalate_rate  >= rules_escalate_rate  - 0.01
+
+    where escalate_rate = 1 - resolve_rate (trained pick failed or declined).
+
+    Fits **medium only**; derives low/high/max via Pioneer offsets
+    dt(-0.05, +0.10) / (+0.10, -0.05) / (+0.50, -0.17), clamped to [0, 1],
+    then walked to restore t_low <= t_med <= t_high <= t_max and
+    r_low >= r_med >= r_high >= r_max.
+
+    Returns the ``trained_effort:`` YAML fragment, or ``"do-not-promote"``
+    if no (t, r) satisfies the constraints.
+    """
+    rows = _jsonl_rows(dense_path)
+    if len(rows) < 300:
+        raise ValueError(f"tune split has {len(rows)} rows; need >= 300")
+
+    root = Path(__file__).resolve().parents[2]
+    cfg = load_config(models_path or root / "config" / "models.yaml")
+    models = load_models(cfg)
+    by_id = {m.id: m for m in models}
+
+    scorer_file = scorer_path or Path(
+        os.getenv("SCORER_PATH") or str(root / "data" / "scorer.json")
+    )
+    artifact = load_scorer(scorer_file)
+    if artifact is None:
+        return "do-not-promote"
+
+    # Group rows by prompt -> per-query dense gold
+    queries: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        prompt = str(row.get("prompt") or "")
+        if not prompt:
+            continue
+        queries.setdefault(prompt, []).append(row)
+
+    if not queries:
+        return "do-not-promote"
+
+    # Pre-compute per-query data (score_eligible is independent of t, r)
+    per_query: list[dict[str, Any]] = []
+    for prompt, qrows in queries.items():
+        first = qrows[0]
+        phase = str(first.get("phase") or "plan")
+        needs_tools = bool(first.get("needs_tools"))
+        tokens = int(first.get("tokens") or 500)
+
+        gold: dict[str, bool] = {}
+        for r in qrows:
+            mid = r.get("model_id")
+            if mid and mid in by_id:
+                gold[mid] = bool(r.get("success"))
+
+        if not gold:
+            continue
+
+        _, eligible = eligible_models(
+            cfg,
+            models,
+            phase=phase,
+            needs_tools=needs_tools,
+            tokens=tokens,
+            effort="medium",
+            allowed=None,
+            spend_usd=0.0,
+            budget_usd=1e18,
+        )
+        eligible_ids = [m.id for m in eligible]
+
+        eligible_gold = {mid: gold[mid] for mid in eligible_ids if mid in gold}
+        if not eligible_gold:
+            continue
+
+        rules_decision = select_model(
+            cfg,
+            models,
+            phase=phase,
+            needs_tools=needs_tools,
+            tokens=tokens,
+            effort="medium",
+            allowed=None,
+            spend_usd=0.0,
+            budget_usd=1e18,
+        )
+        rules_model_id = rules_decision.model.id
+        rules_success = gold.get(rules_model_id, False)
+        rules_cost = estimate_cost(rules_decision.model, tokens, 800)
+
+        _, p_success = score_eligible(
+            artifact,
+            eligible_ids,
+            phase=phase,
+            needs_tools=needs_tools,
+            tokens=tokens,
+            text=prompt,
+        )
+        scored_eligible = [m for m in eligible if m.id in p_success]
+
+        per_query.append(
+            {
+                "eligible": scored_eligible,
+                "p_success": p_success,
+                "gold": eligible_gold,
+                "rules_success": rules_success,
+                "rules_cost": rules_cost,
+                "tokens": tokens,
+            }
+        )
+
+    if not per_query:
+        return "do-not-promote"
+
+    n_queries = len(per_query)
+
+    # Rules baseline
+    rules_resolve = sum(1 for q in per_query if q["rules_success"]) / n_queries
+    rules_escalate = 1.0 - rules_resolve
+
+    # Grid search: threshold [0, 1] step 0.01, max_regret [0, 0.2] step 0.01
+    best_cost = float("inf")
+    best_t: float | None = None
+    best_r: float | None = None
+
+    for t_i in range(101):
+        t = t_i / 100.0
+        for r_i in range(21):
+            r = r_i / 100.0
+            total_cost = 0.0
+            n_resolve = 0
+
+            for q in per_query:
+                chosen, _ = pick_cheapest_above_bar(
+                    q["eligible"],
+                    q["p_success"],
+                    threshold=t,
+                    max_regret=r,
+                )
+                if chosen is None:
+                    total_cost += q["rules_cost"]
+                else:
+                    total_cost += estimate_cost(chosen, q["tokens"], 800)
+                    if q["gold"].get(chosen.id, False):
+                        n_resolve += 1
+
+            resolve_rate = n_resolve / n_queries
+            escalate_rate = 1.0 - resolve_rate
+
+            if resolve_rate < rules_resolve - 0.01:
+                continue
+            if escalate_rate < rules_escalate - 0.01:
+                continue
+
+            if total_cost < best_cost:
+                best_cost = total_cost
+                best_t = t
+                best_r = r
+
+    if best_t is None:
+        return "do-not-promote"
+
+    # Pioneer offsets: derive low/high/max from medium
+    t_med, r_med = best_t, best_r
+    t_low = max(0.0, min(1.0, t_med - 0.05))
+    r_low = max(0.0, min(1.0, r_med + 0.10))
+    t_high = max(0.0, min(1.0, t_med + 0.10))
+    r_high = max(0.0, min(1.0, r_med - 0.05))
+    t_max = max(0.0, min(1.0, t_med + 0.50))
+    r_max = max(0.0, min(1.0, r_med - 0.17))
+
+    # Walk to restore ordering
+    t_low = min(t_low, t_med)
+    t_high = max(t_high, t_med)
+    t_max = max(t_max, t_high)
+    r_low = max(r_low, r_med)
+    r_high = min(r_high, r_med)
+    r_max = min(r_max, r_high)
+
+    lines = ["trained_effort:"]
+    for name, t_val, r_val in [
+        ("low", t_low, r_low),
+        ("medium", t_med, r_med),
+        ("high", t_high, r_high),
+        ("max", t_max, r_max),
+    ]:
+        lines.append(f"  {name}: {{threshold: {t_val:.2f}, max_regret: {r_val:.2f}}}")
+
+    return "\n".join(lines) + "\n"
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -824,10 +782,91 @@ def main(
     cache_dir: Path | None = None,
     models_path: Path | None = None,
 ) -> int:
-    if os.getenv(OPT_IN_ENV) != "1":
+    argv = list(argv) if argv is not None else sys.argv[1:]
+    is_offline = argv[:1] in (["pool"], ["retune"])
+    if not is_offline and os.getenv(OPT_IN_ENV) != "1":
         return _refuse()
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("pool")
+    p.add_argument(
+        "--smith",
+        help=(
+            "SWE-smith-trajectories tool-split JSONL (messages + tool_calls + "
+            "instance_id/traj_id). Not datasets/train-queries.jsonl. Export: "
+            "load_dataset('SWE-bench/SWE-smith-trajectories', split='tool')"
+            ".to_json('data/smith-tool.jsonl')"
+        ),
+    )
+    p.add_argument("--bfcl")
+    p.add_argument("--gym")
+    p.add_argument("--r2e")
+    p.add_argument(
+        "--tasks",
+        help=(
+            "SWE-smith tasks JSONL joined by instance_id. Copies FAIL_TO_PASS and "
+            "expected from reverting the bug patch. Not Verified/Lite/TB; dump "
+            "resolved is never y. Never invents json_schema."
+        ),
+    )
+    p.add_argument(
+        "--gym-tasks",
+        help=(
+            "SWE-Gym (or smith-shaped) *task* JSONL as primary pool source when "
+            "smith traj family is exhausted. Builds flashlight/issue rows via "
+            "gold-revert expected — no traj dump required. Unpaid ingest: "
+            "`python -m aiand_router.pool ingest --profile gym_alt`."
+        ),
+    )
+    p.add_argument("--eval", nargs="*", default=[])
+    p.add_argument("--out", required=True)
+    p.add_argument("--n", type=int, default=4000)
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument(
+        "--verified-like",
+        action="store_true",
+        help=(
+            "Prefer short + hard/frontier with copied expected/schema/tests; "
+            "refuse an empty hard-check mix (proxy-only tools cannot dominate). "
+            "Never invent json_schema from the word json. Not Verified eval"
+        ),
+    )
+    p.add_argument(
+        "--verified-like-max-tokens",
+        type=int,
+        default=450,
+        help="Max prompt tokens for verified-like flashlight/issue rows (mix length knob)",
+    )
+    p.add_argument(
+        "--prompt-family",
+        choices=("flashlight", "issue", "any"),
+        default="flashlight",
+        help=(
+            "Verified-like prompt family. Default flashlight keeps hunk-restore "
+            "plus dump-copied expected/schema/tests (family other). Pass issue|any "
+            "explicitly; issue-fix was H2 kill. Mix1 also needs --near-miss-lo/hi."
+        ),
+    )
+    p.add_argument("--min-expected-len", type=int, default=0)
+    p.add_argument("--max-expected-len", type=int, default=0)
+    p.add_argument(
+        "--near-miss-lo",
+        type=float,
+        default=0.0,
+        help="Min buggy↔expected line ratio (prefer small-fix flashlights when set)",
+    )
+    p.add_argument(
+        "--near-miss-hi",
+        type=float,
+        default=1.0,
+        help="Max buggy↔expected line ratio (exclude near-identical / too-easy)",
+    )
+    p.add_argument(
+        "--max-fail-to-pass",
+        type=int,
+        default=0,
+        help="Drop queries with more FAIL_TO_PASS tests than this (0 = no cap). Mix1 p90 is 4.",
+    )
     t = sub.add_parser("teacher")
     t.add_argument("--queries", required=True)
     t.add_argument("--out", required=True)
@@ -837,10 +876,82 @@ def main(
     g.add_argument("--out", required=True)
     g.add_argument("--limit", type=int, default=None)
     g.add_argument("--dense", action="store_true")
+    g.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        help="JSONL of already-labeled queries/gold (repeatable). Drops matching prompt or instance_id.",
+    )
+    g.add_argument("--seed", type=int, default=0, help="Stratum sample seed after --exclude")
     f = sub.add_parser("fit")
     f.add_argument("--gold", required=True)
+    f.add_argument("--cal")
     f.add_argument("--silver")
     f.add_argument("--out", required=True)
+    f.add_argument(
+        "--gbdt",
+        action="store_true",
+        help=(
+            "One stump GBDT after logistic fails transfer; length stumps collapse on short "
+            "prompts. Prefer logistic until Spearman(train, eval) > 0."
+        ),
+    )
+    f.add_argument(
+        "--bilinear",
+        action="store_true",
+        help=(
+            "EmbedLLM/IRT-lite head: shared query projection + frozen per-model factors. "
+            "Features-only at serve time; no live embed."
+        ),
+    )
+    f.add_argument(
+        "--bilinear-hash-dim",
+        type=int,
+        default=0,
+        help=(
+            "Append hashing-trick text latent of this dim to the live bilinear trunk "
+            "(features-only; not a neural embed). Ignored when --bilinear-distill-hash-dim>0."
+        ),
+    )
+    f.add_argument(
+        "--bilinear-distill-hash-dim",
+        type=int,
+        default=0,
+        help=(
+            "Offline distill: fit teacher bilinear on hash_dim trunk, ridge-map base "
+            "features → teacher query latent; serve with hash_dim=0 (no live hash)."
+        ),
+    )
+    f.add_argument(
+        "--bilinear-hash-seed",
+        type=int,
+        default=17,
+        help="Deterministic seed for hashing-trick buckets",
+    )
+    f.add_argument(
+        "--bilinear-distill-latent-dim",
+        type=int,
+        default=0,
+        help=(
+            "Teacher latent dim for offline distill (default min(32, teacher_feat_dim)). "
+            "Requires --bilinear-distill-hash-dim>0."
+        ),
+    )
+    f.add_argument(
+        "--bilinear-ridge-l2",
+        type=float,
+        default=0.05,
+        help="Ridge L2 for student←teacher query map (distill only).",
+    )
+    f.add_argument(
+        "--geometry-train",
+        help="Train/sparse gold JSONL for geometry gate (blocks fit when geometry_pass=false)",
+    )
+    f.add_argument("--geometry-cal", help="Optional dense/cal gold for geometry report")
+    f.add_argument(
+        "--geometry-eval",
+        help="Eval-only holdout gold for geometry gate (required with --geometry-train)",
+    )
     r = sub.add_parser("relabel")
     r.add_argument("--gold", required=True)
     r.add_argument("--queries", required=True)
@@ -848,7 +959,22 @@ def main(
     s = sub.add_parser("salvage")
     s.add_argument("--silver", required=True)
     s.add_argument("--queries", required=True)
+    rt = sub.add_parser("retune")
+    rt.add_argument("--dense", required=True)
+    rt.add_argument("--scorer")
+    rt.add_argument("--models")
     args = parser.parse_args(argv)
+    if args.cmd == "pool":
+        return run_pool(args)
+    if args.cmd == "retune":
+        root = Path(__file__).resolve().parents[2]
+        result = run_retune(
+            Path(args.dense),
+            scorer_path=Path(args.scorer) if args.scorer else None,
+            models_path=Path(args.models) if args.models else models_path,
+        )
+        print(result, end="")
+        return 0
 
     root = Path(__file__).resolve().parents[2]
     cfg = load_config(models_path or root / "config" / "models.yaml")
@@ -861,7 +987,71 @@ def main(
     upstream = provider or HttpAiandProvider(base, key)
 
     if args.cmd == "fit":
-        fit_scorer(Path(args.gold), Path(args.silver) if args.silver else None, Path(args.out))
+        geo_report: dict[str, Any] | None = None
+        if args.geometry_train or args.geometry_eval:
+            if not args.geometry_train or not args.geometry_eval:
+                print(
+                    "refusing: --geometry-train and --geometry-eval must be set together",
+                    file=sys.stderr,
+                )
+                return 2
+            blocked, geo_report = _geometry_gate(
+                Path(args.geometry_train),
+                Path(args.geometry_eval),
+                Path(args.geometry_cal) if args.geometry_cal else None,
+            )
+            if blocked:
+                print(
+                    json.dumps(
+                        {
+                            "geometry_pass": False,
+                            "kill": geo_report.get("kill"),
+                            "recommended_artifact": geo_report.get("recommended_artifact"),
+                        },
+                        indent=2,
+                    ),
+                    file=sys.stderr,
+                )
+                print(
+                    f"refusing fit: geometry_pass=false "
+                    f"(set {GEOMETRY_OVERRIDE_ENV}=1 to override)",
+                    file=sys.stderr,
+                )
+                return 2
+        if args.gbdt and args.bilinear:
+            print("refusing: choose at most one of --gbdt and --bilinear", file=sys.stderr)
+            return 2
+        if (args.bilinear_hash_dim or args.bilinear_distill_hash_dim) and not args.bilinear:
+            print(
+                "refusing: --bilinear-hash-dim / --bilinear-distill-hash-dim require --bilinear",
+                file=sys.stderr,
+            )
+            return 2
+        if int(args.bilinear_distill_latent_dim or 0) > 0 and not (
+            args.bilinear and int(args.bilinear_distill_hash_dim or 0) > 0
+        ):
+            print(
+                "refusing: --bilinear-distill-latent-dim requires --bilinear "
+                "and --bilinear-distill-hash-dim>0",
+                file=sys.stderr,
+            )
+            return 2
+        fit_scorer(
+            Path(args.gold),
+            Path(args.silver) if args.silver else None,
+            Path(args.out),
+            Path(args.cal) if args.cal else None,
+            gbdt=bool(args.gbdt),
+            bilinear=bool(args.bilinear),
+            geometry_report_out=geo_report,
+            bilinear_hash_dim=int(args.bilinear_hash_dim or 0),
+            bilinear_distill_hash_dim=int(args.bilinear_distill_hash_dim or 0),
+            bilinear_hash_seed=int(args.bilinear_hash_seed or 17),
+            bilinear_distill_latent_dim=int(args.bilinear_distill_latent_dim or 0),
+            bilinear_ridge_l2=float(args.bilinear_ridge_l2),
+        )
+        if geo_report:
+            print("recommended_artifact", geo_report.get("recommended_artifact"))
         return 0
     if args.cmd == "relabel":
         relabel_gold(
@@ -885,10 +1075,33 @@ def main(
         )
         return 0
     if args.cmd == "gold":
+        if args.dense and not args.exclude:
+            print("refusing: --dense requires --exclude so the cal slice stays disjoint", file=sys.stderr)
+            return 2
         limit = args.limit if args.limit is not None else (DENSE_LIMIT if args.dense else SPARSE_LIMIT)
     else:
         limit = args.limit
-    queries = _read_queries(Path(args.queries), limit)
+    blocked: set[str] = set()
+    blocked_ids: set[str] = set()
+    for ep in getattr(args, "exclude", None) or []:
+        for r in _jsonl_rows(Path(ep)):
+            prompt = str(r.get("prompt") or "")
+            if prompt:
+                blocked.add(prompt)
+            iid = str(r.get("instance_id") or "").lower()
+            if iid:
+                blocked_ids.add(iid)
+    gold_seed = int(getattr(args, "seed", 0) or 0) if args.cmd == "gold" else 0
+    queries = _read_queries(
+        Path(args.queries),
+        limit,
+        exclude=blocked or None,
+        exclude_ids=blocked_ids or None,
+        seed=gold_seed,
+    )
+    if args.cmd == "gold" and args.dense and not queries:
+        print("refusing: --dense --exclude left no queries to run", file=sys.stderr)
+        return 2
     if args.cmd == "teacher":
         asyncio.run(
             run_teacher(

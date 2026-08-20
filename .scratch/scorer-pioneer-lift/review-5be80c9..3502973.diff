@@ -1,0 +1,527 @@
+# Review package: 5be80c9e05a9f4fbf131b9fb52e2d589fa717e1b..3502973fe2efe1ca1a01f4cce1c498954477ebc7
+
+## Commits
+3502973 Fail tool-required gold without tool_calls so y is not nonempty text. ab06f39 Run sparse success gold so y is gateway-measurable, not dump resolved or nonempty text.
+
+## Files changed
+ src/aiand_router/train.py |  44 ++++++--  tests/test_train.py       | 263 +++++++++++++++++++++++++++++++++++++++++++++-  2 files changed, 295 insertions(+), 12 deletions(-)
+
+## Diff
+
+diff --git a/src/aiand_router/train.py b/src/aiand_router/train.py
+index 950e18b..fe200e1 100644
+--- a/src/aiand_router/train.py
++++ b/src/aiand_router/train.py
+@@ -318,31 +318,50 @@ async def run_teacher(
+         salvaged += 1
+     if salvaged:
+         labeled = sum(1 for r in rows if not r.get("unlabeled"))
+         print(f"teacher salvage +{salvaged} labeled={labeled} spend={spend.total():.4f}", flush=True)
+     out.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+ 
+ 
+ SPARSE_ANCHORS = (FLASH, *MEASURED_TRIO)
+ 
+ 
+-def _gold_body(model_id: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
++def _gold_ids(q: dict[str, Any], models_by_id: dict[str, Model], *, dense: bool) -> list[str]:
++    ids = list(SPARSE_ANCHORS)
++    if dense:
++        ids = [i for i in models_by_id if i != K3 and models_by_id[i].enabled]
++    out = []
++    for model_id in ids:
++        m = models_by_id.get(model_id)
++        if m is None or not m.enabled or model_id == K3:
++            continue
++        if q.get("needs_tools") and not m.supports_tools:
++            continue
++        out.append(model_id)
++    return out
++
++
++def _gold_body(
++    model_id: str, messages: list[dict[str, Any]], *, needs_tools: bool = False
++) -> dict[str, Any]:
+     effort = MIN_REASONING_EFFORT.get(model_id)
+     max_tokens = GOLD_REASONING_MAX_TOKENS if effort and effort != "none" else GOLD_MAX_TOKENS
+     body: dict[str, Any] = {
+         "model": model_id,
+         "messages": messages,
+         "max_tokens": max_tokens,
+         "temperature": 0,
+     }
+     if effort:
+         body["reasoning_effort"] = effort
++    if needs_tools:
++        body["tools"] = [{"type": "function", "function": {"name": "read", "parameters": {}}}]
+     return body
+ 
+ 
+ def _strip_fences(text: str) -> str:
+     t = text.strip()
+     if "```" not in t:
+         return t
+     inner = t.split("```", 2)[1]
+     if inner.startswith(("json", "python", "yaml")):
+         inner = inner.split("\n", 1)[-1] if "\n" in inner else inner[3:]
+@@ -388,22 +407,34 @@ def _gold_label(
+     """Return (success, tier). verified > proxy > weak."""
+     meta = meta or {}
+     content = message.get("content")
+     text = content.strip() if isinstance(content, str) else ""
+     pytest_ok = _pytest_verify(text, meta)
+     if pytest_ok is not None:
+         return pytest_ok, "verified"
+     expected = meta.get("expected")
+     if expected is not None:
+         return str(expected) in text, "verified"
++    schema = meta.get("json_schema") or meta.get("schema")
++    if schema is not None:
++        try:
++            obj = json.loads(_strip_fences(text) if text else "")
++        except json.JSONDecodeError:
++            return False, "verified"
++        req = schema.get("required") or [] if isinstance(schema, dict) else []
++        if req and (not isinstance(obj, dict) or any(k not in obj for k in req)):
++            return False, "verified"
++        return True, "verified"
+     if message.get("tool_calls"):
+         return True, "proxy"
++    if meta.get("needs_tools"):
++        return False, "proxy"
+     finish = str(choice.get("finish_reason") or "")
+     if finish == "length" and not text:
+         return False, "weak"
+     if not text:
+         return False, "weak"
+     pl = prompt.lower()
+     body = _strip_fences(text)
+     used_proxy = False
+     if any(k in pl for k in ("reply with json", "json_schema", "valid json", "json only")):
+         used_proxy = True
+@@ -460,38 +491,33 @@ def _gold_success(
+ async def run_gold(
+     queries: list[dict[str, Any]],
+     out: Path,
+     *,
+     provider: Any,
+     spend: SpendLog,
+     cache: RequestCache,
+     models_by_id: dict[str, Model],
+     dense: bool = False,
+ ) -> None:
+-    ids = list(SPARSE_ANCHORS)
+-    if dense:
+-        ids = [i for i in models_by_id if i != K3 and models_by_id[i].enabled]
+     jobs: list[tuple[list[dict[str, Any]], str, dict[str, Any]]] = []
+     for q in queries:
+         messages = _messages(q)
+-        for model_id in ids:
+-            if model_id not in models_by_id or model_id == K3:
+-                continue
++        for model_id in _gold_ids(q, models_by_id, dense=dense):
+             jobs.append((messages, model_id, q))
+     spend._async_lock = asyncio.Lock()
+     sem = asyncio.Semaphore(_concurrency())
+ 
+     async def one(
+         messages: list[dict[str, Any]], model_id: str, q: dict[str, Any]
+     ) -> dict[str, Any]:
+         async with sem:
+-            body = _gold_body(model_id, messages)
++            body = _gold_body(model_id, messages, needs_tools=bool(q.get("needs_tools")))
+             result = await _complete(
+                 provider, body, cache=cache, spend=spend, models_by_id=models_by_id
+             )
+             status = result.get("status", 200)
+             if status == 429:
+                 return {
+                     "prompt": _prompt_of(messages),
+                     "model_id": model_id,
+                     "unobserved": True,
+                     "tokens": estimate_tokens(messages),
+@@ -735,21 +761,21 @@ def relabel_gold(
+         json.loads(line)
+         for line in gold_path.read_text(encoding="utf-8").splitlines()
+         if line.strip()
+     ]
+     changed = 0
+     for row in rows:
+         if row.get("unobserved") or "model_id" not in row:
+             continue
+         q = qmap.get(row["prompt"], {})
+         messages = _messages(q) if q else [{"role": "user", "content": row["prompt"]}]
+-        body = _gold_body(row["model_id"], messages)
++        body = _gold_body(row["model_id"], messages, needs_tools=bool(q.get("needs_tools")))
+         hit = cache.get(request_cache_key(body, row["model_id"]))
+         if not hit:
+             continue
+         choice = (hit.get("choices") or [{}])[0]
+         message = choice.get("message") or {}
+         ok, tier = _gold_label(message, row["prompt"], choice, meta=q)
+         if ok != row.get("success") or tier != row.get("success_tier"):
+             changed += 1
+         row["success"] = ok
+         row["success_tier"] = tier
+diff --git a/tests/test_train.py b/tests/test_train.py
+index 65fd3bc..ce4ca43 100644
+--- a/tests/test_train.py
++++ b/tests/test_train.py
+@@ -187,22 +187,24 @@ def test_gold_sparse_skips_k3_and_fit_writes_not_spec_floors(tmp_path, monkeypat
+     assert main(["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1"], **kwargs) == 0
+     by_id = {c["model"]: c for c in provider.calls}
+     assert by_id["deepseek-ai/deepseek-v4-flash"]["max_tokens"] == 512
+     assert by_id["deepseek-ai/deepseek-v4-flash"]["reasoning_effort"] == "none"
+     assert by_id["qwen/qwen3.6-27b"]["reasoning_effort"] == "none"
+     assert by_id["moonshotai/kimi-k2.7-code"]["reasoning_effort"] == "high"
+     assert by_id["moonshotai/kimi-k2.7-code"]["max_tokens"] == 1024
+     rows = [json.loads(line) for line in gold.read_text(encoding="utf-8").splitlines() if line.strip()]
+     models = {r["model_id"] for r in rows}
+     assert "moonshotai/kimi-k3" not in models
+-    assert "deepseek-ai/deepseek-v4-flash" in models
+-    assert "qwen/qwen3.6-27b" in models
++    assert models >= set(SPARSE_ANCHORS)
++    for r in rows:
++        assert "success" in r and "success_tier" in r
++        assert "resolved" not in r and "y" not in r
+     silver = tmp_path / "silver.jsonl"
+     silver.write_text(
+         json.dumps(
+             {
+                 "complexity_bin": "trivial",
+                 "p_success": {
+                     "deepseek-ai/deepseek-v4-flash": 0.9,
+                     "google/gemma-4-31b-it": 0.4,
+                 },
+             }
+@@ -249,20 +251,21 @@ def test_gold_timeout_is_unsuccessful_cell_not_crash(tmp_path, monkeypatch):
+         )
+         == 0
+     )
+     rows = [json.loads(line) for line in gold.read_text(encoding="utf-8").splitlines() if line.strip()]
+     assert any(r["success"] is False for r in rows)
+     assert any(r["success"] is True for r in rows)
+ 
+ 
+ def test_gold_runs_cells_concurrently(tmp_path, monkeypatch):
+     monkeypatch.setenv(OPT_IN_ENV, "1")
++    monkeypatch.setenv("TRAIN_CONCURRENCY", "2")
+ 
+     class Slow:
+         def __init__(self):
+             self.calls = []
+             self.in_flight = 0
+             self.max_in_flight = 0
+ 
+         async def complete(self, body):
+             self.calls.append(dict(body))
+             self.in_flight += 1
+@@ -279,21 +282,21 @@ def test_gold_runs_cells_concurrently(tmp_path, monkeypatch):
+     assert (
+         main(
+             ["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1"],
+             provider=provider,
+             spend=spend,
+             cache_dir=tmp_path / "cache",
+             models_path=Path("config/models.yaml"),
+         )
+         == 0
+     )
+-    assert provider.max_in_flight > 1
++    assert 1 < provider.max_in_flight <= 2
+ 
+ 
+ def test_gold_refuses_without_opt_in(tmp_path, monkeypatch):
+     monkeypatch.delenv(OPT_IN_ENV, raising=False)
+     provider = FakeProvider()
+     spend = SpendLog(tmp_path / "spend.txt", 15)
+     queries = tmp_path / "q.jsonl"
+     queries.write_text(json.dumps({"prompt": "x"}) + "\n", encoding="utf-8")
+     code = main(
+         ["gold", "--queries", str(queries), "--out", str(tmp_path / "gold.jsonl")],
+@@ -489,31 +492,285 @@ def test_gold_expected_beats_tool_calls_proxy():
+     """Verified expected must win before gateway tool_calls proxy."""
+     ok, tier = _gold_label(
+         {"content": "wrong", "tool_calls": [{"id": "1"}]},
+         "What is 2+2?",
+         {},
+         meta={"expected": "4"},
+     )
+     assert ok is False and tier == "verified"
+ 
+ 
++def test_gold_json_schema_beats_tool_calls_proxy():
++    """Verified JSON/schema on the query wins before gateway tool_calls proxy."""
++    ok, tier = _gold_label(
++        {"content": "not json", "tool_calls": [{"id": "1"}]},
++        "call a tool",
++        {},
++        meta={"json_schema": {"type": "object", "required": ["status"]}},
++    )
++    assert ok is False and tier == "verified"
++
++
+ def test_gold_query_level_tests_passed_is_not_y():
+     """Dump/query tests_passed must not stamp the same y on every model."""
+     ok, tier = _gold_label(
+         {"content": "looks fine"},
+         "implement foo",
+         {},
+         meta={"tests_passed": False},
+     )
+     assert ok is True and tier == "weak"
+ 
+ 
++def test_gold_needs_tools_sends_tools_array(tmp_path, monkeypatch):
++    """needs_tools gold request must include a tools array so the model can emit tool_calls."""
++    monkeypatch.setenv(OPT_IN_ENV, "1")
++    provider = FakeProvider()
++    spend = SpendLog(tmp_path / "spend.txt", 15)
++    queries = tmp_path / "q.jsonl"
++    queries.write_text(
++        json.dumps(
++            {
++                "prompt": "Use a tool to list files in src.",
++                "phase": "tool",
++                "hint_bin": "standard",
++                "needs_tools": True,
++                "source": "swe-smith",
++            }
++        )
++        + "\n",
++        encoding="utf-8",
++    )
++    gold = tmp_path / "gold.jsonl"
++    assert (
++        main(
++            ["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1"],
++            provider=provider,
++            spend=spend,
++            cache_dir=tmp_path / "cache",
++            models_path=Path("config/models.yaml"),
++        )
++        == 0
++    )
++    assert provider.calls
++    assert all(isinstance(c.get("tools"), list) and c["tools"] for c in provider.calls)
++
++
++def test_gold_needs_tools_without_tool_calls_is_not_success(tmp_path, monkeypatch):
++    """needs_tools + nonempty text + no tool_calls is observed fail, not weak-True."""
++    monkeypatch.setenv(OPT_IN_ENV, "1")
++    provider = FakeProvider()
++    spend = SpendLog(tmp_path / "spend.txt", 15)
++    queries = tmp_path / "q.jsonl"
++    queries.write_text(
++        json.dumps(
++            {
++                "prompt": "Use a tool to list files in src.",
++                "phase": "tool",
++                "hint_bin": "standard",
++                "needs_tools": True,
++                "source": "swe-smith",
++            }
++        )
++        + "\n",
++        encoding="utf-8",
++    )
++    gold = tmp_path / "gold.jsonl"
++    assert (
++        main(
++            ["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1"],
++            provider=provider,
++            spend=spend,
++            cache_dir=tmp_path / "cache",
++            models_path=Path("config/models.yaml"),
++        )
++        == 0
++    )
++    rows = [json.loads(line) for line in gold.read_text(encoding="utf-8").splitlines() if line.strip()]
++    observed = [r for r in rows if not r.get("unobserved")]
++    assert observed
++    assert all(r.get("success") is False for r in observed)
++    assert all("success" in r for r in observed)
++
++
++def test_gold_sparse_skips_ineligible_anchors(tmp_path, monkeypatch):
++    """Flash + measured trio run when eligible; ineligible anchors are not gold cells."""
++    import yaml
++
++    monkeypatch.setenv(OPT_IN_ENV, "1")
++    cfg = yaml.safe_load(Path("config/models.yaml").read_text(encoding="utf-8"))
++    for m in cfg["models"]:
++        if m["id"] == "moonshotai/kimi-k2.7-code":
++            m["supports_tools"] = False
++    models_path = tmp_path / "models.yaml"
++    models_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
++    provider = FakeProvider()
++    spend = SpendLog(tmp_path / "spend.txt", 15)
++    queries = tmp_path / "q.jsonl"
++    queries.write_text(
++        json.dumps(
++            {
++                "prompt": "Use a tool to list files in src.",
++                "phase": "tool",
++                "hint_bin": "standard",
++                "needs_tools": True,
++                "source": "swe-smith",
++            }
++        )
++        + "\n",
++        encoding="utf-8",
++    )
++    gold = tmp_path / "gold.jsonl"
++    assert (
++        main(
++            ["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1"],
++            provider=provider,
++            spend=spend,
++            cache_dir=tmp_path / "cache",
++            models_path=models_path,
++        )
++        == 0
++    )
++    called = {c["model"] for c in provider.calls}
++    assert "moonshotai/kimi-k2.7-code" not in called
++    assert "deepseek-ai/deepseek-v4-flash" in called
++    assert "qwen/qwen3.6-27b" in called
++    assert "deepseek-ai/deepseek-v4-pro" in called
++    assert "moonshotai/kimi-k3" not in called
++    rows = [json.loads(line) for line in gold.read_text(encoding="utf-8").splitlines() if line.strip()]
++    models = {r["model_id"] for r in rows}
++    assert "moonshotai/kimi-k2.7-code" not in models
++    assert "moonshotai/kimi-k3" not in models
++    for r in rows:
++        if not r.get("unobserved"):
++            assert "success" in r and "success_tier" in r
++
++
++def test_gold_is_cache_first(tmp_path, monkeypatch):
++    """Second gold run on the same bodies is cache-first: no new spend, no new provider calls."""
++    monkeypatch.setenv(OPT_IN_ENV, "1")
++    provider = FakeProvider()
++    spend = SpendLog(tmp_path / "spend.txt", 15)
++    queries = tmp_path / "q.jsonl"
++    queries.write_text(json.dumps({"prompt": "add a docstring"}) + "\n", encoding="utf-8")
++    gold = tmp_path / "gold.jsonl"
++    kwargs = dict(
++        provider=provider,
++        spend=spend,
++        cache_dir=tmp_path / "cache",
++        models_path=Path("config/models.yaml"),
++    )
++    assert main(["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1"], **kwargs) == 0
++    n_calls = len(provider.calls)
++    first_spend = spend.total()
++    assert n_calls > 0 and first_spend > 0
++    assert main(["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1"], **kwargs) == 0
++    assert len(provider.calls) == n_calls
++    assert spend.total() == first_spend
++
++
++def test_gold_upstream_429_is_unobserved_not_failure(tmp_path, monkeypatch):
++    """Provider 429 is missing, not success=0."""
++    monkeypatch.setenv(OPT_IN_ENV, "1")
++    rate = {"status": 429, "json": {"error": {"message": "rate"}}}
++    provider = FakeProvider([rate, rate, rate, rate])
++    spend = SpendLog(tmp_path / "spend.txt", 15)
++    queries = tmp_path / "q.jsonl"
++    queries.write_text(json.dumps({"prompt": "add a docstring"}) + "\n", encoding="utf-8")
++    gold = tmp_path / "gold.jsonl"
++    assert (
++        main(
++            ["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1"],
++            provider=provider,
++            spend=spend,
++            cache_dir=tmp_path / "cache",
++            models_path=Path("config/models.yaml"),
++        )
++        == 0
++    )
++    rows = [json.loads(line) for line in gold.read_text(encoding="utf-8").splitlines() if line.strip()]
++    assert rows and all(r.get("unobserved") is True for r in rows)
++    assert all("success" not in r for r in rows)
++
++
++def test_gold_dump_resolved_is_not_y(tmp_path, monkeypatch):
++    """Dump teacher resolved on a pool-shaped row is not gold y."""
++    monkeypatch.setenv(OPT_IN_ENV, "1")
++
++    class Empty:
++        def __init__(self):
++            self.calls = []
++
++        async def complete(self, body):
++            self.calls.append(dict(body))
++            return _ok("")
++
++    provider = Empty()
++    spend = SpendLog(tmp_path / "spend.txt", 15)
++    queries = tmp_path / "q.jsonl"
++    queries.write_text(
++        json.dumps(
++            {
++                "prompt": "add a docstring",
++                "phase": "edit",
++                "hint_bin": "trivial",
++                "needs_tools": False,
++                "source": "swe-smith",
++                "resolved": True,
++            }
++        )
++        + "\n",
++        encoding="utf-8",
++    )
++    gold = tmp_path / "gold.jsonl"
++    assert (
++        main(
++            ["gold", "--queries", str(queries), "--out", str(gold), "--limit", "1"],
++            provider=provider,
++            spend=spend,
++            cache_dir=tmp_path / "cache",
++            models_path=Path("config/models.yaml"),
++        )
++        == 0
++    )
++    rows = [json.loads(line) for line in gold.read_text(encoding="utf-8").splitlines() if line.strip()]
++    observed = [r for r in rows if not r.get("unobserved")]
++    assert observed and all(r.get("success") is False for r in observed)
++    assert all("resolved" not in r and "y" not in r for r in rows)
++
++
++def test_gold_budget_code_default_stays_15(tmp_path, monkeypatch):
++    """Code default BUDGET_LIMIT_USD stays 15 unless the operator raises it."""
++    monkeypatch.setenv(OPT_IN_ENV, "1")
++    monkeypatch.delenv("BUDGET_LIMIT_USD", raising=False)
++    captured: dict[str, float] = {}
++    real = SpendLog
++
++    def wrap(path, limit):
++        captured["limit"] = float(limit)
++        return real(tmp_path / "spend.txt", limit)
++
++    monkeypatch.setattr("aiand_router.train.SpendLog", wrap)
++    queries = tmp_path / "q.jsonl"
++    queries.write_text(json.dumps({"prompt": "x"}) + "\n", encoding="utf-8")
++    assert (
++        main(
++            ["gold", "--queries", str(queries), "--out", str(tmp_path / "gold.jsonl"), "--limit", "1"],
++            provider=FakeProvider(),
++            cache_dir=tmp_path / "cache",
++            models_path=Path("config/models.yaml"),
++        )
++        == 0
++    )
++    assert captured["limit"] == 15.0
++
++
+ def test_gold_budget_skip_is_unobserved_not_failure(tmp_path, monkeypatch):
+     """429 / pre-call budget skip stays missing ΓÇö unobserved Γëá 0."""
+     monkeypatch.setenv(OPT_IN_ENV, "1")
+     provider = FakeProvider()
+     spend = SpendLog(tmp_path / "spend.txt", 15)
+     spend.add(15.0)
+     queries = tmp_path / "q.jsonl"
+     queries.write_text(json.dumps({"prompt": "add a docstring"}) + "\n", encoding="utf-8")
+     gold = tmp_path / "gold.jsonl"
+     assert (

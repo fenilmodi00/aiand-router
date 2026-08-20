@@ -1,0 +1,387 @@
+# Review package: 15e629bb9abb7025b0b1e6cad557da50a284b4ed..40a64cd0661bd85aca3fe719e702295f3c004095
+
+## Commits
+40a64cd Keep shadow and not_spec_floors when holdout replay misses a bar so the Scorer can be judged without live aiand.
+
+## Files changed
+ src/aiand_router/replay_report.py |  28 ++++++++-  tests/test_replay_report.py       | 118 ++++++++++++++++++++++++++++++++++++++  2 files changed, 143 insertions(+), 3 deletions(-)
+
+## Diff
+
+diff --git a/src/aiand_router/replay_report.py b/src/aiand_router/replay_report.py
+index 38d162e..c4bb71f 100644
+--- a/src/aiand_router/replay_report.py
++++ b/src/aiand_router/replay_report.py
+@@ -77,20 +77,24 @@ def _eligible(cfg: dict[str, Any], models: list[Model], item: dict[str, Any]) ->
+ 
+ 
+ def _pick_flash(cfg: dict[str, Any], eligible: list[Model]) -> Model | None:
+     fid = cfg.get("fallback_model")
+     for m in eligible:
+         if m.id == fid:
+             return m
+     return min(eligible, key=lambda m: m.unit_cost) if eligible else None
+ 
+ 
++def _pick_cheapest(eligible: list[Model]) -> Model | None:
++    return min(eligible, key=lambda m: m.unit_cost) if eligible else None
++
++
+ def _pick_strong(eligible: list[Model]) -> Model | None:
+     return max(eligible, key=lambda m: (m.quality, m.unit_cost)) if eligible else None
+ 
+ 
+ def _pick_oracle(
+     eligible: list[Model], success: dict[tuple[str, str], bool], prompt: str
+ ) -> Model | None:
+     winners = [m for m in eligible if success.get((prompt, m.id))]
+     return min(winners, key=lambda m: m.unit_cost) if winners else None
+ 
+@@ -181,20 +185,21 @@ def replay_report(
+     holdout_ids: Iterable[str] | None = None,
+ ) -> dict[str, Any]:
+     items, success = _load_gold(Path(gold_path))
+     if holdout_ids is not None:
+         wanted = set(holdout_ids)
+         items = [it for it in items if it["prompt"] in wanted]
+ 
+     rules_picks: list[tuple[Model | None, dict[str, Any]]] = []
+     trained_picks: list[tuple[Model | None, dict[str, Any]]] = []
+     flash_picks: list[tuple[Model | None, dict[str, Any]]] = []
++    cheapest_picks: list[tuple[Model | None, dict[str, Any]]] = []
+     strong_picks: list[tuple[Model | None, dict[str, Any]]] = []
+     oracle_picks: list[tuple[Model | None, dict[str, Any]]] = []
+     disagree = 0
+     auc_pairs: list[tuple[float, int]] = []
+     spreads: list[float] = []
+     selected: list[tuple[float, float]] = []
+ 
+     for item in items:
+         eligible = _eligible(cfg, models, item)
+         kw = dict(
+@@ -204,20 +209,21 @@ def replay_report(
+             effort=EFFORT,
+             allowed=None,
+             spend_usd=0.0,
+             budget_usd=BUDGET,
+         )
+         rules = select_model(cfg, models, **kw)
+         trained = trained_select(cfg, models, artifact, **kw)
+         rules_picks.append((rules.model, item))
+         trained_picks.append((trained.model, item))
+         flash_picks.append((_pick_flash(cfg, eligible), item))
++        cheapest_picks.append((_pick_cheapest(eligible), item))
+         strong_picks.append((_pick_strong(eligible), item))
+         oracle_picks.append((_pick_oracle(eligible, success, item["prompt"]), item))
+         if rules.model.id != trained.model.id:
+             disagree += 1
+ 
+         ids = [m.id for m in eligible if (item["prompt"], m.id) in success]
+         _, ps = score_eligible(
+             artifact,
+             [m.id for m in eligible],
+             phase=item["phase"],
+@@ -233,68 +239,84 @@ def replay_report(
+         y = success.get((item["prompt"], trained.model.id))
+         if trained.confidence is not None and y is not None:
+             selected.append((float(trained.confidence), 1.0 if y else 0.0))
+ 
+     n = len(items)
+     policies = {
+         "rules": _policy_stats(rules_picks, success),
+         "trained": _policy_stats(trained_picks, success),
+         "oracle": _policy_stats(oracle_picks, success),
+         "always_flash": _policy_stats(flash_picks, success),
++        "always_cheapest": _policy_stats(cheapest_picks, success),
+         "always_strong": _policy_stats(strong_picks, success),
+     }
+-    return {
++    out = {
+         "n_prompts": n,
+         "gold_is_holdout": True,
+         "policies": policies,
+         "disagreement_rate": (disagree / n) if n else 0.0,
+         "rank_auc": _rank_auc(auc_pairs),
+         "mean_p_spread": (sum(spreads) / len(spreads)) if spreads else 0.0,
+         "brier": _brier(selected),
+         "brier_skill": _brier_skill(selected),
+         "ece_equal_width": _ece_equal_width(selected),
+         "ece_equal_mass": _ece_equal_mass(selected),
+         "rules_cost_delta": policies["trained"]["list_price_cost"]
+         - policies["rules"]["list_price_cost"],
+     }
++    return apply_replay_gate(out)
+ 
+ 
+ def replay_gate_pass(report: dict[str, Any]) -> bool:
+     trained_s = report["policies"]["trained"]["success_rate"]
+     rules_s = report["policies"]["rules"]["success_rate"]
++    always_cheapest = report["policies"].get(
++        "always_cheapest", report["policies"]["always_flash"]
++    )
+     return (
+         report["rank_auc"] >= 0.65
+         and report["mean_p_spread"] >= 0.10
+         and report["brier_skill"] > 0
+         and report["ece_equal_width"] <= 0.03
+         and report["ece_equal_mass"] <= 0.03
+         and trained_s >= rules_s - 0.01
+         and report["rules_cost_delta"] < 0
+-        and report["policies"]["trained"] != report["policies"]["always_flash"]
++        and report["policies"]["trained"] != always_cheapest
+     )
+ 
+ 
++def apply_replay_gate(report: dict[str, Any]) -> dict[str, Any]:
++    """Failing any bar keeps shadow and not_spec_floors. Never stamps Verified or flips path."""
++    out = dict(report)
++    out["replay_gate_pass"] = replay_gate_pass(out)
++    out["path"] = "shadow"
++    out["not_spec_floors"] = True
++    return out
++
++
+ def main(argv: list[str] | None = None) -> int:
+     parser = argparse.ArgumentParser(description="Offline replay report (no live provider)")
+     parser.add_argument(
+         "--gold",
+         required=True,
+         help=(
+             "Holdout gold JSONL (the evaluation set). Assumed unused for train/cal; "
+             "passing mixed gold contaminates the gate. No hash split."
+         ),
+     )
+     parser.add_argument("--artifact", required=True)
+     parser.add_argument("--models", default="config/models.yaml")
+     args = parser.parse_args(argv)
+     cfg = load_config(Path(args.models))
+     artifact = load_scorer(Path(args.artifact))
+     if artifact is None:
+         return 2
+     report = replay_report(Path(args.gold), artifact, load_models(cfg), cfg)
+     print(json.dumps(report, indent=2))
+-    print("replay_gate_pass", replay_gate_pass(report))
++    print("replay_gate_pass", report["replay_gate_pass"])
++    print(f"path={report['path']}")
++    print("not_spec_floors", report["not_spec_floors"])
+     return 0
+ 
+ 
+ if __name__ == "__main__":
+     raise SystemExit(main())
+diff --git a/tests/test_replay_report.py b/tests/test_replay_report.py
+index e921e5d..11fc3e2 100644
+--- a/tests/test_replay_report.py
++++ b/tests/test_replay_report.py
+@@ -1,18 +1,19 @@
+ from __future__ import annotations
+ 
+ import json
+ from pathlib import Path
+ 
+ import pytest
+ 
+ from aiand_router.replay_report import (
++    apply_replay_gate,
+     assert_not_production_floors,
+     main,
+     replay_gate_pass,
+     replay_report,
+ )
+ from aiand_router.router import load_models
+ 
+ FIXTURE_DIR = Path(__file__).parent / "fixtures"
+ GOLD = FIXTURE_DIR / "replay_gold.jsonl"
+ SCORER = FIXTURE_DIR / "replay_scorer.json"
+@@ -57,23 +58,42 @@ def _toy_cfg() -> dict:
+         ],
+     }
+ 
+ 
+ def _artifact() -> dict:
+     return json.loads(SCORER.read_text(encoding="utf-8"))
+ 
+ 
+ def _report(**kwargs):
+     cfg = _toy_cfg()
++    assert_not_production_floors(GOLD, _artifact())
+     return replay_report(GOLD, _artifact(), load_models(cfg), cfg, **kwargs)
+ 
+ 
++def _bars_green() -> dict:
++    cheapest = {"success_rate": 0.5, "list_price_cost": 0.01}
++    return {
++        "rank_auc": 0.9,
++        "mean_p_spread": 0.2,
++        "brier_skill": 0.1,
++        "ece_equal_width": 0.01,
++        "ece_equal_mass": 0.01,
++        "rules_cost_delta": -0.01,
++        "policies": {
++            "trained": {"success_rate": 0.8, "list_price_cost": 0.04},
++            "rules": {"success_rate": 0.8, "list_price_cost": 0.05},
++            "always_flash": dict(cheapest),
++            "always_cheapest": dict(cheapest),
++        },
++    }
++
++
+ def test_fixture_is_not_production_floors():
+     assert_not_production_floors(GOLD, _artifact())
+ 
+ 
+ def test_replay_report_policies_success_rate_and_list_price_cost():
+     assert_not_production_floors(GOLD, _artifact())
+     report = _report()
+     # 4├ù2 gold: p0 both win, p1 strong only, p2 flash only, p3 neither.
+     assert report["policies"]["oracle"]["success_rate"] == 3 / 4
+     flash = report["policies"]["always_flash"]
+@@ -121,39 +141,66 @@ def test_cli_gold_is_holdout(capsys):
+     assert exit_info.value.code == 0
+     help_text = capsys.readouterr().out.lower()
+     assert "--gold" in help_text
+     assert "holdout" in help_text
+     assert "train" in help_text or "cal" in help_text
+     report = _report()
+     assert report["gold_is_holdout"] is True
+ 
+ 
+ def test_replay_gate_pass_is_bool_on_toy_fixture():
++    assert_not_production_floors(GOLD, _artifact())
+     report = _report()
+     assert isinstance(replay_gate_pass(report), bool)
++    # toy fixture is allowed to fail the bars; do not require AUC ΓëÑ 0.65 here
++    assert report["path"] == "shadow"
++    assert report["not_spec_floors"] is True
+ 
+ 
+ def test_replay_gate_fails_when_trained_is_always_cheapest():
+     """RulesΓëátrained is not enough; trained=always-Flash must fail the gate."""
+     cheapest = {"success_rate": 0.5, "list_price_cost": 0.01}
+     report = {
+         "rank_auc": 0.9,
+         "mean_p_spread": 0.2,
+         "brier_skill": 0.1,
+         "ece_equal_width": 0.01,
+         "ece_equal_mass": 0.01,
+         "rules_cost_delta": -0.01,
+         "disagreement_rate": 0.4,
+         "policies": {
+             "trained": dict(cheapest),
+             "rules": {"success_rate": 0.5, "list_price_cost": 0.05},
+             "always_flash": dict(cheapest),
++            "always_cheapest": dict(cheapest),
++        },
++    }
++    assert replay_gate_pass(report) is False
++
++
++def test_replay_gate_fails_when_trained_is_always_cheapest_even_if_not_flash():
++    """Gate compares trained Γëá always-cheapest-eligible, not trained Γëá always-Flash."""
++    cheapest = {"success_rate": 0.9, "list_price_cost": 0.01}
++    dear = {"success_rate": 0.5, "list_price_cost": 0.10}
++    report = {
++        "rank_auc": 0.9,
++        "mean_p_spread": 0.2,
++        "brier_skill": 0.1,
++        "ece_equal_width": 0.01,
++        "ece_equal_mass": 0.01,
++        "rules_cost_delta": -0.01,
++        "disagreement_rate": 0.4,
++        "policies": {
++            "trained": dict(cheapest),
++            "rules": dict(dear),
++            "always_flash": dict(dear),
++            "always_cheapest": dict(cheapest),
+         },
+     }
+     assert replay_gate_pass(report) is False
+ 
+ 
+ def test_rank_auc_skips_unscored_gold_ids(tmp_path):
+     """Unscored eligible ids must not be imputed as 0.5 (that pulls AUC to chance)."""
+     cfg = _toy_cfg()
+     cfg["models"].append(
+         {
+@@ -224,10 +271,81 @@ def test_assert_not_production_floors_rejects_verified_n(tmp_path):
+         return
+     raise AssertionError("expected production floors (Verified nΓëÑ300) to be rejected")
+ 
+ 
+ def test_assert_not_production_floors_rejects_staffed_promotion_stamp():
+     try:
+         assert_not_production_floors(GOLD, {"not_spec_floors": False, "n_gold": 4000})
+     except AssertionError:
+         return
+     raise AssertionError("expected staffed promotion floors to be rejected")
++
++
++def test_failing_any_bar_keeps_shadow_and_not_spec_floors():
++    """Toy fixture fails the gate; report stays path=shadow and not_spec_floors (no Verified stamp)."""
++    assert_not_production_floors(GOLD, _artifact())
++    report = _report()
++    assert replay_gate_pass(report) is False
++    assert report["replay_gate_pass"] is False
++    assert report["path"] == "shadow"
++    assert report["not_spec_floors"] is True
++    assert "savings" not in report
++
++
++def test_cli_stdout_grepable_shadow_and_not_spec_floors(tmp_path, capsys, monkeypatch):
++    import os
++
++    import yaml
++
++    monkeypatch.delenv("TRAINED_PATH", raising=False)
++    models = tmp_path / "models.yaml"
++    models.write_text(yaml.safe_dump(_toy_cfg()), encoding="utf-8")
++    assert main(["--gold", str(GOLD), "--artifact", str(SCORER), "--models", str(models)]) == 0
++    out = capsys.readouterr().out
++    assert "path=shadow" in out
++    assert "not_spec_floors" in out
++    assert "replay_gate_pass" in out
++    assert os.getenv("TRAINED_PATH") != "trained"
++
++
++def test_passing_gate_still_keeps_shadow_and_not_spec_floors():
++    """This cycle does not auto-flip TRAINED_PATH or stamp Verified."""
++    out = apply_replay_gate(_bars_green())
++    assert out["replay_gate_pass"] is True
++    assert out["path"] == "shadow"
++    assert out["not_spec_floors"] is True
++
++
++@pytest.mark.parametrize(
++    "key,value",
++    [
++        ("rank_auc", 0.64),
++        ("mean_p_spread", 0.09),
++        ("brier_skill", 0.0),
++        ("ece_equal_width", 0.031),
++        ("ece_equal_mass", 0.031),
++        ("rules_cost_delta", 0.0),
++    ],
++)
++def test_failing_numeric_bar_keeps_shadow_and_not_spec_floors(key, value):
++    report = _bars_green()
++    report[key] = value
++    out = apply_replay_gate(report)
++    assert out["replay_gate_pass"] is False
++    assert out["path"] == "shadow"
++    assert out["not_spec_floors"] is True
++
++
++def test_trained_success_below_rules_minus_1pp_fails_gate():
++    report = _bars_green()
++    report["policies"]["trained"]["success_rate"] = 0.78
++    out = apply_replay_gate(report)
++    assert out["replay_gate_pass"] is False
++    assert out["path"] == "shadow"
++    assert out["not_spec_floors"] is True
++
++
++def test_replay_report_includes_always_cheapest_policy():
++    assert_not_production_floors(GOLD, _artifact())
++    row = _report()["policies"]["always_cheapest"]
++    assert 0.0 <= row["success_rate"] <= 1.0
++    assert row["list_price_cost"] >= 0.0

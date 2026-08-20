@@ -36,3 +36,19 @@
 
 - Starter smoke prompts exist at `datasets/smoke-queries.jsonl` (48 rows). Still no production dump at teacher ≤1000 / gold ≤200.
 - No production runbook (Nginx, systemd, TLS). Intentionally out of scope for the hop spec.
+- Landing-page SWE-Bench “62% cost reduction” / “40–60% token savings” are marketing visuals — no matching measured Verified gate report in this repo to cite as fact.
+
+## Pitch knowledge (Mahakaathan)
+
+- [Lesson: 6-minute technical fluency](lessons/0005-pitch-technical-fluency.html)
+  Timed pitch + quiz on safe claims. Use for: rehearsal before judges.
+- [Reference: pitch card](reference/pitch-six-minute.html)
+  One-page SAFE numbers + code map. Use for: print beside monitor.
+- [Deck: hackathon submission](lessons/0004-hackathon-submission.html)
+  6-page judging-criteria deck. Use for: slide order, not live ML oversell.
+- [ARCHITECTURE.md](ARCHITECTURE.md)
+  Gateway diagram. Use for: “where does a request go?”
+- [Landing page source](web/app/page.tsx) · [Trained vs rules UI](web/components/TrainedVsRulesSection.tsx)
+  What judges see on `:3000/`. Use for: matching demo narration to UI copy — then soften marketing %.
+- [data/scorer.json](data/scorer.json) · [data/spend.txt](data/spend.txt) · [data/replay-results.json](data/replay-results.json)
+  Artifact floors and spend file. Use for: measured pitch numbers only.

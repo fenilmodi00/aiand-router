@@ -1,0 +1,2 @@
+{"instance_id": "rebench-gpl-1", "problem_statement": "Fix the GPL-licensed repo crash on startup.", "license_name": "GPL-3.0"}
+{"instance_id": "rebench-mit-1", "problem_statement": "Refactor the spend log deadlock across cache and gold.", "license_name": "MIT"}

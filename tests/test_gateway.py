@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import pytest
 from aiand_router.app import create_app
 from aiand_router.flashlight import ROOT as PROJECT_ROOT
 from aiand_router.router import SpendLog
@@ -15,6 +16,57 @@ from fastapi.testclient import TestClient
 
 AUTH = {"Authorization": "Bearer secret"}
 CHAT = {"model": "router/auto", "messages": [{"role": "user", "content": "ping"}]}
+CASC_CFG = """
+fallback_model: deepseek-ai/deepseek-v4-flash
+premium_aa_floor: 58
+max_regret: 8
+phase_threshold: {{summarize: 0, plan: 0, edit: 0, tool: 0, debug: 0, discover: 0}}
+trained_effort:
+  low: {{threshold: 0.05, max_regret: 0.30}}
+  medium: {{threshold: 0.10, max_regret: 0.20}}
+  high: {{threshold: 0.20, max_regret: 0.15}}
+  max: {{threshold: 0.60, max_regret: 0.03}}
+cascade_lane:
+  enabled: {enabled}
+  cheap_model: deepseek-ai/deepseek-v4-flash
+  strong_model: deepseek-ai/deepseek-v4-pro
+  phases: [plan]
+models:
+  - id: deepseek-ai/deepseek-v4-flash
+    enabled: true
+    input_per_1m: 0.15
+    cached_input_per_1m: 0.08
+    output_per_1m: 0.25
+    context_window: 1048576
+    supports_tools: true
+    supports_json: true
+    supports_streaming: true
+    max_output_tokens: 16384
+    aa_index: 52
+    aa_source: test
+    measured_on: test
+  - id: deepseek-ai/deepseek-v4-pro
+    enabled: true
+    input_per_1m: 1.00
+    cached_input_per_1m: 0.25
+    output_per_1m: 2.50
+    context_window: 1048576
+    supports_tools: true
+    supports_json: true
+    supports_streaming: true
+    max_output_tokens: 16384
+    aa_index: 53
+    aa_source: test
+    measured_on: test
+    priors:
+      plan: 0.65
+"""
+
+
+@pytest.fixture(autouse=True)
+def _rules_path_for_gateway_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Pin rules (not conftest shadow): reason header + pioneer_score picks.
+    monkeypatch.setenv("TRAINED_PATH", "off")
 
 
 class FakeProvider:
@@ -56,8 +108,31 @@ def _client(tmp_path, provider=None, spend_usd=0.0, budget=15.0):
         router_key="secret",
         budget=budget,
         cache_dir=tmp_path / "cache",
+        trained_path="off",
+        learned_flag=tmp_path / "learned_wins.json",
     )
     return TestClient(app), provider
+
+
+def _scorer(tmp_path: Path, p_success: dict[str, float], bin: str = "standard") -> Path:
+    path = tmp_path / "scorer.json"
+    path.write_text(
+        json.dumps(
+            {
+                "calibrator": {"mode": "platt", "a": 1.0, "b": 0.0},
+                "p_success": p_success,
+                "complexity_bin": bin,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _cascade_config(tmp_path: Path, *, enabled: bool) -> Path:
+    path = tmp_path / "models.yaml"
+    path.write_text(CASC_CFG.format(enabled=str(enabled).lower()), encoding="utf-8")
+    return path
 
 
 def test_missing_router_key_returns_401_without_calling_provider(tmp_path):
@@ -109,6 +184,87 @@ def test_plan_phase_does_not_forward_k3(tmp_path):
     assert response.status_code == 200
     assert provider.calls[0]["model"] != "moonshotai/kimi-k3"
     assert "kimi-k3" not in response.headers["x-router-model"]
+
+
+def test_disabled_cascade_lane_keeps_rules_pick(tmp_path):
+    provider = FakeProvider()
+    app = create_app(
+        provider=provider,
+        spend=SpendLog(tmp_path / "spend.txt", 15.0),
+        log_path=tmp_path / "requests.jsonl",
+        router_key="secret",
+        budget=15.0,
+        cache_dir=tmp_path / "cache",
+        config_path=_cascade_config(tmp_path, enabled=False),
+        trained_path="off",
+        scorer_path=_scorer(
+            tmp_path, {"deepseek-ai/deepseek-v4-flash": 0.85, "deepseek-ai/deepseek-v4-pro": 0.90}
+        ),
+    )
+    client = TestClient(app)
+    response = client.post(
+        "/v1/chat/completions",
+        json=CHAT,
+        headers={**AUTH, "x-agent-phase": "plan"},
+    )
+    assert response.status_code == 200
+    assert provider.calls[0]["model"] == "deepseek-ai/deepseek-v4-flash"
+    assert response.headers["x-router-model"] == "deepseek-ai/deepseek-v4-flash"
+    assert response.headers.get("x-router-path") is None
+
+
+def test_enabled_cascade_lane_redirects_to_cheap_model_on_rules_path(tmp_path):
+    provider = FakeProvider()
+    app = create_app(
+        provider=provider,
+        spend=SpendLog(tmp_path / "spend.txt", 15.0),
+        log_path=tmp_path / "requests.jsonl",
+        router_key="secret",
+        budget=15.0,
+        cache_dir=tmp_path / "cache",
+        config_path=_cascade_config(tmp_path, enabled=True),
+        trained_path="off",
+        scorer_path=_scorer(
+            tmp_path, {"deepseek-ai/deepseek-v4-flash": 0.85, "deepseek-ai/deepseek-v4-pro": 0.90}
+        ),
+    )
+    client = TestClient(app)
+    response = client.post(
+        "/v1/chat/completions",
+        json=CHAT,
+        headers={**AUTH, "x-agent-phase": "plan"},
+    )
+    assert response.status_code == 200
+    assert provider.calls[0]["model"] == "deepseek-ai/deepseek-v4-flash"
+    assert response.headers["x-router-model"] == "deepseek-ai/deepseek-v4-flash"
+    assert response.headers["x-router-path"] == "cascade"
+    assert response.headers["x-router-rule"] == "cheap_redirect"
+
+
+def test_enabled_cascade_lane_is_ignored_outside_off_path(tmp_path):
+    provider = FakeProvider()
+    app = create_app(
+        provider=provider,
+        spend=SpendLog(tmp_path / "spend.txt", 15.0),
+        log_path=tmp_path / "requests.jsonl",
+        router_key="secret",
+        budget=15.0,
+        cache_dir=tmp_path / "cache",
+        config_path=_cascade_config(tmp_path, enabled=True),
+        trained_path="shadow",
+        scorer_path=_scorer(
+            tmp_path, {"deepseek-ai/deepseek-v4-flash": 0.85, "deepseek-ai/deepseek-v4-pro": 0.90}
+        ),
+    )
+    client = TestClient(app)
+    response = client.post(
+        "/v1/chat/completions",
+        json=CHAT,
+        headers={**AUTH, "x-agent-phase": "plan"},
+    )
+    assert response.status_code == 200
+    assert response.headers["x-router-path"] == "shadow"
+    assert response.headers["x-router-trained-would"] == "deepseek-ai/deepseek-v4-flash"
 
 
 def test_max_effort_may_forward_k3(tmp_path):
@@ -354,10 +510,13 @@ def test_failed_test_outcome_makes_debug_pick_a_stronger_model(tmp_path):
         headers={**AUTH, "x-agent-phase": "debug"},
     )
     assert outcome.status_code == 200
-    assert edit.headers["x-router-model"] == "deepseek-ai/deepseek-v4-flash"
+    # Coding-agent priors: pioneer_score already prefers Pro on edit.
+    # debug_fail_threshold (53) still bars Flash (AA 52) after a failed test.
+    assert edit.headers["x-router-model"] == "deepseek-ai/deepseek-v4-pro"
     assert debug.headers["x-router-model"] == "deepseek-ai/deepseek-v4-pro"
-    assert provider.calls[0]["model"] == "deepseek-ai/deepseek-v4-flash"
-    assert provider.calls[1]["model"] == "deepseek-ai/deepseek-v4-pro"
+    assert debug.headers["x-router-model"] != "deepseek-ai/deepseek-v4-flash"
+    assert provider.calls[0]["model"] == "deepseek-ai/deepseek-v4-pro"
+    # Same prompt + Pro on both turns → debug is a cache hit, not a second upstream.
 
 
 def test_replay_page_shows_phase_winner_reason_cost_and_hides_secrets(tmp_path):
@@ -430,8 +589,9 @@ def test_flashlight_walks_phases_and_uses_stronger_model_after_test_fail(tmp_pat
     assert "debug" in phases
     assert "summarize" in phases
     by_phase = {r["phase"]: r for r in rows if r.get("selected")}
-    assert by_phase["edit"]["selected"] == "deepseek-ai/deepseek-v4-flash"
+    assert by_phase["edit"]["selected"] == "deepseek-ai/deepseek-v4-pro"
     assert by_phase["debug"]["selected"] == "deepseek-ai/deepseek-v4-pro"
+    assert by_phase["debug"]["selected"] != "deepseek-ai/deepseek-v4-flash"
     assert by_phase["summarize"]["selected"] == "deepseek-ai/deepseek-v4-flash"
     assert any(r.get("tests_passed") is False for r in rows)
     assert any(r.get("tests_passed") is True for r in rows)
@@ -444,24 +604,32 @@ def test_eval_runs_three_baselines_on_five_tasks_and_rereads_log(tmp_path):
     spec = load_tasks(PROJECT_ROOT / "config" / "tasks.yaml")
     first = run_eval(client, "secret", spec, log_path=tmp_path / "requests.jsonl")
     calls_after_first = len(provider.calls)
-    assert calls_after_first == 15
+    # 5 tasks × 3 baselines, but rules pick Pro on plan/edit/debug (same as
+    # premium) so those three adaptive turns cache-hit → 12 unique upstream calls.
+    assert calls_after_first == 12
     second = run_eval(client, "secret", spec, log_path=tmp_path / "requests.jsonl")
     assert len(provider.calls) == calls_after_first
     report = report_from_log(tmp_path / "requests.jsonl")
     assert set(report["baselines"]) == {"premium", "kimi", "adaptive"}
-    for name in ("premium", "kimi", "adaptive"):
+    for name in ("premium", "kimi"):
         row = report["baselines"][name]
         assert row["tasks"] == 5
         assert "cost_usd" in row
         assert "latency_ms" in row
         assert "models" in row
         assert "resolved" in row
+    adaptive = report["baselines"]["adaptive"]
+    assert adaptive["tasks"] == 2  # discover + summarize; rest cache-hit Pro
+    assert "cost_usd" in adaptive
+    assert "latency_ms" in adaptive
+    assert "resolved" in adaptive
     assert report["baselines"]["premium"]["models"] == ["deepseek-ai/deepseek-v4-pro"]
     assert report["baselines"]["kimi"]["models"] == ["moonshotai/kimi-k2.7-code"]
-    assert "deepseek-ai/deepseek-v4-flash" in report["baselines"]["adaptive"]["models"]
+    assert adaptive["models"] == ["deepseek-ai/deepseek-v4-flash"]
     assert "savings_pct" not in report
     assert first["stubbed"] == ["qwen-only", "flash-only", "glm-only", "random", "oracle"]
-    assert second["cache_hits"] == calls_after_first
+    assert first["cache_hits"] == 3
+    assert second["cache_hits"] == 15
     assert "not_aiand" in report["quality_note"]
 
 

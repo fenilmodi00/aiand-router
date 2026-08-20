@@ -96,6 +96,8 @@ Default `TRAINED_PATH` is **`shadow`**: the client still gets the rules pick; JS
 
 Scorer weights load from `SCORER_PATH` (default `data/scorer.json`) at process start. Missing or corrupt weights fall back to rules with reason_code `scorer_down` — they do not invent P(success).
 
+There is also a disabled-by-default `cascade_lane` config prototype for `TRAINED_PATH=off` only. It is a binary scorer-backed lane between one configured cheap model and one configured strong model: serve the cheap lane only if it clears the existing effort threshold and stays within the existing max_regret of the strong lane; otherwise pass through to the strong lane. It does not alter the default Pioneer-shaped shadow path.
+
 Opt-in train (not CI; shares `BUDGET_LIMIT_USD`, default **15** in code — set `100` in the environment for the smoke fit):
 
 ```bash

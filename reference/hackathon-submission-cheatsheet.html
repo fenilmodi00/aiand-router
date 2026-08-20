@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Submission cheat sheet — aiand/auto</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+  <style>
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; font-size: 0.82rem; }
+    .cell { background: var(--card); border: 1px solid var(--rule); padding: 0.5rem 0.65rem; }
+    .cell h3 { margin: 0 0 0.2rem; font-size: 0.88rem; }
+    .cell p, .cell ul { margin: 0; font-size: 0.8rem; }
+    @media print { .grid { grid-template-columns: 1fr 1fr; } }
+  </style>
+</head>
+<body>
+  <article class="page">
+    <header>
+      <h1>aiand/auto — submission cheat sheet</h1>
+      <p class="lede">One page. Print beside your monitor during the pitch.</p>
+    </header>
+
+    <div class="grid">
+      <div class="cell">
+        <h3>Elevator pitch</h3>
+        <p>OpenAI-compatible router · <code>router/auto</code> · cheapest aiand model per agent step · rules live, ML shadow ready.</p>
+      </div>
+      <div class="cell">
+        <h3>Problem</h3>
+        <p>Premium-only burns budget; cheap-only breaks hard tasks. Agents run 20–100 hops/session.</p>
+      </div>
+      <div class="cell">
+        <h3>Stack</h3>
+        <p>FastAPI gateway · Next.js dashboard · teacher/gold/fit ML · JSONL telemetry · 70 tests</p>
+      </div>
+      <div class="cell">
+        <h3>vs rule routers</h3>
+        <p>Per-request P(success) · complexity bins · Platt calibration · &lt;10ms · graceful fallback</p>
+      </div>
+      <div class="cell">
+        <h3>Demo URLs</h3>
+        <p><code>:3000/</code> landing · <code>/routers/auto</code> · <code>/playground</code> · gateway <code>:8000</code></p>
+      </div>
+      <div class="cell">
+        <h3>Future</h3>
+        <p>Shadow → trained flip · SWE-bench gate · managed SaaS · aiand partnership</p>
+      </div>
+    </div>
+
+    <h2>Judging hooks (say these aloud)</h2>
+    <ul>
+      <li><strong>Impact:</strong> “Every hop logged with cost vs baseline — FinOps can audit it.”</li>
+      <li><strong>Innovation:</strong> “Teacher labels offline; 8ms student serves live — no LLM on the hot path.”</li>
+      <li><strong>Technical:</strong> “Drop-in OpenAI endpoint; 70 tests; shadow mode proves ML before we flip.”</li>
+      <li><strong>Product:</strong> “One URL for OpenCode, Cursor, Claude Code — no harness rewrite.”</li>
+    </ul>
+
+    <p><a href="../lessons/0004-hackathon-submission.html">Full 6-page deck →</a></p>
+  </article>
+</body>
+</html>

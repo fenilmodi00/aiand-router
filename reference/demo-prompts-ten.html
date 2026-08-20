@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ideathon — 10 demo prompts</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+  <style>
+    .page { max-width: 58rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.72rem; margin: 0.5rem 0 1rem; }
+    th, td { border: 1px solid var(--rule); padding: 0.35rem 0.4rem; text-align: left; vertical-align: top; }
+    th { background: var(--card); white-space: nowrap; }
+    td.prompt { font-family: var(--mono); font-size: 0.68rem; line-height: 1.35; }
+    .win { font-family: var(--mono); font-size: 0.7rem; white-space: nowrap; }
+    .caveat { background: var(--card); border: 1px solid var(--rule); padding: 0.65rem 0.75rem; margin: 0.75rem 0; font-size: 0.85rem; }
+    ol.run { font-size: 0.9rem; }
+    ol.run code { font-size: 0.82rem; }
+  </style>
+</head>
+<body>
+  <article class="page">
+    <nav class="crumbs">
+      <a href="../lessons/0006-ideathon-four-minute.html">Lesson 0006</a> ·
+      <a href="./ideathon-four-minute.html">4+3 card</a> ·
+      <a href="../datasets/demo-pitch-prompts.jsonl">JSONL</a>
+    </nav>
+    <header>
+      <h1>10 playground demo prompts</h1>
+      <p class="lede">Print beside the laptop. Phase + effort drive the ladder — not prompt magic alone.</p>
+    </header>
+
+    <h2>How to run live</h2>
+    <ol class="run">
+      <li><strong>Gateway on rules/shadow:</strong> set <code>TRAINED_PATH=shadow</code> (or unset) and restart uvicorn. Local <code>.env</code> often has <code>trained</code> — that path does <em>not</em> show the Flash→Pro→K3 ladder below. Playground’s path toggle does not override server env today.</li>
+      <li>Open Playground with <code>router/auto</code> selected.</li>
+      <li>Set <strong>Phase</strong> and <strong>Effort</strong> from the row (not Auto).</li>
+      <li>Paste the prompt → Run.</li>
+      <li>Point judges at the model chip and/or response header <code>X-Router-Model</code> (also <code>X-Router-Phase</code>, <code>X-Router-Reason</code>).</li>
+    </ol>
+
+    <div class="caveat">
+      <strong>Verified dry-run (rules, medium/xhigh/max, current catalog):</strong>
+      winners collapse to <code>deepseek-v4-flash</code> · <code>deepseek-v4-pro</code> · <code>kimi-k3</code>.
+      Motif / GLM / Qwen rarely win Pioneer score when Flash/Pro are eligible.
+      Labels below = <em>likely under rules</em>. K3 needs <code>effort=max</code> (premium AA floor).
+      With <code>TRAINED_PATH=trained</code>, picks diverge (often Kimi Code or Flash fallback) — fine for Q&amp;A, not for this ladder.
+    </div>
+
+    <h2>Prompts</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Phase (UI)</th>
+          <th>Effort</th>
+          <th>Prompt (copy-paste)</th>
+          <th>Expected winner</th>
+          <th>Why</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>Final Summary<br><code>summarize</code></td>
+          <td>medium</td>
+          <td class="prompt">Summarize in one sentence: a REST API returns JSON errors with code and message fields.</td>
+          <td class="win">deepseek-v4-flash</td>
+          <td>Cheap phase bar (24); Flash wins Pioneer on summarize.</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>Discovery / Search<br><code>discover</code></td>
+          <td>medium</td>
+          <td class="prompt">Name three files I should open first to understand a FastAPI project layout. Reply as a short bullet list.</td>
+          <td class="win">deepseek-v4-flash</td>
+          <td>Discover bar 35; Flash still cheapest strong eligible.</td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>Final Summary<br><code>summarize</code></td>
+          <td>low</td>
+          <td class="prompt">Reply with one word only: ready</td>
+          <td class="win">deepseek-v4-flash</td>
+          <td>effort=low → bar 0, sort by unit cost; Flash is cheapest.</td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>Planning / Design<br><code>planning</code></td>
+          <td>medium</td>
+          <td class="prompt">Plan a 5-step rollout to add rate limiting to an OpenAI-compatible proxy. Include risks and rollback.</td>
+          <td class="win">deepseek-v4-pro</td>
+          <td>Plan bar 50 + Pro coding-phase priors beat Flash.</td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>Code Generation<br><code>code_generation</code></td>
+          <td>medium</td>
+          <td class="prompt">Write a typed Python function binary_search(nums: list[int], target: int) -&gt; int. Return -1 if missing. Include docstring.</td>
+          <td class="win">deepseek-v4-pro</td>
+          <td>Edit-family bar 40; Pro prior wins mid tier.</td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>Security Review<br><code>security_review</code></td>
+          <td>medium</td>
+          <td class="prompt">Review this auth sketch for issues: JWT in localStorage, no exp check, CORS *. List findings as bullets.</td>
+          <td class="win">deepseek-v4-pro</td>
+          <td>Security bar 50 + Pro prior (same story as planning).</td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>Debug / Test Fail<br><code>test_failure_analysis</code></td>
+          <td>medium</td>
+          <td class="prompt">pytest failed: AssertionError: expected 42 got None at tests/test_parser.py:88. Traceback shows parse_int returned None on empty string. Explain root cause and minimal fix.</td>
+          <td class="win">deepseek-v4-pro</td>
+          <td>Bar 53 drops Flash (AA 52); Pro clears debug-fail floor.</td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>Final Summary<br><code>summarize</code></td>
+          <td>xhigh</td>
+          <td class="prompt">TL;DR the difference between a rules router and a calibrated P(success) scorer in two sentences.</td>
+          <td class="win">deepseek-v4-pro</td>
+          <td>Same cheap phase as #1, but xhigh raises bar to 53 → Pro.</td>
+        </tr>
+        <tr>
+          <td>9</td>
+          <td>Planning / Design<br><code>planning</code></td>
+          <td>max</td>
+          <td class="prompt">Design a multi-region KV store with Byzantine fault tolerance. Cover quorum, conflict resolution, and CAP tradeoffs.</td>
+          <td class="win">kimi-k3</td>
+          <td>effort=max opens premium AA floor (58); K3 only catalog above it.</td>
+        </tr>
+        <tr>
+          <td>10</td>
+          <td>Code Generation<br><code>code_generation</code></td>
+          <td>max</td>
+          <td class="prompt">Implement a lock-free MPMC queue sketch in Python-like pseudocode and argue linearizability under weak memory.</td>
+          <td class="win">kimi-k3</td>
+          <td>Second max hop — frontier coding still gated to K3.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p class="source">Stage script → <a href="./ideathon-four-minute.html">ideathon-four-minute.html</a> · Machine list → <a href="../datasets/demo-pitch-prompts.jsonl">demo-pitch-prompts.jsonl</a></p>
+  </article>
+</body>
+</html>

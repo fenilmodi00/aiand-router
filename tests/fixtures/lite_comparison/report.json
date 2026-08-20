@@ -1,0 +1,19 @@
+{
+  "verdict": "bounded_check_only",
+  "label_type": "harness_proxy",
+  "comparison_mode": "fixture_replay",
+  "n": 10,
+  "rules_resolved": 3,
+  "trained_resolved": 7,
+  "rules_resolve_rate": 0.3,
+  "trained_resolve_rate": 0.7,
+  "delta_pp": 40.0,
+  "both_pass": 2,
+  "both_fail": 2,
+  "rules_only": 1,
+  "trained_only": 5,
+  "production_parity": false,
+  "session_gold": false,
+  "fixture": "tests/fixtures/lite_comparison/fixture.json",
+  "results": "tests/fixtures/lite_comparison/results.jsonl"
+}

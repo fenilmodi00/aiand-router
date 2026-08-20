@@ -1,0 +1,248 @@
+# SHADOW EXPERIMENT ONLY — unpaid cost overlay (2026-08-20).
+# Diff vs config/models.yaml: trained_effort.medium.threshold 0.10 -> 0.15.
+# Pair with data/scorer-hard-logistic-cost-overlay.json for verified replay.
+# Do NOT use as production models.yaml. Do NOT set TRAINED_PATH=trained.
+# Serve candidate remains data/scorer-hard-logistic.json + config/models.yaml.
+#
+# Public catalog prices: https://docs.aiand.com/models/catalog/
+# AA scores are public priors, not aiand-hosted measurements.
+# No free models. Motif-3 is on this org catalog (ping + tools ok 2026-08-13).
+
+virtual_model: router/auto
+fallback_model: deepseek-ai/deepseek-v4-flash
+max_tokens_limit: 32768
+upstream_timeout_s: 120
+redact_keys:
+  - key
+  - authorization
+  - token
+  - secret
+
+max_regret: 8
+trained_effort:
+  # Pioneer ship defaults (scorer.py SHIP_EFFORT). Retune to 0.83+ was a GBDT
+  # workaround when scores were non-discriminative; revert until geometry_pass.
+  low: {threshold: 0.05, max_regret: 0.30}
+  medium: {threshold: 0.15, max_regret: 0.20}  # cost-overlay-t015: unpaid shadow experiment; do not promote
+  high: {threshold: 0.20, max_regret: 0.15}
+  max: {threshold: 0.60, max_regret: 0.03}
+cascade_lane:
+  enabled: false
+  cheap_model: deepseek-ai/deepseek-v4-flash
+  strong_model: deepseek-ai/deepseek-v4-pro
+  # Off-path prototype only: ignored unless TRAINED_PATH=off and scorer data exists.
+  phases:
+    - plan
+    - planning
+    - edit
+    - code_generation
+    - code_edit
+    - refactoring
+    - tool
+    - tool_call
+    - debug
+    - debugging
+    - test_failure_analysis
+    - security_review
+latency_limit_ms: 0
+phase_threshold:
+  discover: 35
+  repository_discovery: 35
+  repository_summary: 30
+  intent: 40
+  plan: 50
+  planning: 50
+  edit: 40
+  code_generation: 40
+  code_edit: 40
+  refactoring: 40
+  security_review: 50
+  tool: 38
+  tool_call: 38
+  test_execution: 0
+  debug: 50
+  debugging: 50
+  test_failure_analysis: 53
+  summarize: 24
+  final_summary: 24
+
+# K3 only when the bar is at least this, or routing_effort=max
+premium_aa_floor: 58
+# After a reported test failure, debug must clear this (above Flash's AA 52)
+debug_fail_threshold: 53
+
+models:
+  - id: qwen/qwen3.6-27b
+    display_name: Qwen 3.6 27B
+    enabled: true
+    input_per_1m: 0.32
+    cached_input_per_1m: 0.20
+    output_per_1m: 3.20
+    context_window: 262144
+    supports_tools: true
+    supports_json: true
+    supports_streaming: true
+    max_output_tokens: 16384
+    aa_index: 38
+    aa_source: artificial_analysis
+    measured_on: not_aiand
+    measured_success: null
+
+  - id: deepseek-ai/deepseek-v4-flash
+    display_name: DeepSeek V4 Flash
+    enabled: true
+    input_per_1m: 0.15
+    cached_input_per_1m: 0.08
+    output_per_1m: 0.25
+    context_window: 1048576
+    supports_tools: true
+    supports_json: true
+    supports_streaming: true
+    max_output_tokens: 16384
+    aa_index: 52
+    aa_source: artificial_analysis
+    measured_on: not_aiand
+    measured_success: null
+
+  - id: google/gemma-4-31b-it
+    display_name: Gemma 4 31B
+    enabled: true
+    input_per_1m: 0.20
+    cached_input_per_1m: 0.05
+    output_per_1m: 0.50
+    context_window: 262144
+    supports_tools: true
+    supports_json: true
+    supports_streaming: true
+    max_output_tokens: 16384
+    aa_index: 30
+    aa_source: artificial_analysis
+    measured_on: not_aiand
+    measured_success: null
+
+  - id: openai/gpt-oss-120b
+    display_name: GPT OSS 120B
+    enabled: true
+    input_per_1m: 0.15
+    cached_input_per_1m: 0.08
+    output_per_1m: 0.60
+    context_window: 131072
+    supports_tools: true
+    supports_json: true
+    supports_streaming: true
+    max_output_tokens: 16384
+    aa_index: 24
+    aa_source: artificial_analysis
+    measured_on: not_aiand
+    measured_success: null
+
+  - id: moonshotai/kimi-k2.7-code
+    display_name: Kimi K2.7 Code
+    enabled: true
+    input_per_1m: 0.75
+    cached_input_per_1m: 0.20
+    output_per_1m: 3.50
+    context_window: 262144
+    supports_tools: true
+    supports_json: true
+    supports_streaming: true
+    max_output_tokens: 16384
+    aa_index: 42
+    aa_source: artificial_analysis
+    measured_on: not_aiand
+    measured_success: null
+
+  - id: deepseek-ai/deepseek-v4-pro
+    display_name: DeepSeek V4 Pro
+    enabled: true
+    input_per_1m: 1.00
+    cached_input_per_1m: 0.25
+    output_per_1m: 2.50
+    context_window: 1048576
+    supports_tools: true
+    supports_json: true
+    supports_streaming: true
+    max_output_tokens: 16384
+    aa_index: 53
+    aa_source: artificial_analysis
+    measured_on: not_aiand
+    measured_success: null
+    # Coding-agent phases: capability prior so pioneer_score prefers Pro over Flash
+    # while Flash stays global cheapest → rules_ne_cheapest becomes a real cost test.
+    # Summarize/discover keep AA/100 → still Flash.
+    priors:
+      plan: 0.65
+      planning: 0.65
+      intent: 0.65
+      security_review: 0.65
+      edit: 0.65
+      code_generation: 0.65
+      code_edit: 0.65
+      refactoring: 0.65
+      tool: 0.65
+      tool_call: 0.65
+      test_execution: 0.65
+      debug: 0.65
+      debugging: 0.65
+
+  - id: zai-org/glm-5.2
+    display_name: GLM 5.2
+    enabled: true
+    input_per_1m: 1.00
+    cached_input_per_1m: 0.30
+    output_per_1m: 4.00
+    context_window: 1048576
+    supports_tools: true
+    supports_json: true
+    supports_streaming: true
+    max_output_tokens: 16384
+    aa_index: 53
+    aa_source: artificial_analysis
+    measured_on: not_aiand
+    measured_success: null
+    priors:
+      plan: 0.65
+      planning: 0.65
+      intent: 0.65
+      security_review: 0.65
+      edit: 0.65
+      code_generation: 0.65
+      code_edit: 0.65
+      refactoring: 0.65
+      tool: 0.65
+      tool_call: 0.65
+      test_execution: 0.65
+      debug: 0.65
+      debugging: 0.65
+
+  - id: moonshotai/kimi-k3
+    display_name: Kimi K3
+    enabled: true
+    input_per_1m: 3.00
+    cached_input_per_1m: 0.50
+    output_per_1m: 12.50
+    context_window: 1048576
+    supports_tools: true
+    supports_json: true
+    supports_streaming: true
+    max_output_tokens: 16384
+    aa_index: 60
+    aa_source: artificial_analysis
+    measured_on: not_aiand
+    measured_success: null
+
+  - id: motif-technologies/motif-3
+    display_name: Motif 3
+    enabled: true
+    input_per_1m: 0.50
+    cached_input_per_1m: 0.20
+    output_per_1m: 2.00
+    context_window: 262144
+    supports_tools: true
+    supports_json: true
+    supports_streaming: true
+    max_output_tokens: 16384
+    aa_index: 47
+    aa_source: artificial_analysis
+    measured_on: not_aiand
+    measured_success: null

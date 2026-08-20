@@ -1,0 +1,2 @@
+{"instance_id": "django__django-11099", "problem_statement": "Fix the ORM query optimization bug in django."}
+{"instance_id": "sympy__sympy-20000", "problem_statement": "Fix the symbolic computation edge case in sympy."}

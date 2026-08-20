@@ -1,0 +1,582 @@
+# Review package: 40a64cd0661bd85aca3fe719e702295f3c004095..cb7a9bff01bf9b548d8b539e7aaef0363d596203
+
+## Commits
+cb7a9bf Add optional GBDT plus post-hoc Platt so a failed replay gate can take one Rec A lift without Rec B.
+
+## Files changed
+ src/aiand_router/scorer.py |  36 ++++++++++++++  src/aiand_router/train.py  |  98 +++++++++++++++++++++++++++++++++----  tests/test_scorer.py       |  23 +++++++++  tests/test_train.py        | 117 +++++++++++++++++++++++++++++++++++++++++++++  tests/test_trained_hop.py  |  45 +++++++++++++++++  5 files changed, 309 insertions(+), 10 deletions(-)
+
+## Diff
+
+diff --git a/src/aiand_router/scorer.py b/src/aiand_router/scorer.py
+index 8045794..56dc356 100644
+--- a/src/aiand_router/scorer.py
++++ b/src/aiand_router/scorer.py
+@@ -110,29 +110,65 @@ def _dot(w: list[float], x: list[float]) -> float:
+     n = min(len(w), len(x))
+     return sum(float(w[i]) * x[i] for i in range(n))
+ 
+ 
+ def _calibrator_ab(artifact: dict[str, Any]) -> tuple[float, float]:
+     cal = artifact.get("calibrator") if isinstance(artifact.get("calibrator"), dict) else {}
+     src = cal if ("a" in cal or "b" in cal) else (artifact.get("platt") or {})
+     return float(src.get("a", 1.0)), float(src.get("b", 0.0))
+ 
+ 
++def _gbdt_z(head: dict[str, Any], x: list[float]) -> float:
++    z = float(head.get("intercept") or 0.0)
++    for t in head.get("trees") or []:
++        j = int(t["feature"])
++        if j >= len(x):
++            continue
++        z += float(t["left"] if x[j] <= float(t["threshold"]) else t["right"])
++    return z
++
++
+ def score_eligible(
+     artifact: dict[str, Any],
+     eligible_ids: list[str],
+     *,
+     phase: str = "plan",
+     needs_tools: bool = False,
+     tokens: int = 1,
+     hint_bin: str | None = None,
+ ) -> tuple[str, dict[str, float]]:
++    gbdt = artifact.get("gbdt")
++    if isinstance(gbdt, dict) and gbdt:
++        bin_ = (
++            hint_bin
++            if hint_bin in BINS
++            else predict_complexity_bin(
++                artifact, phase=phase, needs_tools=needs_tools, tokens=tokens
++            )
++        )
++        x = featurize(phase, needs_tools, tokens, bin_)
++        a, b = _calibrator_ab(artifact)
++        intercepts = artifact.get("intercepts") or {}
++        table = artifact.get("p_success") or {}
++        p_success = {}
++        for i in eligible_ids:
++            if intercepts and i not in intercepts:
++                if i in table:
++                    p_success[i] = float(table[i])
++                continue
++            head = gbdt.get(i)
++            if not isinstance(head, dict):
++                if i in table:
++                    p_success[i] = float(table[i])
++                continue
++            p_success[i] = _sigmoid(a * _gbdt_z(head, x) + b)
++        return bin_, p_success
+     weights = artifact.get("weights")
+     if isinstance(weights, dict) and weights:
+         bin_ = (
+             hint_bin
+             if hint_bin in BINS
+             else predict_complexity_bin(
+                 artifact, phase=phase, needs_tools=needs_tools, tokens=tokens
+             )
+         )
+         x = featurize(phase, needs_tools, tokens, bin_)
+diff --git a/src/aiand_router/train.py b/src/aiand_router/train.py
+index 28fa3fa..ddc27b6 100644
+--- a/src/aiand_router/train.py
++++ b/src/aiand_router/train.py
+@@ -19,21 +19,21 @@ from .cache import RequestCache, request_cache_key
+ from .provider import HttpAiandProvider
+ from .router import (
+     SpendLog,
+     estimate_cost,
+     estimate_tokens,
+     load_config,
+     load_models,
+     Model,
+ )
+ from .pool import run_pool, sample_stratum
+-from .scorer import BINS, featurize, featurize_observable
++from .scorer import BINS, _gbdt_z, featurize, featurize_observable
+ 
+ _TEACHER_SYS = (
+     "Label this coding-agent request for a model router. Do not solve the task. "
+     "complexity_bin must be one of trivial, standard, hard, frontier. "
+     "trivial=rename/typo/lookup; standard=localized implement/fix; "
+     "hard=multi-file/ambiguous/debug; frontier=novel/huge/adversarial. "
+     "p_success maps each catalog model id to P(that model would succeed) in [0,1]. "
+     "Catalog ids: {ids}. label_confidence in [0,1]."
+ )
+ 
+@@ -616,20 +616,80 @@ def _fit_binary_intercept(
+             z = intercept + sum(w[i] * x[i] for i in range(dim))
+             z = max(-30.0, min(30.0, z))
+             err = (1.0 / (1.0 + math.exp(-z))) - y
+             for i in range(1, dim):
+                 grad[i] += err * x[i]
+         for i in range(1, dim):
+             w[i] -= lr * grad[i] / n
+     return w
+ 
+ 
++GBDT_TREES = 24
++GBDT_LR = 0.1
++
++
++def _fit_stump(xs: list[list[float]], resid: list[float]) -> dict[str, float]:
++    n = len(xs)
++    dim = len(xs[0]) if xs else 0
++    best: tuple[float, int, float, float, float] | None = None
++    for j in range(1, dim):
++        vals = sorted({x[j] for x in xs})
++        if len(vals) < 2:
++            continue
++        for k in range(len(vals) - 1):
++            thr = 0.5 * (vals[k] + vals[k + 1])
++            left_s = left_n = right_s = right_n = 0.0
++            for x, r in zip(xs, resid):
++                if x[j] <= thr:
++                    left_s += r
++                    left_n += 1
++                else:
++                    right_s += r
++                    right_n += 1
++            if left_n == 0 or right_n == 0:
++                continue
++            left, right = left_s / left_n, right_s / right_n
++            sse = 0.0
++            for x, r in zip(xs, resid):
++                pred = left if x[j] <= thr else right
++                sse += (r - pred) ** 2
++            if best is None or sse < best[0]:
++                best = (sse, j, thr, left, right)
++    if best is None:
++        mean = (sum(resid) / n) if n else 0.0
++        return {"feature": 0, "threshold": 0.0, "left": mean, "right": mean}
++    return {"feature": best[1], "threshold": best[2], "left": best[3], "right": best[4]}
++
++
++def _fit_gbdt(
++    xs: list[list[float]],
++    ys: list[float],
++    intercept: float,
++    n_trees: int = GBDT_TREES,
++    lr: float = GBDT_LR,
++) -> dict[str, Any]:
++    z = [intercept] * len(xs)
++    trees: list[dict[str, float]] = []
++    for _ in range(n_trees):
++        p = [1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, zi)))) for zi in z]
++        resid = [y - pi for y, pi in zip(ys, p)]
++        stump = _fit_stump(xs, resid)
++        stump["left"] = float(stump["left"]) * lr
++        stump["right"] = float(stump["right"]) * lr
++        trees.append(stump)
++        j = int(stump["feature"])
++        thr = float(stump["threshold"])
++        for i, x in enumerate(xs):
++            z[i] += stump["left"] if (j < len(x) and x[j] <= thr) else stump["right"]
++    return {"intercept": intercept, "trees": trees}
++
++
+ def _fit_platt(zs: list[float], ys: list[float]) -> tuple[float, float]:
+     if len(zs) < 2:
+         return 1.0, 0.0
+     a, b = 1.0, 0.0
+     n = len(zs)
+     for _ in range(60):
+         ga = gb = 0.0
+         for z, y in zip(zs, ys):
+             p = 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, a * z + b))))
+             err = p - y
+@@ -659,21 +719,25 @@ def _jsonl_rows(path: Path) -> list[dict[str, Any]]:
+         for line in path.read_text(encoding="utf-8").splitlines()
+         if line.strip()
+     ]
+ 
+ 
+ def _observed_gold(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+     return [r for r in rows if not r.get("unobserved") and "model_id" in r]
+ 
+ 
+ def fit_scorer(
+-    gold_path: Path, silver_path: Path | None, out: Path, cal_path: Path | None = None
++    gold_path: Path,
++    silver_path: Path | None,
++    out: Path,
++    cal_path: Path | None = None,
++    gbdt: bool = False,
+ ) -> None:
+     gold = _jsonl_rows(gold_path)
+     silver = _jsonl_rows(silver_path) if silver_path and silver_path.exists() else []
+     observed = _observed_gold(gold)
+     cal_file = _observed_gold(_jsonl_rows(cal_path)) if cal_path and cal_path.exists() else []
+     tagged_cal = [r for r in observed if r.get("dense")]
+     tagged_train = [r for r in observed if not r.get("dense")]
+     if cal_file:
+         train_gold = tagged_train
+         cal_gold = cal_file
+@@ -702,72 +766,84 @@ def fit_scorer(
+             continue
+         x = _row_x(row)
+         prompt = str(row.get("prompt") or "")
+         for mid, p in (row.get("p_success") or {}).items():
+             if mid not in gold_ids:
+                 continue
+             if (prompt, mid) in gold_cells:
+                 continue
+             by_model_x[mid].append(x)
+             by_model_y[mid].append(float(p))
+-    weights = {}
++    weights: dict[str, list[float]] = {}
+     intercepts = {}
++    gbdt_heads: dict[str, dict[str, Any]] = {}
+     for mid, xs in by_model_x.items():
+         n_train = train_counts[mid]
+         if n_train == 0 or not xs:
+             continue
+         gold_ys = by_model_y[mid][:n_train]
+         rate = sum(gold_ys) / len(gold_ys) if gold_ys else 0.5
+         ic = _logit(rate)
+         intercepts[mid] = ic
+-        weights[mid] = _fit_binary_intercept(xs, by_model_y[mid], ic)
++        if gbdt:
++            gbdt_heads[mid] = _fit_gbdt(xs, by_model_y[mid], ic)
++        else:
++            weights[mid] = _fit_binary_intercept(xs, by_model_y[mid], ic)
+     zs_cal: list[float] = []
+     ys_cal: list[float] = []
+     for row in cal_gold:
+         mid = row["model_id"]
+-        w = weights.get(mid)
+-        if not w:
+-            continue
+-        ic = intercepts[mid]
+         x = _row_x(row)
+-        zs_cal.append(ic + sum(w[i] * x[i] for i in range(len(w))))
++        if gbdt:
++            head = gbdt_heads.get(mid)
++            if not head:
++                continue
++            zs_cal.append(_gbdt_z(head, x))
++        else:
++            w = weights.get(mid)
++            if not w:
++                continue
++            ic = intercepts[mid]
++            zs_cal.append(ic + sum(w[i] * x[i] for i in range(len(w))))
+         ys_cal.append(1.0 if row.get("success") else 0.0)
+     a, b = _fit_platt(zs_cal, ys_cal)
+     bin_xs: list[list[float]] = []
+     bin_ys: dict[str, list[float]] = {bn: [] for bn in BINS}
+     for row in silver:
+         if row.get("unlabeled") or row.get("complexity_bin") not in BINS:
+             continue
+         x = _row_x_observable(row)
+         bin_xs.append(x)
+         for bn in BINS:
+             bin_ys[bn].append(1.0 if row["complexity_bin"] == bn else 0.0)
+     bin_weights = {bn: _fit_binary(bin_xs, bin_ys[bn]) for bn in BINS} if bin_xs else {}
+     p_success = {}
+     for mid in gold_ids:
+         gold_ys = [1.0 if r.get("success") else 0.0 for r in observed if r["model_id"] == mid]
+         if gold_ys:
+             p_success[mid] = sum(gold_ys) / len(gold_ys)
+     bins = [str(r.get("complexity_bin")) for r in silver if r.get("complexity_bin") in BINS]
+     bin_ = max(set(bins), key=bins.count) if bins else "standard"
+-    artifact = {
++    artifact: dict[str, Any] = {
+         "not_spec_floors": True,
+         "complexity_bin": bin_,
+         "p_success": p_success,
+         "weights": weights,
+         "intercepts": intercepts,
+         "bin_weights": bin_weights,
+         "platt": {"a": a, "b": b},
+         "n_gold": len(gold),
+         "n_cal": len(cal_gold),
+         "n_silver": len(silver),
+     }
++    if gbdt:
++        artifact["gbdt"] = gbdt_heads
+     out.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
+ 
+ 
+ def _query_map(queries_path: Path) -> dict[str, dict[str, Any]]:
+     qmap: dict[str, dict[str, Any]] = {}
+     paths = [queries_path, queries_path.parent / "verified-queries.jsonl"]
+     for path in paths:
+         if path.exists():
+             for q in _read_queries(path, 10_000):
+                 qmap[_prompt_of(_messages(q))] = q
+@@ -901,20 +977,21 @@ def main(
+     g.add_argument("--queries", required=True)
+     g.add_argument("--out", required=True)
+     g.add_argument("--limit", type=int, default=None)
+     g.add_argument("--dense", action="store_true")
+     g.add_argument("--exclude")
+     f = sub.add_parser("fit")
+     f.add_argument("--gold", required=True)
+     f.add_argument("--cal")
+     f.add_argument("--silver")
+     f.add_argument("--out", required=True)
++    f.add_argument("--gbdt", action="store_true")
+     r = sub.add_parser("relabel")
+     r.add_argument("--gold", required=True)
+     r.add_argument("--queries", required=True)
+     r.add_argument("--out", required=True)
+     s = sub.add_parser("salvage")
+     s.add_argument("--silver", required=True)
+     s.add_argument("--queries", required=True)
+     args = parser.parse_args(argv)
+     if args.cmd == "pool":
+         return run_pool(args)
+@@ -928,20 +1005,21 @@ def main(
+     key = os.getenv("AIAND_API_KEY", "")
+     base = os.getenv("AIAND_BASE_URL", "https://api.aiand.com/v1")
+     upstream = provider or HttpAiandProvider(base, key)
+ 
+     if args.cmd == "fit":
+         fit_scorer(
+             Path(args.gold),
+             Path(args.silver) if args.silver else None,
+             Path(args.out),
+             Path(args.cal) if args.cal else None,
++            gbdt=bool(args.gbdt),
+         )
+         return 0
+     if args.cmd == "relabel":
+         relabel_gold(
+             Path(args.gold),
+             Path(args.queries),
+             Path(args.out),
+             cache=cache,
+             models_by_id=by_id,
+         )
+diff --git a/tests/test_scorer.py b/tests/test_scorer.py
+index 98f41e9..20a7489 100644
+--- a/tests/test_scorer.py
++++ b/tests/test_scorer.py
+@@ -262,10 +262,33 @@ def test_load_scorer_corrupt_is_none_and_scorer_down_does_not_invent_p(tmp_path)
+         health=1,
+         priors=None,
+     )
+     rules = Decision(model=model, phase="plan", threshold=0, reason="rules", candidates=["cheap/ok"])
+     rules.confidence = 0.99
+     out = apply_trained_path("trained", rules, None, tokens=10)
+     assert out.confidence is None
+     assert out.complexity_bin is None
+     assert "scorer_down" in (out.reason_codes or [])
+     assert out.p_success is None
++
++
++def test_score_eligible_uses_gbdt_when_present():
++    """GBDT artifact scores from trees + Platt, not the logistic weights path."""
++    from aiand_router.scorer import score_eligible
++
++    zeros = _zeros(_full_dim())
++    artifact = {
++        "not_spec_floors": True,
++        "weights": {"m/a": zeros},
++        "intercepts": {"m/a": 0.0},
++        "gbdt": {
++            "m/a": {
++                "intercept": 0.0,
++                "trees": [{"feature": 1, "threshold": 0.5, "left": -2.0, "right": 2.0}],
++            }
++        },
++        "platt": {"a": 1.0, "b": 0.0},
++    }
++    _, no_tools = score_eligible(artifact, ["m/a"], phase="plan", needs_tools=False, tokens=100)
++    _, with_tools = score_eligible(artifact, ["m/a"], phase="plan", needs_tools=True, tokens=100)
++    assert no_tools["m/a"] < 0.5 < with_tools["m/a"]
++    assert artifact["not_spec_floors"] is True
+diff --git a/tests/test_train.py b/tests/test_train.py
+index c8b8539..cce49fc 100644
+--- a/tests/test_train.py
++++ b/tests/test_train.py
+@@ -1331,10 +1331,127 @@ def test_gold_budget_skip_is_unobserved_not_failure(tmp_path, monkeypatch):
+         if r.get("unobserved"):
+             assert "success" not in r
+ 
+ 
+ def test_fit_binary_intercept_freezes_bias_column():
+     """Per-model intercept already locks the marginal; do not also learn w[0]."""
+     xs = [[1.0, 2.0], [1.0, -1.0], [1.0, 0.5], [1.0, 3.0]]
+     ys = [1.0, 0.0, 1.0, 0.0]
+     w = _fit_binary_intercept(xs, ys, intercept=_logit(0.5))
+     assert w[0] == 0.0
++
++
++def test_fit_gbdt_writes_trees_keeps_not_spec_floors(tmp_path, monkeypatch):
++    """One GBDT + post-hoc Platt after logistic fails the gate. Rec B / live embed stay closed."""
++    from aiand_router.scorer import score_eligible
++
++    monkeypatch.setenv(OPT_IN_ENV, "1")
++    flash = "deepseek-ai/deepseek-v4-flash"
++    train = [_gold_cell(f"train prompt {i}", flash, i % 2 == 0) for i in range(8)]
++    for i, r in enumerate(train):
++        r["needs_tools"] = i >= 4
++        r["phase"] = "debug" if i >= 4 else "edit"
++    gold = tmp_path / "gold.jsonl"
++    gold.write_text("".join(json.dumps(r) + "\n" for r in train), encoding="utf-8")
++    cal = tmp_path / "cal.jsonl"
++    cal.write_text(
++        "".join(json.dumps(_gold_cell(f"zz cal {i}", flash, False)) + "\n" for i in range(2)),
++        encoding="utf-8",
++    )
++    artifact = tmp_path / "scorer.json"
++    assert (
++        main(
++            [
++                "fit",
++                "--gold",
++                str(gold),
++                "--cal",
++                str(cal),
++                "--out",
++                str(artifact),
++                "--gbdt",
++            ],
++            provider=FakeProvider(),
++            spend=SpendLog(tmp_path / "spend.txt", 15),
++            cache_dir=tmp_path / "cache",
++            models_path=Path("config/models.yaml"),
++        )
++        == 0
++    )
++    data = json.loads(artifact.read_text(encoding="utf-8"))
++    assert data["not_spec_floors"] is True
++    assert "threshold" not in data
++    assert "max_regret" not in data
++    assert "embed" not in data and "bilinear" not in data
++    assert flash in data["gbdt"]
++    trees = data["gbdt"][flash]["trees"]
++    assert isinstance(trees, list) and trees
++    assert "feature" in trees[0] and "threshold" in trees[0]
++    _, ps = score_eligible(
++        data, [flash], phase="edit", needs_tools=False, tokens=10, hint_bin=None
++    )
++    assert flash in ps
++    assert 0.0 < ps[flash] < 1.0
++
++
++def test_fit_gbdt_platt_on_cal_gold_only(tmp_path, monkeypatch):
++    """GBDT z is calibrated on the cal-gold slice only ΓÇö never silver, never train y."""
++    monkeypatch.setenv(OPT_IN_ENV, "1")
++    flash = "deepseek-ai/deepseek-v4-flash"
++    train = [_gold_cell(f"train prompt {i}", flash, True) for i in range(8)]
++    cal_rows = [_gold_cell(f"zz cal prompt {i}", flash, False) for i in range(2)]
++    gold = tmp_path / "gold.jsonl"
++    gold.write_text("".join(json.dumps(r) + "\n" for r in train), encoding="utf-8")
++    cal = tmp_path / "cal.jsonl"
++    cal.write_text("".join(json.dumps(r) + "\n" for r in cal_rows), encoding="utf-8")
++    silver = tmp_path / "silver.jsonl"
++    silver.write_text(
++        json.dumps(
++            {
++                "prompt": "unobserved silver",
++                "complexity_bin": "standard",
++                "p_success": {flash: 1.0},
++                "tokens": 10,
++                "needs_tools": False,
++                "phase": "edit",
++                "hint_bin": "standard",
++            }
++        )
++        + "\n",
++        encoding="utf-8",
++    )
++    artifact = tmp_path / "scorer.json"
++    assert (
++        main(
++            [
++                "fit",
++                "--gold",
++                str(gold),
++                "--cal",
++                str(cal),
++                "--silver",
++                str(silver),
++                "--out",
++                str(artifact),
++                "--gbdt",
++            ],
++            provider=FakeProvider(),
++            spend=SpendLog(tmp_path / "spend.txt", 15),
++            cache_dir=tmp_path / "cache",
++            models_path=Path("config/models.yaml"),
++        )
++        == 0
++    )
++    data = json.loads(artifact.read_text(encoding="utf-8"))
++    head = data["gbdt"][flash]
++    zs, ys = [], []
++    for r in cal_rows:
++        x = _row_x(r)
++        z = float(head["intercept"])
++        for t in head["trees"]:
++            z += t["left"] if x[int(t["feature"])] <= float(t["threshold"]) else t["right"]
++        zs.append(z)
++        ys.append(1.0 if r["success"] else 0.0)
++    a, b = _fit_platt(zs, ys)
++    assert data["platt"]["a"] == a
++    assert data["platt"]["b"] == b
++    assert data["not_spec_floors"] is True
+diff --git a/tests/test_trained_hop.py b/tests/test_trained_hop.py
+index 5cfa36e..e747454 100644
+--- a/tests/test_trained_hop.py
++++ b/tests/test_trained_hop.py
+@@ -589,10 +589,55 @@ def test_shadow_loads_rec_a_and_predicts_bin_without_hint_bin(tmp_path):
+         headers={**AUTH, "x-agent-phase": "summarize"},
+     )
+     assert response.status_code == 200
+     assert response.headers["x-router-path"] == "shadow"
+     assert provider.calls[0]["model"] == "cheap/ok"
+     assert response.headers["x-router-complexity-bin"] == "frontier"
+     assert "x-router-trained-would" in response.headers
+     row = _last_row(tmp_path)
+     assert row["path"] == "shadow"
+     assert row["complexity_bin"] == "frontier"
++
++
++def test_shadow_loads_gbdt_and_does_not_auto_flip(tmp_path):
++    """GBDT Rec A still serves rules under default shadow; JSONL/headers show path. No Verified stamp."""
++    from aiand_router.scorer import BINS, FAMILIES
++
++    yaml_path = _tiny_catalog(tmp_path)
++    obs = 3 + 4 + len(FAMILIES)
++    obs_z = [0.0] * obs
++    artifact = tmp_path / "scorer.json"
++    artifact.write_text(
++        json.dumps(
++            {
++                "not_spec_floors": True,
++                "complexity_bin": "standard",
++                "gbdt": {
++                    "cheap/ok": {"intercept": -1.0, "trees": []},
++                    "mid/ok": {"intercept": 0.5, "trees": []},
++                    "dear/ok": {"intercept": 1.5, "trees": []},
++                },
++                "intercepts": {"cheap/ok": -1.0, "mid/ok": 0.5, "dear/ok": 1.5},
++                "p_success": {"cheap/ok": 0.3, "mid/ok": 0.6, "dear/ok": 0.9},
++                "bin_weights": {
++                    "trivial": obs_z,
++                    "standard": obs_z,
++                    "hard": obs_z,
++                    "frontier": obs_z,
++                },
++                "platt": {"a": 1.0, "b": 0.0},
++            }
++        ),
++        encoding="utf-8",
++    )
++    client, provider = _client(tmp_path, scorer_path=artifact, config_path=yaml_path)
++    response = client.post("/v1/chat/completions", json=CHAT, headers=AUTH)
++    assert response.status_code == 200
++    assert response.headers["x-router-path"] == "shadow"
++    assert provider.calls[0]["model"] == "cheap/ok"
++    # GBDT intercepts: cheap 0.27 / mid 0.62 / dear 0.82 ΓåÆ cheapest-above-bar is mid.
++    # Table-only p_success would pick dear. Live hop stays rules (cheap).
++    assert response.headers["x-router-trained-would"] == "mid/ok"
++    row = _last_row(tmp_path)
++    assert row["path"] == "shadow"
++    data = json.loads(artifact.read_text(encoding="utf-8"))
++    assert data["not_spec_floors"] is True

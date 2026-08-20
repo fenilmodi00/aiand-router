@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>0006 — Ideathon 4-minute pitch</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+  <article class="page">
+    <nav class="crumbs">
+      <a href="../MISSION.md">Mission</a> ·
+      <a href="../reference/ideathon-four-minute.html">Stage card</a> ·
+      <a href="../reference/pitch-six-minute.html">SAFE numbers</a> ·
+      <a href="./0006-ideathon-final-pitch.pptx">Live PPT</a> ·
+      <a href="./0005-pitch-technical-fluency.html">Lesson 0005</a>
+    </nav>
+
+    <header>
+      <h1>Official clock: 4 minutes + 3 Q&amp;A</h1>
+      <p class="lede">
+        Match the AI Ideathon 2026 Final Pitch Guidelines. Balance all five criteria —
+        do not burn the whole slot on idea, demo, or tech alone.
+      </p>
+    </header>
+
+    <p class="callout">
+      Rehearse with a phone timer. If a block runs long, cut sentences — never cut the demo or the closing.
+      Ask this teacher to grill you for the 3-minute Q&amp;A after one full timed run.
+      Speak-from deck: <a href="./0006-ideathon-final-pitch.pptx">0006-ideathon-final-pitch.pptx</a>
+      (regenerate: <code>python scripts/gen_ideathon_ppt.py</code>).
+    </p>
+
+    <h2>Judging mix (keep in your head)</h2>
+    <ul>
+      <li>Problem fit &amp; impact — <strong>25%</strong></li>
+      <li>Innovation — <strong>20%</strong></li>
+      <li>Technical — <strong>20%</strong></li>
+      <li>Product potential — <strong>20%</strong></li>
+      <li>Demo &amp; presentation — <strong>15%</strong></li>
+    </ul>
+
+    <h2>Word-for-word spine (adapt to your voice)</h2>
+
+    <h3>1 · Problem &amp; impact <span class="muted">(0:00–0:45)</span></h3>
+    <p>
+      Coding agents don’t make one model call — they make dozens per session: discover, plan, edit, debug, summarize.
+      Teams face a bad trade-off. <em>Premium-only</em> (always K3 / frontier) burns budget on trivial greps.
+      <em>Cheap-only</em> (always Flash) fails multi-file refactors and tool-heavy debug.
+      Who feels it? Engineering teams running OpenCode, Cursor, Claude Code against multi-model catalogs.
+      Impact: measurable dollars per agent session — and fewer broken loops that waste human time.
+    </p>
+
+    <h3>2 · Solution &amp; innovation <span class="muted">(0:45–1:30)</span></h3>
+    <p>
+      We built <strong>aiand/auto</strong> — an OpenAI-compatible gateway. Point your agent at us with
+      <code>model: router/auto</code>. Each hop, we filter ineligible models, then pick the
+      <em>cheapest model that still clears your quality bar</em>.
+    </p>
+    <p>
+      What’s different: not a static “if phase=edit use model X” router.
+      We train a tiny <strong>Scorer</strong> offline — a teacher labels difficulty and success priors;
+      we measure gold on real aiand completions; we fit calibrated P(success).
+      Live, that student runs in milliseconds — <strong>we do not call an LLM to decide the route</strong>.
+      That is what AI enables: better picks without adding latency and cost to the routing itself.
+    </p>
+
+    <h3>3 · Demo <span class="muted">(1:30–2:45) — one journey only</span></h3>
+    <ol>
+      <li><strong>User problem:</strong> “I need this agent step cheap but reliable.”</li>
+      <li><strong>User action:</strong> Playground (or OpenCode) sends one <code>router/auto</code> chat with a phase.</li>
+      <li><strong>AI / product process:</strong> Show response headers or UI: chosen model, reason/score, path.</li>
+      <li><strong>Useful result:</strong> Cut to dashboard — candidate mix + savings vs expensive baseline on that hop.</li>
+    </ol>
+    <p class="callout">
+      Skip login, keys page, and menus. Tabs pre-opened: playground + <code>/routers/auto</code>.
+      Optional 5s: landing simulator as “what the product vision looks like” — then live hop.
+      Prompt pack (phase + effort → Flash / Pro / K3): <a href="../reference/demo-prompts-ten.html">demo-prompts-ten.html</a>
+      (<code>TRAINED_PATH=shadow</code> for the ladder).
+    </p>
+
+    <h3>4 · Technical implementation <span class="muted">(2:45–3:25)</span></h3>
+    <p>Say the diagram out loud:</p>
+    <p><code>Agent → FastAPI gateway → Rules + Scorer → aiand API → result + JSONL log</code></p>
+    <ul>
+      <li>Backend: FastAPI, OpenAI-compatible <code>/v1/chat/completions</code></li>
+      <li>Frontend: Next.js landing, dashboard, playground</li>
+      <li>Data: 2000 train queries; gold/silver fit → <code>data/scorer.json</code> (<code>not_spec_floors</code>)</li>
+      <li>Proof of engineering: 213 tests; CI never spends credits; soft spend tracked locally</li>
+    </ul>
+    <p>No framework laundry list. Feasibility &gt; buzzwords.</p>
+
+    <h3>5 · Potential &amp; close <span class="muted">(3:25–4:00)</span></h3>
+    <p>
+      Target users: teams and agent platforms that already speak OpenAI APIs.
+      Adoption is a baseURL change — no harness rewrite.
+      Scale: add models in YAML, retrain Scorer offline, shadow, then flip — same client forever.
+      Next: promote trained after gates, SWE-bench Verified as the quality bar, managed SaaS / aiand partnership.
+    </p>
+    <p>
+      <strong>Close:</strong> “Agents will keep multiplying model calls. aiand/auto makes every hop cost-aware
+      without rewriting the agent — and we can prove each pick in the log.”
+    </p>
+
+    <h2>3-minute Q&amp;A — who answers what</h2>
+    <ul>
+      <li><strong>You (product / demo):</strong> who it’s for, journey, dashboard meaning, competitors at product level</li>
+      <li><strong>You or teammate (tech):</strong> architecture, Scorer vs rules, files, tests, limitations</li>
+    </ul>
+    <p>Full cheat table: <a href="../reference/ideathon-four-minute.html">ideathon-four-minute.html</a>.</p>
+
+    <h2>Retrieval quiz (structure, not vanity numbers)</h2>
+    <div id="quiz"></div>
+
+    <h2>Primary source</h2>
+    <p>
+      Your operators’ <em>AI Ideathon 2026 Final Pitch Guidelines</em> (the message you pasted) —
+      treat that as the clock contract. Technical depth: <a href="../ARCHITECTURE.md">ARCHITECTURE.md</a>.
+    </p>
+  </article>
+
+  <script src="../assets/quiz.js"></script>
+  <script>
+    mountQuiz(document.getElementById("quiz"), [
+      {
+        prompt: "How long is the Ideathon final pitch monologue?",
+        options: [
+          { text: "Four minutes, then three minutes of Q&A" },
+          { text: "Six minutes, then two minutes of Q&A" },
+          { text: "Three minutes, then four minutes of Q&A" }
+        ],
+        answer: "Four minutes, then three minutes of Q&A",
+        ok: "Official finals clock. Rehearse to 4:00, not 6:00.",
+        no: "Operators set 4 + 3. Old six-minute framing is for fluency practice only."
+      },
+      {
+        prompt: "Which block should get the single longest slice?",
+        options: [
+          { text: "Product demo — about sixty to seventy-five seconds" },
+          { text: "Framework list — about sixty to seventy-five seconds" },
+          { text: "Login walkthrough — about sixty to seventy-five seconds" }
+        ],
+        answer: "Product demo — about sixty to seventy-five seconds",
+        ok: "Guidelines put demo at 60–75s. One user journey, strongest path.",
+        no: "Skip setup chrome. Framework dump is not the demo block."
+      },
+      {
+        prompt: "Best one-line answer to “why is AI necessary?”",
+        options: [
+          { text: "Offline teacher trains a tiny live Scorer — no LLM on the hop" },
+          { text: "We paste ChatGPT into every routing decision for accuracy" },
+          { text: "AI is necessary because our slide deck mentions machine learning" }
+        ],
+        answer: "Offline teacher trains a tiny live Scorer — no LLM on the hop",
+        ok: "That is purposeful AI: quality picks without taxing the hot path.",
+        no: "Calling a big model to route would add the cost you’re trying to save."
+      },
+      {
+        prompt: "You are at 3:40 with no closing yet. What do you cut?",
+        options: [
+          { text: "Extra tech jargon — keep potential line and closing" },
+          { text: "The entire demo — keep listing every Python package" },
+          { text: "The problem — jump straight into YAML file paths" }
+        ],
+        answer: "Extra tech jargon — keep potential line and closing",
+        ok: "Guidelines want a strong close and future path. Trim jargon first.",
+        no: "Never delete the demo or the “why it matters” close to save a package name."
+      }
+    ]);
+  </script>
+</body>
+</html>

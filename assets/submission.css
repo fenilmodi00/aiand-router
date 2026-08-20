@@ -1,0 +1,208 @@
+/* Hackathon submission deck — print-first, 6 pages */
+@import url("lesson.css");
+
+@page {
+  size: A4;
+  margin: 18mm 16mm 20mm;
+}
+
+html { font-size: 17px; }
+
+.page {
+  max-width: none;
+  padding: 0;
+}
+
+/* Each .slide is one printed page */
+.slide {
+  min-height: 248mm;
+  page-break-after: always;
+  break-after: page;
+  padding: 0.2rem 0 1.5rem;
+  position: relative;
+}
+
+.slide:last-child {
+  page-break-after: auto;
+}
+
+.slide-num {
+  position: absolute;
+  top: 0;
+  right: 0;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.cover {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 248mm;
+  text-align: center;
+}
+
+.cover h1 {
+  font-size: 2.4rem;
+  margin-bottom: 0.5rem;
+}
+
+.cover .tagline {
+  font-size: 1.15rem;
+  color: var(--muted);
+  max-width: 28rem;
+  margin: 0 auto 2rem;
+}
+
+.cover .meta {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-top: 3rem;
+}
+
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  justify-content: center;
+  margin: 1.5rem 0;
+}
+
+.badge {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--card);
+}
+
+h2.slide-title {
+  font-size: 1.35rem;
+  margin: 0 0 0.15rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid var(--accent);
+}
+
+.subtitle {
+  color: var(--muted);
+  font-size: 0.92rem;
+  margin: 0 0 1.1rem;
+}
+
+.cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 0.8rem 0;
+}
+
+.col-card {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  padding: 0.75rem 0.85rem;
+  border-radius: 4px;
+}
+
+.col-card h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+}
+
+.col-card ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.88rem;
+}
+
+.col-card li { margin: 0.25rem 0; }
+
+.col-card.bad { border-left: 4px solid var(--bad); }
+.col-card.good { border-left: 4px solid var(--ok); }
+
+.pipeline {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  margin: 0.9rem 0 1.1rem;
+}
+
+.pipeline .step {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  padding: 0.45rem 0.35rem;
+  text-align: center;
+  border-radius: 3px;
+}
+
+.pipeline .step strong {
+  display: block;
+  font-size: 0.78rem;
+  margin-bottom: 0.15rem;
+}
+
+table.compact {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  margin: 0.7rem 0;
+}
+
+table.compact th,
+table.compact td {
+  border: 1px solid var(--rule);
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+table.compact th {
+  background: #eee8df;
+  font-weight: 600;
+}
+
+.criteria {
+  font-size: 0.82rem;
+}
+
+.criteria tr td:first-child {
+  font-weight: 600;
+  width: 38%;
+  color: var(--accent);
+}
+
+.timeline {
+  list-style: none;
+  padding: 0;
+  margin: 0.6rem 0;
+}
+
+.timeline li {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  gap: 0.6rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.88rem;
+}
+
+.timeline .when {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--accent);
+}
+
+.small { font-size: 0.85rem; color: var(--muted); }
+
+@media print {
+  body { background: #fff; }
+  .slide { min-height: auto; }
+  .cover { min-height: 240mm; }
+}
+
+@media (max-width: 40rem) {
+  .cols { grid-template-columns: 1fr; }
+  .pipeline { grid-template-columns: 1fr 1fr; }
+}
