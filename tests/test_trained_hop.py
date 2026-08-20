@@ -120,6 +120,24 @@ def test_shadow_serves_rules_pick_and_records_trained_would(tmp_path):
     assert row["trained_selected"] == PRO
 
 
+def test_shadow_gateway_hop_path_header_serves_trained_counterfactual(tmp_path):
+    yaml_path = _tiny_catalog(tmp_path)
+    scorer = _write_scorer(tmp_path, {"cheap/ok": 0.85, "mid/ok": 0.90, "dear/ok": 0.91})
+    client, provider = _client(
+        tmp_path, trained_path="shadow", scorer_path=scorer, config_path=yaml_path
+    )
+    response = client.post(
+        "/v1/chat/completions",
+        json=CHAT,
+        headers={**AUTH, "x-agent-phase": "summarize", "x-router-hop-path": "trained"},
+    )
+    assert response.status_code == 200
+    assert provider.calls[0]["model"] == "cheap/ok"
+    assert response.headers["x-router-path"] == "trained"
+    row = _last_row(tmp_path)
+    assert row["path"] == "trained"
+
+
 def test_invalid_trained_path_is_shadow(tmp_path):
     scorer = _write_scorer(tmp_path, {PRO: 0.95, FLASH: 0.40})
     client, provider = _client(tmp_path, trained_path="nope", scorer_path=scorer)

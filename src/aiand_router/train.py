@@ -32,8 +32,11 @@ from .router import (
 )
 from .scorer import (
     BINS,
+    _bilinear_z,
     _gbdt_z,
+    _query_latent,
     featurize,
+    featurize_bilinear,
     featurize_observable,
     load_scorer,
     pick_cheapest_above_bar,
@@ -109,18 +112,32 @@ def _refuse() -> int:
 
 
 def _read_queries(
-    path: Path, limit: int, exclude: set[str] | None = None
+    path: Path,
+    limit: int,
+    exclude: set[str] | None = None,
+    exclude_ids: set[str] | None = None,
+    seed: int = 0,
 ) -> list[dict[str, Any]]:
     rows = []
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         rows.append(json.loads(line))
-    if exclude:
-        rows = [q for q in rows if _prompt_of(_messages(q)) not in exclude]
+    if exclude or exclude_ids:
+        blocked_p = exclude or set()
+        blocked_i = {x.lower() for x in (exclude_ids or set()) if x}
+        filtered = []
+        for q in rows:
+            if _prompt_of(_messages(q)) in blocked_p:
+                continue
+            iid = str(q.get("instance_id") or "").lower()
+            if iid and iid in blocked_i:
+                continue
+            filtered.append(q)
+        rows = filtered
     if limit >= len(rows):
         return rows
-    return sample_stratum(rows, limit, seed=0)
+    return sample_stratum(rows, limit, seed=seed)
 
 
 def _messages(row: dict[str, Any]) -> list[dict[str, Any]]:
@@ -671,6 +688,8 @@ async def run_gold(
                 }
                 if dense:
                     row["dense"] = True
+                if q.get("instance_id"):
+                    row["instance_id"] = q["instance_id"]
                 return row
             if status < 400 and result.get("json"):
                 cache.put(request_cache_key(body, model_id), result["json"])
@@ -691,6 +710,8 @@ async def run_gold(
             }
             if dense:
                 row["dense"] = True
+            if q.get("instance_id"):
+                row["instance_id"] = q["instance_id"]
             return row
 
     rows: list[dict[str, Any]] = []
@@ -768,6 +789,191 @@ def _fit_binary_intercept(
 
 GBDT_TREES = 24
 GBDT_LR = 0.1
+# Latent dim tracks feature dim (identity init). A padded 32-d trunk left
+# unused rows at 0 and interaction terms too small to move vs intercepts.
+BILINEAR_DIM = 0
+GEOMETRY_OVERRIDE_ENV = "GEOMETRY_OVERRIDE"
+
+
+def _row_x_bilinear(
+    row: dict[str, Any],
+    *,
+    hash_dim: int = 0,
+    hash_seed: int = 17,
+) -> list[float]:
+    messages = row.get("messages") or [{"role": "user", "content": row.get("prompt") or ""}]
+    tokens = int(row.get("tokens") or estimate_tokens(messages))
+    hint = str(row.get("hint_bin") or row.get("complexity_bin") or "standard")
+    text = str(row.get("prompt") or "")
+    if not text and messages:
+        text = "\n".join(_text(m.get("content")) for m in messages if isinstance(m, dict))
+    return featurize_bilinear(
+        str(row.get("phase") or "plan"),
+        bool(row.get("needs_tools")),
+        tokens,
+        hint,
+        text=text,
+        hash_dim=hash_dim,
+        hash_seed=hash_seed,
+    )
+
+
+def _ridge_multivariate(
+    xs: list[list[float]],
+    ys: list[list[float]],
+    *,
+    l2: float = 0.05,
+) -> list[list[float]]:
+    """Row-major W (out_dim × in_dim) minimizing ||W x - y||^2 + l2||W||^2."""
+    if not xs or not ys or len(xs) != len(ys):
+        return []
+    in_dim = len(xs[0])
+    out_dim = len(ys[0])
+    # Accumulate XtX and XtY
+    xtx = [[0.0] * in_dim for _ in range(in_dim)]
+    xty = [[0.0] * out_dim for _ in range(in_dim)]
+    for x, y in zip(xs, ys):
+        for i in range(in_dim):
+            xi = x[i]
+            for j in range(in_dim):
+                xtx[i][j] += xi * x[j]
+            for k in range(out_dim):
+                xty[i][k] += xi * y[k]
+    for i in range(in_dim):
+        xtx[i][i] += l2
+    # Gauss-Jordan solve for each output column.
+    w_t = [[0.0] * out_dim for _ in range(in_dim)]  # in_dim × out_dim
+    for k in range(out_dim):
+        a = [row[:] + [xty[i][k]] for i, row in enumerate(xtx)]
+        n = in_dim
+        for col in range(n):
+            pivot = max(range(col, n), key=lambda r: abs(a[r][col]))
+            a[col], a[pivot] = a[pivot], a[col]
+            diag = a[col][col] or 1e-12
+            inv = 1.0 / diag
+            a[col] = [v * inv for v in a[col]]
+            for r in range(n):
+                if r == col:
+                    continue
+                factor = a[r][col]
+                a[r] = [a[r][c] - factor * a[col][c] for c in range(n + 1)]
+        for i in range(n):
+            w_t[i][k] = a[i][n]
+    # Return out_dim × in_dim (query_proj layout).
+    return [[w_t[j][i] for j in range(in_dim)] for i in range(out_dim)]
+
+
+def _fit_bilinear(
+    cells: list[tuple[list[float], float, str]],
+    *,
+    dim: int | None = None,
+    steps: int = 120,
+    lr: float = 0.08,
+) -> tuple[list[list[float]], dict[str, list[float]], dict[str, float]]:
+    """Shared query projection + per-model factor vectors (EmbedLLM/IRT-lite).
+
+    Intercepts stay at gold logit(rate) (same as logistic). Stage 1 fits
+    per-model factors with identity projection so the head cannot collapse
+    below a per-model linear model. Stage 2 takes small joint steps on the
+    projection so query×model terms can move without wiping the intercepts.
+    """
+    if not cells:
+        return [], {}, {}
+    feat_dim = len(cells[0][0])
+    dim = feat_dim if not dim else min(int(dim), feat_dim)
+    mids = sorted({mid for _, _, mid in cells})
+    intercepts: dict[str, float] = {}
+    factors: dict[str, list[float]] = {}
+    counts: dict[str, int] = {}
+    for mid in mids:
+        xs = [x for x, _, m in cells if m == mid]
+        ys = [y for _, y, m in cells if m == mid]
+        rate = sum(ys) / len(ys) if ys else 0.5
+        intercepts[mid] = _logit(rate)
+        counts[mid] = len(ys)
+        w = _fit_binary_intercept(xs, ys, intercepts[mid])
+        factors[mid] = (list(w) + [0.0] * dim)[:dim]
+    query_proj = [[0.0] * feat_dim for _ in range(dim)]
+    for i in range(dim):
+        query_proj[i][i] = 1.0
+    n = max(1, len(cells))
+    l2 = 0.002
+    for _ in range(steps):
+        g_proj = [[0.0] * feat_dim for _ in range(dim)]
+        g_factors: dict[str, list[float]] = {mid: [0.0] * dim for mid in mids}
+        for x, y, mid in cells:
+            q = [
+                sum(query_proj[i][j] * x[j] for j in range(feat_dim))
+                for i in range(dim)
+            ]
+            fac = factors[mid]
+            z = intercepts[mid] + sum(q[i] * fac[i] for i in range(dim))
+            z = max(-30.0, min(30.0, z))
+            err = (1.0 / (1.0 + math.exp(-z))) - y
+            for i in range(dim):
+                g_factors[mid][i] += err * q[i]
+                for j in range(feat_dim):
+                    g_proj[i][j] += err * fac[i] * x[j]
+        for mid in mids:
+            nm = max(1, counts[mid])
+            for i in range(dim):
+                factors[mid][i] -= lr * (g_factors[mid][i] / nm + l2 * factors[mid][i])
+        for i in range(dim):
+            for j in range(feat_dim):
+                # Keep the identity diagonal from shrinking to the old 0.05 collapse.
+                if i == j:
+                    continue
+                query_proj[i][j] -= lr * (g_proj[i][j] / n + l2 * query_proj[i][j])
+    return query_proj, factors, intercepts
+
+
+def _fit_bilinear_distill(
+    student_cells: list[tuple[list[float], float, str]],
+    teacher_cells: list[tuple[list[float], float, str]],
+    *,
+    latent_dim: int | None = None,
+    ridge_l2: float = 0.05,
+) -> tuple[list[list[float]], dict[str, list[float]], dict[str, float], dict[str, Any]]:
+    """Offline distill: fit teacher on richer x, map student x → teacher query latent."""
+    if not teacher_cells or not student_cells:
+        return [], {}, {}, {}
+    t_dim = len(teacher_cells[0][0])
+    # Keep latent compact so ridge→student does not overfit Mix1 n≈160.
+    ld = int(latent_dim) if latent_dim else min(32, t_dim)
+    teacher_proj, factors, intercepts = _fit_bilinear(teacher_cells, dim=ld)
+    if not teacher_proj:
+        return [], {}, {}, {}
+    xs_s: list[list[float]] = []
+    qs_t: list[list[float]] = []
+    for (xs, _ys, _ms), (xt, _yt, _mt) in zip(student_cells, teacher_cells):
+        qs_t.append(_query_latent(teacher_proj, xt))
+        xs_s.append(xs)
+    l2 = float(ridge_l2)
+    student_proj = _ridge_multivariate(xs_s, qs_t, l2=l2)
+    meta = {
+        "mode": "hash_teacher_ridge",
+        "teacher_feat_dim": t_dim,
+        "student_feat_dim": len(student_cells[0][0]),
+        "latent_dim": ld,
+        "ridge_l2": l2,
+        "n_distill": len(xs_s),
+    }
+    return student_proj, factors, intercepts, meta
+
+
+def _geometry_gate(
+    train_path: Path,
+    eval_path: Path,
+    cal_path: Path | None = None,
+) -> tuple[bool, dict[str, Any]]:
+    from .geometry import geometry_report
+
+    report = geometry_report(train_path, eval_path, cal_path)
+    blocked = not report.get("geometry_pass", False)
+    if blocked and os.getenv(GEOMETRY_OVERRIDE_ENV) == "1":
+        blocked = False
+        report["geometry_override"] = True
+    return blocked, report
 
 
 def _fit_stump(xs: list[list[float]], resid: list[float]) -> dict[str, float]:
@@ -840,6 +1046,9 @@ def _fit_platt(zs: list[float], ys: list[float]) -> tuple[float, float]:
             gb += err
         a -= 0.2 * ga / n
         b -= 0.2 * gb / n
+    # Negative slope inverts ranking (Mix1 bilinear probe: always-Flash).
+    if a <= 0:
+        return 1.0, 0.0
     return a, b
 
 
@@ -898,6 +1107,13 @@ def fit_scorer(
     out: Path,
     cal_path: Path | None = None,
     gbdt: bool = False,
+    bilinear: bool = False,
+    geometry_report_out: dict[str, Any] | None = None,
+    bilinear_hash_dim: int = 0,
+    bilinear_distill_hash_dim: int = 0,
+    bilinear_hash_seed: int = 17,
+    bilinear_distill_latent_dim: int = 0,
+    bilinear_ridge_l2: float = 0.05,
 ) -> None:
     gold = _jsonl_rows(gold_path)
     silver = _jsonl_rows(silver_path) if silver_path and silver_path.exists() else []
@@ -923,11 +1139,35 @@ def fit_scorer(
     by_model_x: dict[str, list[list[float]]] = {mid: [] for mid in gold_ids}
     by_model_y: dict[str, list[float]] = {mid: [] for mid in gold_ids}
     train_counts: dict[str, int] = {mid: 0 for mid in gold_ids}
+    hash_dim = int(bilinear_hash_dim or 0)
+    distill_dim = int(bilinear_distill_hash_dim or 0)
+    hash_seed = int(bilinear_hash_seed or 17)
+    # Distill serve path keeps student hash_dim=0; teacher uses distill_dim.
+    serve_hash_dim = 0 if distill_dim > 0 else hash_dim
+    teacher_hash_dim = distill_dim if distill_dim > 0 else hash_dim
+    bilinear_cells: list[tuple[list[float], float, str]] = []
+    teacher_cells: list[tuple[list[float], float, str]] = []
     for row in train_gold:
         mid = row["model_id"]
         by_model_x[mid].append(_row_x(row))
         by_model_y[mid].append(1.0 if row.get("success") else 0.0)
         train_counts[mid] += 1
+        y = 1.0 if row.get("success") else 0.0
+        bilinear_cells.append(
+            (
+                _row_x_bilinear(row, hash_dim=serve_hash_dim, hash_seed=hash_seed),
+                y,
+                mid,
+            )
+        )
+        if distill_dim > 0:
+            teacher_cells.append(
+                (
+                    _row_x_bilinear(row, hash_dim=teacher_hash_dim, hash_seed=hash_seed),
+                    y,
+                    mid,
+                )
+            )
     for row in silver:
         if row.get("unlabeled"):
             continue
@@ -940,9 +1180,27 @@ def fit_scorer(
                 continue
             by_model_x[mid].append(x)
             by_model_y[mid].append(float(p))
+            bilinear_cells.append(
+                (
+                    _row_x_bilinear(row, hash_dim=serve_hash_dim, hash_seed=hash_seed),
+                    float(p),
+                    mid,
+                )
+            )
+            if distill_dim > 0:
+                teacher_cells.append(
+                    (
+                        _row_x_bilinear(row, hash_dim=teacher_hash_dim, hash_seed=hash_seed),
+                        float(p),
+                        mid,
+                    )
+                )
     weights: dict[str, list[float]] = {}
     intercepts = {}
     gbdt_heads: dict[str, dict[str, Any]] = {}
+    bilinear_models: dict[str, dict[str, Any]] = {}
+    query_proj: list[list[float]] = []
+    distill_meta: dict[str, Any] = {}
     for mid, xs in by_model_x.items():
         n_train = train_counts[mid]
         if n_train == 0 or not xs:
@@ -953,23 +1211,53 @@ def fit_scorer(
         intercepts[mid] = ic
         if gbdt:
             gbdt_heads[mid] = _fit_gbdt(xs, by_model_y[mid], ic)
+        elif bilinear:
+            continue
         else:
             weights[mid] = _fit_binary_intercept(xs, by_model_y[mid], ic)
+    if bilinear and bilinear_cells:
+        if distill_dim > 0 and teacher_cells:
+            ld_arg = int(bilinear_distill_latent_dim or 0) or None
+            query_proj, factors, bi_ic, distill_meta = _fit_bilinear_distill(
+                bilinear_cells,
+                teacher_cells,
+                latent_dim=ld_arg,
+                ridge_l2=float(bilinear_ridge_l2),
+            )
+        else:
+            query_proj, factors, bi_ic = _fit_bilinear(bilinear_cells)
+        for mid, fac in factors.items():
+            if train_counts.get(mid, 0) == 0:
+                continue
+            intercepts[mid] = bi_ic[mid]
+            bilinear_models[mid] = {"factor": fac, "intercept": bi_ic[mid]}
     zs_cal: list[float] = []
     ys_cal: list[float] = []
     for row in cal_gold:
         mid = row["model_id"]
-        x = _row_x(row)
         if gbdt:
             head = gbdt_heads.get(mid)
             if not head:
                 continue
-            zs_cal.append(_gbdt_z(head, x))
+            zs_cal.append(_gbdt_z(head, _row_x(row)))
+        elif bilinear:
+            if mid not in bilinear_models or not query_proj:
+                continue
+            bm = bilinear_models[mid]
+            zs_cal.append(
+                _bilinear_z(
+                    query_proj,
+                    bm["factor"],
+                    _row_x_bilinear(row, hash_dim=serve_hash_dim, hash_seed=hash_seed),
+                    intercept=float(bm.get("intercept", intercepts.get(mid, 0.0))),
+                )
+            )
         else:
             w = weights.get(mid)
             if not w:
                 continue
             ic = intercepts[mid]
+            x = _row_x(row)
             zs_cal.append(ic + sum(w[i] * x[i] for i in range(len(w))))
         ys_cal.append(1.0 if row.get("success") else 0.0)
     n_cal = len(zs_cal)
@@ -995,6 +1283,15 @@ def fit_scorer(
         gold_ys = [1.0 if r.get("success") else 0.0 for r in observed if r["model_id"] == mid]
         if gold_ys:
             p_success[mid] = sum(gold_ys) / len(gold_ys)
+    k3_prior = [
+        float(p)
+        for row in silver
+        if not row.get("unlabeled")
+        for mid, p in (row.get("p_success") or {}).items()
+        if mid == K3 and p is not None
+    ]
+    if k3_prior:
+        p_success[K3] = sum(k3_prior) / len(k3_prior)
     bins = [str(r.get("complexity_bin")) for r in silver if r.get("complexity_bin") in BINS]
     bin_ = max(set(bins), key=bins.count) if bins else "standard"
     artifact: dict[str, Any] = {
@@ -1011,7 +1308,31 @@ def fit_scorer(
         "n_silver": len(silver),
     }
     if gbdt:
+        artifact["head"] = "gbdt"
         artifact["gbdt"] = gbdt_heads
+    elif bilinear and query_proj:
+        artifact["head"] = "bilinear"
+        bi_block: dict[str, Any] = {
+            "dim": len(query_proj),
+            "query_proj": query_proj,
+            "models": bilinear_models,
+            "hash_dim": serve_hash_dim,
+            "hash_seed": hash_seed,
+        }
+        if distill_meta:
+            bi_block["distill"] = distill_meta
+            bi_block["teacher_hash_dim"] = distill_dim
+        artifact["bilinear"] = bi_block
+    else:
+        artifact["head"] = "logistic"
+    if geometry_report_out is not None:
+        artifact["geometry"] = {
+            "geometry_pass": geometry_report_out.get("geometry_pass"),
+            "spearman_train_eval": geometry_report_out.get("spearman_train_eval"),
+            "kill": geometry_report_out.get("kill"),
+            "recommended_artifact": geometry_report_out.get("recommended_artifact"),
+            "geometry_override": geometry_report_out.get("geometry_override"),
+        }
     out.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
 
 
@@ -1357,6 +1678,15 @@ def main(
             "resolved is never y. Never invents json_schema."
         ),
     )
+    p.add_argument(
+        "--gym-tasks",
+        help=(
+            "SWE-Gym (or smith-shaped) *task* JSONL as primary pool source when "
+            "smith traj family is exhausted. Builds flashlight/issue rows via "
+            "gold-revert expected — no traj dump required. Unpaid ingest: "
+            "`python -m aiand_router.pool ingest --profile gym_alt`."
+        ),
+    )
     p.add_argument("--eval", nargs="*", default=[])
     p.add_argument("--out", required=True)
     p.add_argument("--n", type=int, default=4000)
@@ -1380,7 +1710,11 @@ def main(
         "--prompt-family",
         choices=("flashlight", "issue", "any"),
         default="flashlight",
-        help="Verified-like prompt family filter (default flashlight; issue was H2 kill)",
+        help=(
+            "Verified-like prompt family. Default flashlight keeps hunk-restore "
+            "plus dump-copied expected/schema/tests (family other). Pass issue|any "
+            "explicitly; issue-fix was H2 kill. Mix1 also needs --near-miss-lo/hi."
+        ),
     )
     p.add_argument("--min-expected-len", type=int, default=0)
     p.add_argument("--max-expected-len", type=int, default=0)
@@ -1396,6 +1730,12 @@ def main(
         default=1.0,
         help="Max buggy↔expected line ratio (exclude near-identical / too-easy)",
     )
+    p.add_argument(
+        "--max-fail-to-pass",
+        type=int,
+        default=0,
+        help="Drop queries with more FAIL_TO_PASS tests than this (0 = no cap). Mix1 p90 is 4.",
+    )
     t = sub.add_parser("teacher")
     t.add_argument("--queries", required=True)
     t.add_argument("--out", required=True)
@@ -1405,7 +1745,13 @@ def main(
     g.add_argument("--out", required=True)
     g.add_argument("--limit", type=int, default=None)
     g.add_argument("--dense", action="store_true")
-    g.add_argument("--exclude")
+    g.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        help="JSONL of already-labeled queries/gold (repeatable). Drops matching prompt or instance_id.",
+    )
+    g.add_argument("--seed", type=int, default=0, help="Stratum sample seed after --exclude")
     f = sub.add_parser("fit")
     f.add_argument("--gold", required=True)
     f.add_argument("--cal")
@@ -1418,6 +1764,62 @@ def main(
             "One stump GBDT after logistic fails transfer; length stumps collapse on short "
             "prompts. Prefer logistic until Spearman(train, eval) > 0."
         ),
+    )
+    f.add_argument(
+        "--bilinear",
+        action="store_true",
+        help=(
+            "EmbedLLM/IRT-lite head: shared query projection + frozen per-model factors. "
+            "Features-only at serve time; no live embed."
+        ),
+    )
+    f.add_argument(
+        "--bilinear-hash-dim",
+        type=int,
+        default=0,
+        help=(
+            "Append hashing-trick text latent of this dim to the live bilinear trunk "
+            "(features-only; not a neural embed). Ignored when --bilinear-distill-hash-dim>0."
+        ),
+    )
+    f.add_argument(
+        "--bilinear-distill-hash-dim",
+        type=int,
+        default=0,
+        help=(
+            "Offline distill: fit teacher bilinear on hash_dim trunk, ridge-map base "
+            "features → teacher query latent; serve with hash_dim=0 (no live hash)."
+        ),
+    )
+    f.add_argument(
+        "--bilinear-hash-seed",
+        type=int,
+        default=17,
+        help="Deterministic seed for hashing-trick buckets",
+    )
+    f.add_argument(
+        "--bilinear-distill-latent-dim",
+        type=int,
+        default=0,
+        help=(
+            "Teacher latent dim for offline distill (default min(32, teacher_feat_dim)). "
+            "Requires --bilinear-distill-hash-dim>0."
+        ),
+    )
+    f.add_argument(
+        "--bilinear-ridge-l2",
+        type=float,
+        default=0.05,
+        help="Ridge L2 for student←teacher query map (distill only).",
+    )
+    f.add_argument(
+        "--geometry-train",
+        help="Train/sparse gold JSONL for geometry gate (blocks fit when geometry_pass=false)",
+    )
+    f.add_argument("--geometry-cal", help="Optional dense/cal gold for geometry report")
+    f.add_argument(
+        "--geometry-eval",
+        help="Eval-only holdout gold for geometry gate (required with --geometry-train)",
     )
     r = sub.add_parser("relabel")
     r.add_argument("--gold", required=True)
@@ -1454,13 +1856,71 @@ def main(
     upstream = provider or HttpAiandProvider(base, key)
 
     if args.cmd == "fit":
+        geo_report: dict[str, Any] | None = None
+        if args.geometry_train or args.geometry_eval:
+            if not args.geometry_train or not args.geometry_eval:
+                print(
+                    "refusing: --geometry-train and --geometry-eval must be set together",
+                    file=sys.stderr,
+                )
+                return 2
+            blocked, geo_report = _geometry_gate(
+                Path(args.geometry_train),
+                Path(args.geometry_eval),
+                Path(args.geometry_cal) if args.geometry_cal else None,
+            )
+            if blocked:
+                print(
+                    json.dumps(
+                        {
+                            "geometry_pass": False,
+                            "kill": geo_report.get("kill"),
+                            "recommended_artifact": geo_report.get("recommended_artifact"),
+                        },
+                        indent=2,
+                    ),
+                    file=sys.stderr,
+                )
+                print(
+                    f"refusing fit: geometry_pass=false "
+                    f"(set {GEOMETRY_OVERRIDE_ENV}=1 to override)",
+                    file=sys.stderr,
+                )
+                return 2
+        if args.gbdt and args.bilinear:
+            print("refusing: choose at most one of --gbdt and --bilinear", file=sys.stderr)
+            return 2
+        if (args.bilinear_hash_dim or args.bilinear_distill_hash_dim) and not args.bilinear:
+            print(
+                "refusing: --bilinear-hash-dim / --bilinear-distill-hash-dim require --bilinear",
+                file=sys.stderr,
+            )
+            return 2
+        if int(args.bilinear_distill_latent_dim or 0) > 0 and not (
+            args.bilinear and int(args.bilinear_distill_hash_dim or 0) > 0
+        ):
+            print(
+                "refusing: --bilinear-distill-latent-dim requires --bilinear "
+                "and --bilinear-distill-hash-dim>0",
+                file=sys.stderr,
+            )
+            return 2
         fit_scorer(
             Path(args.gold),
             Path(args.silver) if args.silver else None,
             Path(args.out),
             Path(args.cal) if args.cal else None,
             gbdt=bool(args.gbdt),
+            bilinear=bool(args.bilinear),
+            geometry_report_out=geo_report,
+            bilinear_hash_dim=int(args.bilinear_hash_dim or 0),
+            bilinear_distill_hash_dim=int(args.bilinear_distill_hash_dim or 0),
+            bilinear_hash_seed=int(args.bilinear_hash_seed or 17),
+            bilinear_distill_latent_dim=int(args.bilinear_distill_latent_dim or 0),
+            bilinear_ridge_l2=float(args.bilinear_ridge_l2),
         )
+        if geo_report:
+            print("recommended_artifact", geo_report.get("recommended_artifact"))
         return 0
     if args.cmd == "relabel":
         relabel_gold(
@@ -1491,9 +1951,23 @@ def main(
     else:
         limit = args.limit
     blocked: set[str] = set()
-    if getattr(args, "exclude", None):
-        blocked = {str(r.get("prompt") or "") for r in _jsonl_rows(Path(args.exclude))}
-    queries = _read_queries(Path(args.queries), limit, exclude=blocked or None)
+    blocked_ids: set[str] = set()
+    for ep in getattr(args, "exclude", None) or []:
+        for r in _jsonl_rows(Path(ep)):
+            prompt = str(r.get("prompt") or "")
+            if prompt:
+                blocked.add(prompt)
+            iid = str(r.get("instance_id") or "").lower()
+            if iid:
+                blocked_ids.add(iid)
+    gold_seed = int(getattr(args, "seed", 0) or 0) if args.cmd == "gold" else 0
+    queries = _read_queries(
+        Path(args.queries),
+        limit,
+        exclude=blocked or None,
+        exclude_ids=blocked_ids or None,
+        seed=gold_seed,
+    )
     if args.cmd == "gold" and args.dense and not queries:
         print("refusing: --dense --exclude left no queries to run", file=sys.stderr)
         return 2

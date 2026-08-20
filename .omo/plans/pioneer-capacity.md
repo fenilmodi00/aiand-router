@@ -48,10 +48,10 @@
 
 ### Phase E — Fit → shadow → bounded gate (cap $4)
 
-- [ ] 15. Fit Scorer (bin head + P(success) heads + auto-selected calibrator) → `data/scorer.json`
-- [ ] 16. Retune medium on `data/tune.jsonl`; write `trained_effort:` runtime override
-- [ ] 17. Shadow run (≥100 hops or flashlight replay) collecting `rules_cost_delta_usd`
-- [ ] 18. Bounded promotion check: flashlight suite + SWE-bench-Lite micro-slice via task-9 runner (n≈30–50), dual metric
+- [x] 15. Fit Scorer (bin head + P(success) heads + auto-selected calibrator) → `data/scorer.json`
+- [x] 16. Retune medium on `data/tune.jsonl`; write `trained_effort:` runtime override
+- [x] 17. Shadow run (≥100 hops or flashlight replay) collecting `rules_cost_delta_usd`
+- [x] 18. Bounded promotion check: flashlight suite + SWE-bench-Lite micro-slice via task-9 runner (n≈30–50), dual metric
 - [x] 19. Handoff runbook: full Verified gate, flywheel log store contract, embed-ablation execution, K3 onboarding
 
 ---
@@ -185,13 +185,13 @@
 
 **Final verification wave**
 
-- [ ] F1. Repo test suite green with `TRAINED_PATH` covering off/shadow/trained fixtures; behavior matrix (task 7) passing.
-- [ ] F2. Spend ledger: `data/spend.txt` end-state ≤ $50.00 total plan spend; per-phase caps audited from ledger deltas.
-- [ ] F3. Routing behavior on the fixture harness (task 7): effort=max frontier → K3 when eligible and alone clears; trivial at max → never K3 when a within-regret cheaper survivor exists; default effort → K3 absent from candidates; decline → fallback (evidence: test/JSONL excerpts). On the FITTED artifact, K3-at-max behavior is recorded as-observed (not asserted live: per spec catalog-drift, silver-only ids don't unstick live trained picks until K3 dense gold — task 19d).
-- [ ] F4. Calibration report: BSS > 0, equal-width ECE (M=10) ≤ 0.03 and equal-mass ECE ≤ 0.03 on the held-out dense slice; reliability JSON attached.
-- [ ] F5. Artifact honesty: `bootstrap_partial` + `not_spec_floors` + `k3_prior: silver_only` labels present; grep proves no invented savings % in README/reports.
-- [ ] F6. Runbook completeness: all four sections present, every referenced command exists in-repo.
-- [ ] F7. Serving posture unchanged: default `TRAINED_PATH` and config defaults identical to plan start (bounded verdict never flipped live serving).
+- [x] F1. Repo test suite green with `TRAINED_PATH` covering off/shadow/trained fixtures; behavior matrix (task 7) passing.
+- [x] F2. Spend ledger: `data/spend.txt` end-state ≤ $50.00 total plan spend; per-phase caps audited from ledger deltas.
+- [x] F3. Routing behavior on the fixture harness (task 7): effort=max frontier → K3 when eligible and alone clears; trivial at max → never K3 when a within-regret cheaper survivor exists; default effort → K3 absent from candidates; decline → fallback (evidence: test/JSONL excerpts). On the FITTED artifact, K3-at-max behavior is recorded as-observed (not asserted live: per spec catalog-drift, silver-only ids don't unstick live trained picks until K3 dense gold — task 19d).
+- [~] F4. Calibration report: BSS > 0 (0.404 PASS), equal-width ECE (M=10) ≤ 0.03 (0.013 PASS), equal-mass ECE ≤ 0.03 (0.034 FAIL — bootstrap_partial shortfall, honestly reported in bounded_gate_report.md); reliability JSON attached.
+- [x] F5. Artifact honesty: `bootstrap_partial` + `not_spec_floors` + `k3_prior: silver_only` labels present; grep proves no invented savings % in README/reports.
+- [x] F6. Runbook completeness: all four sections present, every referenced command exists in-repo.
+- [x] F7. Serving posture unchanged: default `TRAINED_PATH` and config defaults identical to plan start (bounded verdict never flipped live serving).
 
 ## Dependency Graph
 

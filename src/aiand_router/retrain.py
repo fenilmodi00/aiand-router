@@ -14,7 +14,7 @@ from typing import Any
 
 from .metrics import brier_skill_score, ece_equal_mass, ece_equal_width, reliability
 from .scorer import score_eligible
-from .train import fit_scorer
+from .train import GEOMETRY_OVERRIDE_ENV, _geometry_gate, fit_scorer
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "data"
@@ -154,9 +154,36 @@ def _write_report(
     REPORT_PATH.write_text("\n".join(lines), encoding="utf-8")
 
 
-def run_plan_only() -> int:
+def run_plan_only(
+    *,
+    geometry_train: Path | None = None,
+    geometry_eval: Path | None = None,
+    geometry_cal: Path | None = None,
+) -> int:
     """Execute: fit -> cal-report -> retune (if available) -> write artifacts -> gate-check."""
     DATA.mkdir(exist_ok=True)
+
+    geo_report: dict | None = None
+    if geometry_train and geometry_eval:
+        blocked, geo_report = _geometry_gate(geometry_train, geometry_eval, geometry_cal)
+        if blocked:
+            print(
+                json.dumps(
+                    {
+                        "geometry_pass": False,
+                        "kill": geo_report.get("kill"),
+                        "recommended_artifact": geo_report.get("recommended_artifact"),
+                    },
+                    indent=2,
+                ),
+                file=sys.stderr,
+            )
+            print(
+                f"refusing retrain: geometry_pass=false "
+                f"(set {GEOMETRY_OVERRIDE_ENV}=1 to override)",
+                file=sys.stderr,
+            )
+            return 2
 
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -165,7 +192,7 @@ def run_plan_only() -> int:
         fit_out = tmp / "scorer.json"
 
         # Step 1: fit
-        fit_scorer(gold_path, silver_path, fit_out)
+        fit_scorer(gold_path, silver_path, fit_out, geometry_report_out=geo_report)
         artifact = json.loads(fit_out.read_text(encoding="utf-8"))
 
         # Step 2: calibration report

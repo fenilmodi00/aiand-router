@@ -152,3 +152,28 @@ It becomes legitimate when **all** of the following hold:
 4. Flip stays **manual**. `apply_replay_gate` never auto-flips.
 
 Until then: shadow, `not_spec_floors`, no 07.
+
+## 8. Status after Mix1 pass and seeds 11–16 failures (2026-08-20)
+
+**Option A partially succeeded, scale path blocked.**
+
+| Milestone | Status |
+| --- | --- |
+| Mix1 hard-y probe | **Pass** — `data/gold-sparse-hard-mix1.jsonl`, geometry_pass=true, Spearman 0.949 |
+| Hard-logistic shadow candidate | **Pass local replay** — `data/scorer-hard-logistic.json`, `replay_gate_pass=true`, still `not_spec_floors` |
+| Seeds 11–16 blind top-ups | **All fail** standalone geometry (only Mix1 passes) |
+| Seed-16 order-conservative | Preflight class fractions **pass** → paid geometry **fail** (y 0.047, 26/32 all-fail) |
+| Class-quota preflight | **Disproven** as geometry predictor (seed-16 falsification) |
+| Retune n≥300 | **Refused** — no geometry-passing concat path without Mix1 overlap or bad seeds |
+| Smith-pool paid expansion | **Dead** until new label source or materially different sampler |
+
+**Do not:** run more blind paid probes from order-conservative, kimi-only-targeted, winner-stratified, or mix1like pools; merge seed-15/16; flip `TRAINED_PATH=trained`; claim parity from `replay_gate_pass=true`.
+
+**Honest unpaid next paths (2026-08-20):**
+
+1. **Replay parity posture** (implemented) — `replay_report` stamps `local_replay_gate_pass`, `production_parity=false`, `parity_blockers` so shadow-local pass ≠ production parity.
+2. **Mix1-only retune** — document refusal honestly (`train retune` needs n≥300; Mix1 has 160 cells).
+3. **Lite/session-gold dry-run** — expand fixture runner offline; no HTTP without credits.
+4. **Smith gold expansion** — blocked; document until new label source appears.
+
+**Update (later 2026-08-20 unpaid):** Smith expansion remains blocked. Chosen replacement pool family is **SWE-Gym `gym_alt`** (see `unpaid-next-path-2026-08-20.md`). Verified `--ids-only` scaffold is secondary plumbing only.

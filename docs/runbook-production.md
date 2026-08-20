@@ -14,6 +14,17 @@ Spec: [`.scratch/trained-router/spec.md`](../.scratch/trained-router/spec.md). T
 
 The **promotion gate** is the explicit eval that must say the trained router beats the rules router on quality, cost, and calibration before trained may leave shadow. This is **not** the bounded check (task 18's `lite_runner` on SWE-bench Lite, capped at 50 instances). This is the full gate on **SWE-bench Verified**.
 
+The bounded check can still be useful as an unpaid dry-run of fixture wiring or frozen replay plumbing, but it must stay labeled `bounded_check_only`. A fixture run or offline replay can show local shadow posture; it cannot claim production parity or substitute for session gold.
+
+Checked-in unpaid dual-policy Lite comparison (synthetic harness-proxy only):
+
+```powershell
+$env:PYTHONPATH='src'
+python scripts/run_lite_comparison.py
+```
+
+Fixture: `tests/fixtures/lite_comparison/fixture.json`. Latest checked-in slice: rules **3/10**, trained **7/10**, verdict **`bounded_check_only`**. Not session gold; do not promote from it.
+
 ### Dataset pin
 
 - **Primary:** `princeton-nlp/SWE-bench_Verified`, test split, 500 instances.
@@ -83,19 +94,32 @@ This runs fit -> cal-report -> retune (if available) -> write `data/scorer.candi
 
 **Step 6 — Run the Verified session gate:**
 
-Run the lite_runner (or a future `verified_runner`) against the gateway in shadow mode, collecting session gold:
+Run `verified_runner` against the gateway in shadow mode. Flashlight alone is **not** session gold — without a docker SWE-bench resolve hook, rows stay `label_type=needs_swe_eval` / `resolved=null`.
 
-```bash
-python -m aiand_router.lite_runner --n 500 --gateway http://127.0.0.1:8000 --out data/verified_results.jsonl
+PowerShell — enable true `session_gold` via `SWE_EVAL_CMD`:
+
+```powershell
+# Thin hook (default backend=local: honest not_available until docker + swebench work)
+$env:SWE_EVAL_CMD='python scripts/swe_eval_cmd.py --instance {instance_id} --patch {patch_file}'
+# Disk-light: $env:SWE_EVAL_BACKEND='modal'  # or 'sb-cli' + SWEBENCH_API_KEY
+# Real local resolve: Docker Engine (`docker info`) + `pip install swebench`
+# Unpaid mock only (never promotion evidence):
+# $env:SWE_EVAL_CMD='python scripts/swe_eval_cmd.py --instance {instance_id} --patch {patch_file} --mock-resolved true'
+
+$env:PYTHONPATH='src'
+$env:TRAINED_PATH='shadow'
+$env:SCORER_PATH='data/scorer-hard-logistic.json'
+python scripts/run_verified_session.py --limit 1 --out data/verified_session_smoke.jsonl
+python -m aiand_router.eval --gate --log data/requests.jsonl --sessions data/verified_session_smoke.jsonl
 ```
 
-Then compare trained vs rules on the four bars using the eval module:
+Lite fixture path (harness-proxy only, not promotion):
 
 ```bash
-python -m aiand_router.eval
+python -m aiand_router.lite_runner --n 50 --fixture data/lite_fixture.json --out data/lite_results.jsonl
 ```
 
-The eval command prints costs and models from the request log and will not invent a savings percentage. Promote only if all four bars hold.
+The eval command prints costs and models from the request log and will not invent a savings percentage. Promote only if all four bars hold on **session_gold** rows (n≥300).
 
 ### Cost estimate formula
 
@@ -141,6 +165,7 @@ This is the promotion gate only — disjoint from train, calibrator, and thresho
 - Gate at **medium** only. Other rungs are diagnostic / ship defaults until fitted.
 - Failed gate -> keep what was live before that attempt. No live A/B.
 - Lite (300) is OK as a cheaper proxy **until** Verified is run, not a substitute after.
+- Unpaid fixture-mode Lite runs prove harness-proxy/session plumbing only. They do **not** measure rules vs trained unless both paths are routed through a real or faithfully replayed gateway.
 
 ---
 

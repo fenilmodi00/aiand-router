@@ -14,13 +14,30 @@ redact_keys:
 
 max_regret: 8
 trained_effort:
+  # Pioneer ship defaults (scorer.py SHIP_EFFORT). Retune to 0.83+ was a GBDT
+  # workaround when scores were non-discriminative; revert until geometry_pass.
   low: {threshold: 0.05, max_regret: 0.30}
-  # Keep 0.10: after hard-cal refit, Kimi P on edit-cal sits ~0.09 → Flash fallback
-  # on cost-gold while verified (higher Kimi P) still routes to Kimi. Cost bar needs
-  # trained cheaper than rules-Pro (priors below).
   medium: {threshold: 0.10, max_regret: 0.20}
   high: {threshold: 0.20, max_regret: 0.15}
   max: {threshold: 0.60, max_regret: 0.03}
+cascade_lane:
+  enabled: false
+  cheap_model: deepseek-ai/deepseek-v4-flash
+  strong_model: deepseek-ai/deepseek-v4-pro
+  # Off-path prototype only: ignored unless TRAINED_PATH=off and scorer data exists.
+  phases:
+    - plan
+    - planning
+    - edit
+    - code_generation
+    - code_edit
+    - refactoring
+    - tool
+    - tool_call
+    - debug
+    - debugging
+    - test_failure_analysis
+    - security_review
 latency_limit_ms: 0
 phase_threshold:
   discover: 35

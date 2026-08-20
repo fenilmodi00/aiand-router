@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>0005 — Pitch technical fluency</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+  <article class="page">
+    <nav class="crumbs">
+      <a href="../MISSION.md">Mission</a> ·
+      <a href="../reference/pitch-six-minute.html">Pitch card</a> ·
+      <a href="../reference/glossary.html">Glossary</a> ·
+      <a href="./0004-hackathon-submission.html">Deck 0004</a>
+    </nav>
+
+    <header>
+      <h1>6-minute pitch: how the router actually works</h1>
+      <p class="lede">
+        One lesson. After this you can explain rules → Scorer → shadow → flip,
+        point at the real files, and use measured numbers without overselling the landing page.
+      </p>
+    </header>
+
+    <p class="callout">
+      Ask follow-up questions here in chat anytime — this agent is your teacher for the pitch.
+      Unclear? Interrupt. Wrong number stuck in your head? Ask before you say it to judges.
+    </p>
+
+    <h2>0. Analogy (30 seconds of brain)</h2>
+    <p>
+      Think of the gateway like a <strong>CDN edge rule</strong> in front of nine backends.
+      Every agent hop hits one URL. The edge decides which backend gets the request.
+    </p>
+    <ul>
+      <li><strong>Rules path</strong> = hand-written routing policy (hard filters + Pioneer score). Always available.</li>
+      <li><strong>Scorer</strong> = a tiny fitted JSON “weights file” loaded at process start — like shipping a dist artifact, not calling an LLM to decide.</li>
+      <li><strong>Shadow</strong> = still serve rules, but log what the Scorer <em>would</em> have picked (<code>X-Router-Trained-Would</code>).</li>
+      <li><strong>Trained</strong> = operator flips env so the Scorer’s cheapest-above-bar pick is live.</li>
+    </ul>
+    <p class="source">Language locked in <a href="../CONTEXT.md">CONTEXT.md</a> / <a href="../reference/glossary.html">glossary</a>.</p>
+
+    <h2>1. What you built (say this first)</h2>
+    <p>
+      <strong>aiand/auto</strong> is an OpenAI-compatible coding-agent router.
+      Clients send <code>model: router/auto</code> to our FastAPI gateway; we pick an aiand catalog model per step
+      and forward the completion. Dashboard + landing live in Next.js.
+    </p>
+    <p>
+      Demo path judges expect: <code>:3000/</code> landing → <code>/routers/auto</code> → <code>/playground</code> → gateway <code>:8000</code>.
+    </p>
+
+    <h2>2. Where the code is</h2>
+    <ol>
+      <li><code>src/aiand_router/app.py</code> — HTTP: <code>/v1/chat/completions</code>, models, health, replay</li>
+      <li><code>src/aiand_router/router.py</code> — rules: hard constraints → phase bar → Pioneer / cheap / max</li>
+      <li><code>src/aiand_router/scorer.py</code> — load artifact, featurize, P(success), cheapest-above-bar</li>
+      <li><code>src/aiand_router/train.py</code> — offline <code>teacher</code> → <code>gold</code> → <code>fit</code> (opt-in, spends credits)</li>
+      <li><code>config/models.yaml</code> — catalog + list prices</li>
+      <li><code>web/</code> — landing, dashboard, playground</li>
+    </ol>
+    <p class="source">Diagram: <a href="../ARCHITECTURE.md">ARCHITECTURE.md</a>.</p>
+
+    <h2>3. How we made the Scorer (pipeline you can draw)</h2>
+    <ol>
+      <li><strong>Queries</strong> — 2000 coding-agent-ish prompts in <code>datasets/train-queries.jsonl</code></li>
+      <li><strong>Teacher (silver)</strong> — a chat model guesses P(success) per eligible model from the query alone → <code>data/silver.jsonl</code> (regularizer, not truth)</li>
+      <li><strong>Gold</strong> — we actually run candidates through aiand; success is measured (tools/JSON/no escalate) → gold JSONL</li>
+      <li><strong>Fit</strong> — logistic heads + Platt calibration → <code>data/scorer.json</code> (and hard-transfer variants like <code>scorer-hard-logistic.json</code>)</li>
+      <li><strong>Serve</strong> — process loads Scorer once; live hop is features-only, milliseconds</li>
+    </ol>
+    <p>
+      Label on the smoke/hard artifacts: <code>not_spec_floors</code>. That means “good enough to shadow/demo,”
+      <em>not</em> “we cleared SWE-bench Verified promotion.” Say that proudly — judges trust honesty.
+    </p>
+    <p class="source">Operator commands: <a href="../README.md#trained-path">README · Trained path</a>.</p>
+
+    <h2>4. Numbers burned into memory</h2>
+    <ul>
+      <li><strong>2000</strong> train queries</li>
+      <li><strong>1600 / 1000 / 800</strong> — gold / silver / cal counts on <code>data/scorer.json</code></li>
+      <li><strong>~$8.16</strong> in <code>data/spend.txt</code> (process soft-budget counter)</li>
+      <li><strong>213</strong> automated tests; CI never bills aiand</li>
+      <li>Savings when logged = vs <strong>most expensive eligible</strong> on that hop — not a magic 62%</li>
+    </ul>
+    <p>
+      Full SAFE / UNSAFE table: <a href="../reference/pitch-six-minute.html">pitch-six-minute.html</a>.
+      Landing hero “97% savings” and “62% SWE-Bench” are <strong>illustrative previews</strong> — say
+      “this card shows the product vision; our measured story is per-request savings vs premium baseline and a shadow-first ML path.”
+    </p>
+
+    <h2>5. Timed 6-minute script</h2>
+    <ol>
+      <li><strong>0:00–0:45 · Hook</strong> — Agents burn money on premium-for-everything or break on cheap-for-everything. We sit in the middle as <code>router/auto</code>.</li>
+      <li><strong>0:45–2:00 · Demo</strong> — Landing simulator → dashboard savings/candidates → playground one hop. Point at <code>X-Router-Model</code> / reason.</li>
+      <li><strong>2:00–3:30 · How it works</strong> — Hard filters first; rules Pioneer score live; Scorer = offline teacher/gold/fit, &lt;10&nbsp;ms student, shadow before flip.</li>
+      <li><strong>3:30–4:30 · Proof posture</strong> — 2000 queries, gold+silver fit, ~$8 soft spend file, 213 tests, telemetry JSONL. No invented Verified win.</li>
+      <li><strong>4:30–5:30 · Why it scales</strong> — Same OpenAI wire forever; new models = YAML + retrain offline; clients unchanged.</li>
+      <li><strong>5:30–6:00 · Ask</strong> — Partnership / next: promote trained after gate, SWE-bench Verified as the real quality bar.</li>
+    </ol>
+
+    <h2>Practice quiz</h2>
+    <p>Same-length options. Retrieve from memory — don’t peek at the card first.</p>
+    <div id="quiz"></div>
+
+    <h2>Primary source to skim tonight</h2>
+    <p>
+      <a href="https://docs.aiand.com/api/chat-completions/">AIand Chat Completions docs</a>
+      — the provider the gateway and the train CLI actually call. Pair with
+      <a href="../README.md">README · How routing works</a> for the policy story.
+    </p>
+
+    <p class="callout">
+      Done? Rehearse the 6-minute script out loud once. Then ask me to grill you like a judge
+      (budget, “is it ML or rules?”, “show me the file”, “what’s your accuracy?”).
+    </p>
+  </article>
+
+  <script src="../assets/quiz.js"></script>
+  <script>
+    mountQuiz(document.getElementById("quiz"), [
+      {
+        prompt: "On a live hop today, what does the Scorer JSON primarily act like?",
+        options: [
+          { text: "A fitted dist artifact loaded once at process start" },
+          { text: "A live Motif teacher called on every agent request" },
+          { text: "A SWE-bench Verified certificate stored under data/" }
+        ],
+        answer: "A fitted dist artifact loaded once at process start",
+        ok: "Yes — train offline; serve weights. Teacher stays off the hot path.",
+        no: "Teacher is offline labeling. Verified promotion is a separate gate we do not claim."
+      },
+      {
+        prompt: "Which number set is SAFE to recite from data/scorer.json?",
+        options: [
+          { text: "n_gold 1600 · n_silver 1000 · n_cal 800 · not_spec_floors" },
+          { text: "n_gold 4000 · Verified resolve 52.6 · ECE proven 0.03" },
+          { text: "n_gold 200 · global savings 62 · SWE-bench promotion yes" }
+        ],
+        answer: "n_gold 1600 · n_silver 1000 · n_cal 800 · not_spec_floors",
+        ok: "Those counts are on the artifact. The others mix marketing with production floors.",
+        no: "Do not cite landing Verified % or production floors as if they were this fit."
+      },
+      {
+        prompt: "A judge asks: “Did you invent a 62% savings claim?” Best answer?",
+        options: [
+          { text: "Landing preview; we log savings vs most_expensive_eligible" },
+          { text: "Yes — our holdout file proves exactly sixty-two percent" },
+          { text: "Yes — PioneerHero scenarios are measured session totals" }
+        ],
+        answer: "Landing preview; we log savings vs most_expensive_eligible",
+        ok: "Honest and still strong: measurable per hop, not a vanity global %.",
+        no: "Hero cards and benchmark bars are illustrative unless you have a gate report."
+      },
+      {
+        prompt: "Where do you open the file if a judge asks for the rules picker?",
+        options: [
+          { text: "src/aiand_router/router.py — Pioneer / effort after hard filters" },
+          { text: "web/app/page.tsx — Next.js landing hero phase simulator" },
+          { text: "data/silver.jsonl — teacher probabilities used as live picks" }
+        ],
+        answer: "src/aiand_router/router.py — Pioneer / effort after hard filters",
+        ok: "Rules live in router.py; scorer.py is the trained hop; web is the console.",
+        no: "Silver never becomes the live pick by itself."
+      }
+    ]);
+  </script>
+</body>
+</html>

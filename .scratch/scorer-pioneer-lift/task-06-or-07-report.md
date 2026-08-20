@@ -1,5 +1,7 @@
 # Task 06/07 report: operator replay then one Rec A lift
 
+> Superseded for current operator state. This file documents the 2026-08-14 pre-Mix1 replay failure on `data/scorer.json`. For the current shadow candidate, current passing/failing gates, and the next paid command, use `operator-handoff-2026-08-20.md`.
+
 **Status:** DONE_WITH_CONCERNS  
 **Decision:** Issue **06** (gate failed). Issue 07 not taken.  
 **Commit:** `cb7a9bf` — Add optional GBDT plus post-hoc Platt so a failed replay gate can take one Rec A lift without Rec B.

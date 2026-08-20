@@ -1,0 +1,15 @@
+{
+  "n_prompts": 89,
+  "cheap_model": "deepseek-ai/deepseek-v4-flash",
+  "strong_model": "deepseek-ai/deepseek-v4-pro",
+  "enabled_in_measurement_only": true,
+  "config_default_enabled": false,
+  "rules": {
+    "strong_pass_through": 89
+  },
+  "picks": {
+    "deepseek-ai/deepseek-v4-pro": 89
+  },
+  "cheap_redirect_rate": 0.0,
+  "note": "Offline fixture on gold-verified edit phase; not FireRouter parity; cascade remains default-off and TRAINED_PATH=off only."
+}

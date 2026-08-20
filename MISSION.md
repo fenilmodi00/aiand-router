@@ -1,24 +1,21 @@
-# Mission: Live trained hop
-
-**Status (2026-08-13): smoke Scorer fit is undone.** `GET /v1/models` works; `POST /v1/chat/completions` returns 404 `model_not_found` for every catalog id (Flash, Motif, GLM, …). Spend stayed $0. Rules path is still the live pick. Resume teacher → gold → fit when a playground completion returns 200. Query file: `datasets/train-queries.jsonl`.
+# Mission: AI Ideathon 2026 final pitch
 
 ## Why
-I already have an OpenAI-compatible coding router. I want coding-agent clients (OpenCode and anything that speaks `/v1/chat/completions`) to point at this process with `model: router/auto` and get real routed completions — first on the rules path, then on a Pioneer-shaped trained path once a Scorer exists and shadow looks sane. Success is a live hop I can use, not a second product and not a Pioneer clone.
+We are finalists. I need a **4-minute pitch + 3-minute Q&A** that makes judges quickly understand the problem, solution, demo, technology, and future of aiand/auto — balanced across all five judging criteria.
 
 ## Success looks like
-- Start this gateway locally and have a client complete a `router/auto` request through it
-- Read `X-Router-Path` / `data/requests.jsonl` and know whether that hop was `rules`, `shadow`, or `trained`
-- Fit a `not_spec_floors` Scorer (opt-in, budget-capped) and watch shadow before flipping `TRAINED_PATH=trained`
-- Keep the rules path as fallback; never treat smoke weights as the Verified promotion gate
+- Hit the official section timings without rushing or stalling
+- One clear demo journey: problem → action → router AI → useful result
+- Explain what AI actually enables (offline teacher → live Scorer), not “we use AI”
+- Answer Q&A on architecture, limitations, competitors, and scale in ≤30s each
+- Use SAFE measured numbers; land marketing % as illustrative only
 
 ## Constraints
-- Windows / PowerShell
-- About $100 of aiand credits for a smoke fit — not production gold-matrix floors
-- Default code budget stays $15; smoke at $100 is an operator env, not a code default
-- Clients must keep talking to `/v1/chat/completions`; no new protocol
+- **4:00 pitch · 3:00 Q&A** (AI Ideathon 2026 Final Pitch Guidelines)
+- Frontend engineer on tech narration — keep ML explainable
+- Honesty: `not_spec_floors` ≠ SWE-bench Verified promotion; no invented savings %
 
 ## Out of scope
-- Flashlight agents, OpenCode snippets, playgrounds, Pioneer dashboard clone
-- Production floors: n=4000 sparse, n≥300 retune, SWE-bench Verified, Terminal-Bench
-- Operating multi-tenant aiand infra, Nginx/Gunicorn production topology
-- Invented savings percentages
+- Rewriting the product for the Ideathon
+- Spending pitch time on login, menus, or setup
+- Claiming production Verified floors as current results

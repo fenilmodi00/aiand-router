@@ -9,6 +9,8 @@ from aiand_router.replay_report import (
     apply_replay_gate,
     assert_not_production_floors,
     main,
+    parity_blockers,
+    parity_posture,
     replay_gate_pass,
     replay_report,
 )
@@ -71,6 +73,7 @@ def _report(**kwargs):
 
 def _bars_green() -> dict:
     cheapest = {"success_rate": 0.5, "list_price_cost": 0.01}
+    trained = {"success_rate": 0.8, "list_price_cost": 0.04}
     return {
         "rank_auc": 0.9,
         "mean_p_spread": 0.2,
@@ -78,11 +81,16 @@ def _bars_green() -> dict:
         "ece_equal_width": 0.01,
         "ece_equal_mass": 0.01,
         "rules_cost_delta": -0.01,
+        "rules_ne_cheapest_rate": 1.0,
+        "rules_cost_delta_where_rules_ne_cheapest": -0.01,
+        "savings_vs_most_expensive": 0.06,
         "policies": {
-            "trained": {"success_rate": 0.8, "list_price_cost": 0.04},
+            "trained": dict(trained),
             "rules": {"success_rate": 0.8, "list_price_cost": 0.05},
             "always_flash": dict(cheapest),
             "always_cheapest": dict(cheapest),
+            "always_strong": {"success_rate": 0.8, "list_price_cost": 0.10},
+            "always_most_expensive": {"success_rate": 0.5, "list_price_cost": 0.10},
         },
     }
 
@@ -105,6 +113,12 @@ def test_replay_report_policies_success_rate_and_list_price_cost():
         report["policies"]["trained"]["list_price_cost"]
         - report["policies"]["rules"]["list_price_cost"]
     )
+    assert report["savings_vs_most_expensive"] >= 0.0
+    assert "always_most_expensive" in report["policies"]
+    if report["rules_ne_cheapest_rate"] == 0.0:
+        assert report["rules_cost_delta_where_rules_ne_cheapest"] is None
+    else:
+        assert isinstance(report["rules_cost_delta_where_rules_ne_cheapest"], float)
     for name in POLICIES:
         row = report["policies"][name]
         assert 0.0 <= row["success_rate"] <= 1.0
@@ -165,20 +179,44 @@ def test_replay_gate_fails_when_trained_is_always_cheapest():
         "brier_skill": 0.1,
         "ece_equal_width": 0.01,
         "ece_equal_mass": 0.01,
-        "rules_cost_delta": -0.01,
+        "rules_cost_delta": 0.02,
+        "rules_ne_cheapest_rate": 1.0,
+        "savings_vs_most_expensive": 0.06,
         "disagreement_rate": 0.4,
         "policies": {
             "trained": dict(cheapest),
             "rules": {"success_rate": 0.5, "list_price_cost": 0.05},
             "always_flash": dict(cheapest),
             "always_cheapest": dict(cheapest),
+            "always_strong": {"success_rate": 0.7, "list_price_cost": 0.10},
         },
     }
     assert replay_gate_pass(report) is False
 
 
-def test_replay_gate_fails_when_trained_is_always_cheapest_even_if_not_flash():
-    """Gate compares trained ≠ always-cheapest-eligible, not trained ≠ always-Flash."""
+def test_replay_gate_fails_always_cheapest_when_strong_is_better_even_if_not_flash():
+    cheapest = {"success_rate": 0.5, "list_price_cost": 0.01}
+    dear = {"success_rate": 0.8, "list_price_cost": 0.10}
+    report = {
+        "rank_auc": 0.9,
+        "mean_p_spread": 0.2,
+        "brier_skill": 0.1,
+        "ece_equal_width": 0.01,
+        "ece_equal_mass": 0.01,
+        "rules_cost_delta": -0.09,
+        "rules_ne_cheapest_rate": 1.0,
+        "savings_vs_most_expensive": 0.09,
+        "disagreement_rate": 0.4,
+        "policies": {
+            "trained": dict(cheapest),
+            "rules": dict(dear),
+            "always_flash": dict(dear),
+            "always_cheapest": dict(cheapest),
+            "always_strong": dict(dear),
+        },
+    }
+    assert replay_gate_pass(report) is False
+    """Always-Flash is allowed only when paying up does not buy quality."""
     cheapest = {"success_rate": 0.9, "list_price_cost": 0.01}
     dear = {"success_rate": 0.5, "list_price_cost": 0.10}
     report = {
@@ -188,15 +226,18 @@ def test_replay_gate_fails_when_trained_is_always_cheapest_even_if_not_flash():
         "ece_equal_width": 0.01,
         "ece_equal_mass": 0.01,
         "rules_cost_delta": -0.01,
+        "rules_ne_cheapest_rate": 1.0,
+        "savings_vs_most_expensive": 0.09,
         "disagreement_rate": 0.4,
         "policies": {
             "trained": dict(cheapest),
             "rules": dict(dear),
             "always_flash": dict(dear),
             "always_cheapest": dict(cheapest),
+            "always_strong": dict(dear),
         },
     }
-    assert replay_gate_pass(report) is False
+    assert replay_gate_pass(report) is True
 
 
 def test_rank_auc_skips_unscored_gold_ids(tmp_path):
@@ -323,7 +364,7 @@ def test_passing_gate_still_keeps_shadow_and_not_spec_floors():
         ("brier_skill", 0.0),
         ("ece_equal_width", 0.031),
         ("ece_equal_mass", 0.031),
-        ("rules_cost_delta", 0.0),
+        ("savings_vs_most_expensive", 0.0),
     ],
 )
 def test_failing_numeric_bar_keeps_shadow_and_not_spec_floors(key, value):
@@ -446,6 +487,9 @@ def test_dual_eval_cost_gold_where_rules_disagree_with_cheapest(tmp_path, capsys
     assert report["rules_ne_cheapest_rate"] == 0.0
     assert report["cost_slice"]["rules_ne_cheapest_rate"] == 1.0
     assert report["cost_slice"]["rules_cost_delta"] < 0
+    assert report["cost_slice"]["savings_vs_most_expensive"] > 0
+    assert report["savings_vs_most_expensive"] >= 0.0
+    assert report["rules_cost_delta_where_rules_ne_cheapest"] is None
     assert report["path"] == "shadow"
     assert report["not_spec_floors"] is True
     assert report["replay_gate_pass"] is False
@@ -472,3 +516,54 @@ def test_replay_gbdt_artifact_prints_prefer_logistic(tmp_path, capsys, monkeypat
     out = capsys.readouterr().out.lower()
     assert "prefer_logistic" in out
     assert "scorer-logistic" in out or "logistic" in out
+
+
+def test_replay_gate_passes_when_trained_costs_more_than_rules_but_saves_vs_expensive():
+    """Quality-first spend vs rules is not a fail if savings vs most_expensive_eligible > 0."""
+    report = _bars_green()
+    report["rules_cost_delta"] = 0.000687
+    report["rules_cost_delta_where_rules_ne_cheapest"] = 0.000687
+    report["rules_ne_cheapest_rate"] = 0.78
+    report["savings_vs_most_expensive"] = 0.0009
+    assert replay_gate_pass(report) is True
+
+
+def test_replay_gate_ignores_rules_cost_delta_when_rules_already_cheapest():
+    report = _bars_green()
+    report["rules_ne_cheapest_rate"] = 0.0
+    report["rules_cost_delta"] = 0.0
+    report["rules_cost_delta_where_rules_ne_cheapest"] = None
+    report["savings_vs_most_expensive"] = 0.002
+    assert replay_gate_pass(report) is True
+
+
+def test_replay_gate_fails_zero_savings_vs_most_expensive():
+    report = _bars_green()
+    report["rules_cost_delta"] = -0.01
+    report["savings_vs_most_expensive"] = 0.0
+    assert replay_gate_pass(report) is False
+
+
+def test_parity_posture_never_claims_production_parity():
+    out = apply_replay_gate(_bars_green())
+    assert out["local_replay_gate_pass"] is True
+    assert out["production_parity"] is False
+    assert out["promotion_tier"] == "shadow_local_pass"
+    assert "not_spec_floors" in out["parity_blockers"]
+    assert "no_session_gold_promotion_gate" in out["parity_blockers"]
+
+
+def test_parity_posture_lists_rules_cost_delta_when_trained_costs_more():
+    report = _bars_green()
+    report["rules_cost_delta"] = 0.000687
+    out = apply_replay_gate(report)
+    assert out["local_replay_gate_pass"] is True
+    assert "rules_cost_delta_not_negative" in out["parity_blockers"]
+
+
+def test_parity_posture_tier_fails_when_local_gate_fails():
+    report = _bars_green()
+    report["rank_auc"] = 0.64
+    out = apply_replay_gate(report)
+    assert out["local_replay_gate_pass"] is False
+    assert out["promotion_tier"] == "shadow_local_fail"

@@ -32,7 +32,13 @@ from .console import (
 )
 from .learn import learned_enabled, learned_select
 from .provider import HttpAiandProvider
-from .scorer import apply_trained_path, load_scorer, parse_trained_path, trained_select
+from .scorer import (
+    apply_trained_path,
+    cascade_select,
+    load_scorer,
+    parse_trained_path,
+    trained_select,
+)
 from .router import (
     DEBUG_PHASES,
     VIRTUAL_MODELS,
@@ -158,6 +164,37 @@ def create_app(
     scorer_artifact = load_scorer(scorer_file)
 
     session_tracker = SessionTracker()
+    # FireRouter-style: reuse the auto-route pick within a conversation (existing
+    # x-session-id / session_id / prompt-cache-key). Re-score if effort, allowlist,
+    # or hop path change, or the prior model is no longer a candidate.
+    route_sticky: dict[tuple[str, str, str, str], str] = {}
+
+    def apply_conversation_sticky(
+        decision: Decision,
+        *,
+        session_id: str,
+        effort: str,
+        allowed: set[str] | None,
+        pinned: bool,
+        req_hop_path: str,
+    ) -> bool:
+        if pinned or not session_id:
+            return False
+        key = (session_id, effort, ",".join(sorted(allowed or ())), req_hop_path)
+        prev = route_sticky.get(key)
+        if prev and prev in by_id and (allowed is None or prev in allowed):
+            if prev != decision.model.id:
+                decision.model = by_id[prev]
+                # Fresh score's savings belong to a different pick; avoid lying
+                # in X-Router-Savings-Usd until post-call recompute.
+                decision.savings_usd = None
+            codes = list(decision.reason_codes or [])
+            if "conversation_sticky" not in codes:
+                codes.append("conversation_sticky")
+            decision.reason_codes = codes
+            return True
+        route_sticky[key] = decision.model.id
+        return False
 
     app = FastAPI(title="AIand Coding Router", version="0.1.0")
     app.add_middleware(
@@ -342,6 +379,7 @@ def create_app(
 
         body = await request.json()
         headers = {k.lower(): v for k, v in request.headers.items()}
+        req_hop_path = parse_trained_path(headers.get("x-router-hop-path") or hop_path)
         effort = (headers.get("x-routing-effort") or "medium").lower()
         allowed_raw = headers.get("x-allowed-models") or ""
         allowed = {x.strip() for x in allowed_raw.split(",") if x.strip()} or None
@@ -384,7 +422,9 @@ def create_app(
         )
 
         tip_msg: str | None = None
-        if requested not in VIRTUAL_MODELS and requested in by_id:
+        session_id = _conversation_id(headers)
+        pinned = requested not in VIRTUAL_MODELS and requested in by_id
+        if pinned:
             decision_model = by_id[requested]
             decision = Decision(
                 model=decision_model,
@@ -403,11 +443,21 @@ def create_app(
                 )
                 tip_msg = f"Using router/auto would have saved ${pot_savings:.4f} (routed to {auto_dec.model.id})"
         else:
-            use_learned = hop_path == "off" and learned_enabled(flag_path)
+            use_learned = req_hop_path == "off" and learned_enabled(flag_path)
             picker = learned_select if use_learned else select_model
             decision = picker(select_cfg, models, **pick_kwargs)
             decision.effort = effort
-            if hop_path != "off":
+            if req_hop_path == "off" and scorer_artifact is not None:
+                cascade = cascade_select(
+                    select_cfg,
+                    models,
+                    scorer_artifact,
+                    text=prompt_text,
+                    **pick_kwargs,
+                )
+                if cascade is not None:
+                    decision = cascade
+            elif req_hop_path != "off":
                 trained = None
                 if scorer_artifact is not None:
                     trained = trained_select(
@@ -418,22 +468,25 @@ def create_app(
                         **pick_kwargs,
                     )
                 decision = apply_trained_path(
-                    hop_path, decision, trained, tokens=tokens, by_id=by_id
+                    req_hop_path, decision, trained, tokens=tokens, by_id=by_id
                 )
 
+        sticky_hit = apply_conversation_sticky(
+            decision,
+            session_id=session_id,
+            effort=effort,
+            allowed=allowed,
+            pinned=pinned,
+            req_hop_path=req_hop_path,
+        )
         meta = _router_headers(decision)
+        if sticky_hit:
+            meta["X-Router-Conversation-Sticky"] = "1"
         if tip_msg:
             meta["X-Router-Tip"] = tip_msg
             meta["X-Pioneer-Router-Tip"] = tip_msg
 
         streaming = bool(body.get("stream"))
-        session_id = (
-            headers.get("x-session-id")
-            or headers.get("session_id")
-            or headers.get("prompt-cache-key")
-            or headers.get("prompt_cache_key")
-            or ""
-        )
         ck = request_cache_key(body, decision.model.id, key_fp)
         if not streaming:
             cached = cache.get(ck)
@@ -460,6 +513,7 @@ def create_app(
                         latency_ms=0,
                         status=200,
                         cache_hit=True,
+                        session_id=session_id,
                     ),
                 )
                 return JSONResponse(cached, headers=meta)
@@ -531,6 +585,7 @@ def create_app(
             cache_hit=False,
             tool_valid=tool_calls_valid(message),
             json_valid=json_content_valid(message) if needs_json else None,
+            session_id=session_id,
         )
         if last_outcome:
             row["tests_passed"] = last_outcome.get("tests_passed")
@@ -563,6 +618,7 @@ def create_app(
 
         anthropic_body = await request.json()
         headers = {k.lower(): v for k, v in request.headers.items()}
+        req_hop_path = parse_trained_path(headers.get("x-router-hop-path") or hop_path)
         openai_body = anthropic_to_openai(anthropic_body)
 
         requested = anthropic_body.get("model") or "router/auto"
@@ -604,7 +660,9 @@ def create_app(
             if isinstance(m, dict)
         )
 
-        if requested not in VIRTUAL_MODELS and requested in by_id:
+        session_id = _conversation_id(headers)
+        pinned = requested not in VIRTUAL_MODELS and requested in by_id
+        if pinned:
             decision = Decision(
                 model=by_id[requested],
                 phase=phase,
@@ -613,11 +671,21 @@ def create_app(
                 candidates=[requested],
             )
         else:
-            use_learned = hop_path == "off" and learned_enabled(flag_path)
+            use_learned = req_hop_path == "off" and learned_enabled(flag_path)
             picker = learned_select if use_learned else select_model
             decision = picker(select_cfg, models, **pick_kwargs)
             decision.effort = effort
-            if hop_path != "off":
+            if req_hop_path == "off" and scorer_artifact is not None:
+                cascade = cascade_select(
+                    select_cfg,
+                    models,
+                    scorer_artifact,
+                    text=prompt_text,
+                    **pick_kwargs,
+                )
+                if cascade is not None:
+                    decision = cascade
+            elif req_hop_path != "off":
                 trained = None
                 if scorer_artifact is not None:
                     trained = trained_select(
@@ -628,10 +696,20 @@ def create_app(
                         **pick_kwargs,
                     )
                 decision = apply_trained_path(
-                    hop_path, decision, trained, tokens=tokens, by_id=by_id
+                    req_hop_path, decision, trained, tokens=tokens, by_id=by_id
                 )
 
+        sticky_hit = apply_conversation_sticky(
+            decision,
+            session_id=session_id,
+            effort=effort,
+            allowed=allowed,
+            pinned=pinned,
+            req_hop_path=req_hop_path,
+        )
         meta = _router_headers(decision)
+        if sticky_hit:
+            meta["X-Router-Conversation-Sticky"] = "1"
         meta["pioneer_routed_model"] = decision.model.id
         meta["pioneer_savings"] = str(decision.savings_usd or 0.0)
 
@@ -666,13 +744,6 @@ def create_app(
                 6,
             )
 
-        session_id = (
-            headers.get("x-session-id")
-            or headers.get("session_id")
-            or headers.get("prompt-cache-key")
-            or headers.get("prompt_cache_key")
-            or ""
-        )
         if session_id:
             session_tracker.record(
                 session_id,
@@ -695,6 +766,7 @@ def create_app(
             status=result.get("status"),
             cache_hit=False,
             wire="anthropic_messages",
+            session_id=session_id,
         )
         append_jsonl(log, row)
 
@@ -742,13 +814,23 @@ def create_app(
     return app
 
 
+def _conversation_id(headers: dict[str, str]) -> str:
+    return (
+        headers.get("x-session-id")
+        or headers.get("session_id")
+        or headers.get("prompt-cache-key")
+        or headers.get("prompt_cache_key")
+        or ""
+    )
+
+
 def _router_headers(decision: Decision) -> dict[str, str]:
     if is_tripped():
         if decision.reason_codes is None:
             decision.reason_codes = []
         if "retrain_drift" not in decision.reason_codes:
             decision.reason_codes.append("retrain_drift")
-    if decision.path in {"shadow", "trained"}:
+    if decision.path in {"shadow", "trained", "cascade"}:
         meta = {
             "X-Router-Phase": decision.phase,
             "X-Router-Model": decision.model.id,
@@ -789,6 +871,7 @@ def _router_headers(decision: Decision) -> dict[str, str]:
 
 
 def _jsonl_row(decision: Decision, **extra: Any) -> dict[str, Any]:
+    session_id = extra.pop("session_id", None)
     row: dict[str, Any] = {
         "phase": decision.phase,
         "selected": decision.model.id,
@@ -797,6 +880,8 @@ def _jsonl_row(decision: Decision, **extra: Any) -> dict[str, Any]:
         "path": decision.path,
         **extra,
     }
+    if session_id:
+        row["session_id"] = session_id
     if decision.trained_selected:
         row["trained_selected"] = decision.trained_selected
     if decision.trained_confidence is not None:

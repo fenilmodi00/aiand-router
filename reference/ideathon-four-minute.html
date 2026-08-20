@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ideathon 4+3 — stage card</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+  <style>
+    table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin: 0.5rem 0 1rem; }
+    th, td { border: 1px solid var(--rule); padding: 0.3rem 0.45rem; text-align: left; vertical-align: top; }
+    th { background: var(--card); }
+    .clock { font-family: var(--mono); font-size: 0.85rem; color: var(--accent); }
+    .arch { font-family: var(--mono); font-size: 0.78rem; background: var(--card); border: 1px solid var(--rule); padding: 0.65rem 0.75rem; margin: 0.75rem 0; }
+  </style>
+</head>
+<body>
+  <article class="page">
+    <nav class="crumbs">
+      <a href="../lessons/0006-ideathon-four-minute.html">Lesson 0006</a> ·
+      <a href="./pitch-six-minute.html">SAFE numbers</a> ·
+      <a href="./glossary.html">Glossary</a>
+    </nav>
+    <header>
+      <h1>AI Ideathon 2026 — 4 + 3 stage card</h1>
+      <p class="lede">Print beside the laptop. Hit every block. Balance all five criteria.</p>
+    </header>
+
+    <h2>Clock <span class="clock">4:00 pitch · 3:00 Q&amp;A</span></h2>
+    <table>
+      <thead><tr><th>Block</th><th>Time</th><th>You say / show</th><th>Judging</th></tr></thead>
+      <tbody>
+        <tr><td>1 Problem &amp; impact</td><td>0:00–0:45</td><td>Premium-only burns $; cheap-only breaks hard agent hops. Teams on OpenCode/Cursor.</td><td>25%</td></tr>
+        <tr><td>2 Solution &amp; innovation</td><td>0:45–1:30</td><td><code>router/auto</code> · cheapest model that clears quality bar · AI = offline teacher → live Scorer</td><td>20%</td></tr>
+        <tr><td>3 Demo</td><td>1:30–2:45</td><td>One journey only: playground hop → chosen model + reason → dashboard savings row. Prompt pack: <a href="./demo-prompts-ten.html">demo-prompts-ten.html</a></td><td>15%</td></tr>
+        <tr><td>4 Technical</td><td>2:45–3:25</td><td>Architecture line + FastAPI/Next + Scorer artifact · 213 tests · no LLM on hot path</td><td>20%</td></tr>
+        <tr><td>5 Potential &amp; close</td><td>3:25–4:00</td><td>Same wire forever · YAML+retrain scales catalog · shadow→gate→SWE-bench · closing line</td><td>20%</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Architecture (say in ~15 seconds)</h2>
+    <div class="arch">
+      Agent (OpenCode / Cursor)<br>
+      → FastAPI gateway <code>/v1/chat/completions</code> · <code>router/auto</code><br>
+      → Rules + Scorer (shadow/trained)<br>
+      → aiand Chat Completions (9 models)<br>
+      → Result + headers + <code>requests.jsonl</code>
+    </div>
+
+    <h2>Q&amp;A cheat (≤25s answers)</h2>
+    <table>
+      <thead><tr><th>If they ask…</th><th>Answer spine</th></tr></thead>
+      <tbody>
+        <tr><td>How does the AI work?</td><td>Teacher labels offline; gold = real runs; fit logistic+Platt; live hop scores in ms — no teacher call.</td></tr>
+        <tr><td>Is it functional?</td><td>Yes — live rules path; playground + dashboard; Scorer loads from JSON; 213 tests.</td></tr>
+        <tr><td>vs rule routers / OpenRouter?</td><td>Per-request calibrated P(success) + cheapest-above-bar; telemetry; shadow before flip.</td></tr>
+        <tr><td>Limitations?</td><td>Smoke fit is <code>not_spec_floors</code>; Verified promotion still future; landing % are previews.</td></tr>
+        <tr><td>Scale / business?</td><td>Drop-in endpoint; per-hop FinOps log; teams + agent platforms; managed SaaS later.</td></tr>
+        <tr><td>Data / spend?</td><td>2000 queries; ~1600/1000/800 gold/silver/cal; soft spend file ~$8; CI never spends.</td></tr>
+      </tbody>
+    </table>
+
+    <p class="source">SAFE numbers detail → <a href="./pitch-six-minute.html">pitch-six-minute.html</a></p>
+  </article>
+</body>
+</html>

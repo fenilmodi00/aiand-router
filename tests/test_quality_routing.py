@@ -274,11 +274,11 @@ def test_max_effort_trivial_bin_flash_served_not_k3(tmp_path, monkeypatch):
 def test_default_effort_cheapest_within_regret_served(tmp_path, monkeypatch):
     _clean_env(monkeypatch)
     # Default config: premium_aa_floor=58, K3 gated at medium
-    # effort=medium -> threshold=0.10, max_regret=0.20
-    # Pro=0.90 (top), Flash=0.85 (within 0.20 of top, cheapest) -> Flash served
+    # effort=medium -> threshold=0.10, max_regret=0.20 (Pioneer ship defaults)
+    # Pro=0.90 (top), Flash=0.85 (clears threshold directly, cheapest) -> Flash served
     scorer = _scorer(
         tmp_path,
-        {FLASH: 0.85, PRO: 0.90, GLM: 0.80, K27: 0.70, MOTIF: 0.60, QWEN: 0.50},
+        {FLASH: 0.85, PRO: 0.90, GLM: 0.08, K27: 0.07, MOTIF: 0.06, QWEN: 0.05},
         bin="standard",
     )
     client, provider = _client(tmp_path, scorer)
@@ -290,7 +290,7 @@ def test_default_effort_cheapest_within_regret_served(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert provider.calls[0]["model"] == FLASH
     assert response.headers["x-router-model"] == FLASH
-    assert response.headers["x-router-rule"] == "max_regret"
+    assert response.headers["x-router-rule"] == "threshold"
 
 
 # --------------------------------------------------------------------------- #

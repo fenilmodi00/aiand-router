@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -65,6 +66,106 @@ def y_is_dense_easy(y: float) -> bool:
     """True when y is closer to dense-easy (~0.39) than to the hard-band midpoint."""
     hard_mid = (Y_HARD_LO + Y_HARD_HI) / 2.0
     return abs(y - Y_DENSE_EASY) < abs(y - hard_mid)
+
+
+WINNER_PATTERNS = (
+    "kimi-only",
+    "all-four",
+    "all-fail",
+    "flash+qwen+kimi",
+    "qwen-without-flash",
+    "flash-without-pro",
+    "flash+pro",
+    "other",
+)
+
+
+def classify_winner_pattern(success_by_model: dict[str, bool]) -> str:
+    """Per-prompt success set → winner pattern (labeled gold only)."""
+    success = {mid for mid, ok in success_by_model.items() if ok}
+    if success == {KIMI}:
+        return "kimi-only"
+    if success == set(HOLDOUT_ORDER_IDS):
+        return "all-four"
+    if not success:
+        return "all-fail"
+    if success == {FLASH, QWEN, KIMI}:
+        return "flash+qwen+kimi"
+    if QWEN in success and FLASH not in success:
+        return "qwen-without-flash"
+    if FLASH in success and PRO not in success:
+        return "flash-without-pro"
+    if FLASH in success and PRO in success:
+        return "flash+pro"
+    return "other"
+
+
+def group_gold_by_prompt(rows: list[dict[str, Any]]) -> dict[str, dict[str, bool]]:
+    """prompt → model_id → success for observed anchor cells."""
+    out: dict[str, dict[str, bool]] = defaultdict(dict)
+    for r in _observed(rows):
+        out[str(r["prompt"])][str(r["model_id"])] = bool(r["success"])
+    return out
+
+
+def winner_pattern_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    """Count prompts with full anchor coverage by winner pattern."""
+    counts: dict[str, int] = {p: 0 for p in WINNER_PATTERNS}
+    for oc in group_gold_by_prompt(rows).values():
+        if not all(mid in oc for mid in HOLDOUT_ORDER_IDS):
+            continue
+        pat = classify_winner_pattern({mid: oc[mid] for mid in HOLDOUT_ORDER_IDS})
+        counts[pat] = counts.get(pat, 0) + 1
+    return counts
+
+
+def winner_diagnosis_row(
+    label: str,
+    rows: list[dict[str, Any]],
+    *,
+    eval_rows: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """One row for operator winner-pattern tables (Mix1 vs seed vs verified)."""
+    by_prompt = group_gold_by_prompt(rows)
+    full = [oc for oc in by_prompt.values() if all(mid in oc for mid in HOLDOUT_ORDER_IDS)]
+    rates = per_id_rates(rows)
+    patterns = winner_pattern_counts(rows)
+    n = len(full)
+    out: dict[str, Any] = {
+        "label": label,
+        "prompts": n,
+        "y_rate": round(y_rate(rows), 4),
+        "flash": round(rates.get(FLASH, 0.0), 4),
+        "qwen": round(rates.get(QWEN, 0.0), 4),
+        "kimi": round(rates.get(KIMI, 0.0), 4),
+        "pro": round(rates.get(PRO, 0.0), 4),
+        "holdout_like_order": holdout_like_order(rates),
+        **{p.replace("+", "_"): patterns.get(p, 0) for p in WINNER_PATTERNS},
+    }
+    if eval_rows is not None:
+        geo = geometry_from_rows(rows, eval_rows)
+        out["spearman"] = round(float(geo["spearman_train_eval"]), 4)
+        out["geometry_pass"] = bool(geo["geometry_pass"])
+    return out
+
+
+def winner_diagnosis_table(
+    slices: list[tuple[str, Path | list[dict[str, Any]]]],
+    *,
+    eval_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    eval_rows = _load_gold(eval_path) if eval_path is not None else None
+    table: list[dict[str, Any]] = []
+    for label, src in slices:
+        rows = _load_gold(src) if isinstance(src, Path) else src
+        table.append(
+            winner_diagnosis_row(
+                label,
+                rows,
+                eval_rows=eval_rows if label != "verified" else None,
+            )
+        )
+    return table
 
 
 def holdout_like_order(rates: dict[str, float]) -> bool:
@@ -145,13 +246,35 @@ def slice_stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def geometry_report(
-    train_path: Path,
-    eval_path: Path,
-    cal_path: Path | None = None,
+def _gold_cell_key(row: dict[str, Any]) -> tuple[str, str]:
+    return (str(row.get("prompt") or ""), str(row.get("model_id") or ""))
+
+
+def concat_gold(
+    base_rows: list[dict[str, Any]], extra_rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Append extra cells; first prompt+model_id wins."""
+    seen: set[tuple[str, str]] = set()
+    out: list[dict[str, Any]] = []
+    for r in list(base_rows) + list(extra_rows):
+        k = _gold_cell_key(r)
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(r)
+    return out
+
+
+def write_gold(rows: list[dict[str, Any]], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+
+
+def geometry_from_rows(
+    train_rows: list[dict[str, Any]],
+    eval_rows: list[dict[str, Any]],
+    cal_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    train_rows = _load_gold(train_path)
-    eval_rows = _load_gold(eval_path)
     train = slice_stats(train_rows)
     ev = slice_stats(eval_rows)
     ids = sorted(set(train["per_id"]) & set(ev["per_id"]))
@@ -182,9 +305,60 @@ def geometry_report(
             "data/scorer-logistic.json" if prefer_logistic else "data/scorer.json"
         ),
     }
-    if cal_path is not None:
-        out["cal"] = slice_stats(_load_gold(cal_path))
+    if cal_rows is not None:
+        out["cal"] = slice_stats(cal_rows)
     return out
+
+
+def geometry_report(
+    train_path: Path,
+    eval_path: Path,
+    cal_path: Path | None = None,
+) -> dict[str, Any]:
+    return geometry_from_rows(
+        _load_gold(train_path),
+        _load_gold(eval_path),
+        _load_gold(cal_path) if cal_path is not None else None,
+    )
+
+
+def merge_gold_if_geometry(
+    base_path: Path,
+    extra_path: Path,
+    eval_path: Path,
+    out_path: Path,
+) -> dict[str, Any]:
+    """Write base+extra to out_path only when new gold and combined pass geometry.
+
+    Standalone ``extra`` must pass ``geometry_pass`` vs eval; combined-only pass is
+    insufficient (seed-14 standalone fail + combined train merge pass regressed replay).
+    Does not overwrite out_path on fail. Unpaid; never trains.
+    """
+    eval_rows = _load_gold(eval_path)
+    extra_rows = _load_gold(extra_path)
+    standalone = geometry_from_rows(extra_rows, eval_rows)
+    combined = concat_gold(_load_gold(base_path), extra_rows)
+    report = geometry_from_rows(combined, eval_rows)
+    report["standalone"] = {
+        "geometry_pass": standalone["geometry_pass"],
+        "holdout_like_order": standalone["holdout_like_order"],
+        "y_rate": standalone["train"]["y_rate"],
+        "spearman_train_eval": standalone["spearman_train_eval"],
+        "n": len(extra_rows),
+    }
+    report["standalone_geometry_pass"] = standalone["geometry_pass"]
+    report["merged_n"] = len(combined)
+    report["wrote"] = False
+    report["out"] = str(out_path)
+    if not standalone["geometry_pass"]:
+        report["refused"] = "standalone_geometry_pass=false"
+        return report
+    if not report.get("geometry_pass"):
+        report["refused"] = "combined_geometry_pass=false"
+        return report
+    write_gold(combined, out_path)
+    report["wrote"] = True
+    return report
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -203,12 +377,28 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="Eval-only holdout gold JSONL (not fit y; typically frozen verified)",
     )
-    args = parser.parse_args(argv)
-    report = geometry_report(
-        Path(args.train),
-        Path(args.eval),
-        Path(args.cal) if args.cal else None,
+    parser.add_argument(
+        "--merge",
+        help="Extra gold JSONL; concatenate onto --train and write --out only if geometry_pass",
     )
+    parser.add_argument("--out", help="Combined gold path (required with --merge)")
+    args = parser.parse_args(argv)
+    if args.merge or args.out:
+        if not args.merge or not args.out:
+            print("refusing: --merge and --out must be set together", file=sys.stderr)
+            return 2
+        report = merge_gold_if_geometry(
+            Path(args.train),
+            Path(args.merge),
+            Path(args.eval),
+            Path(args.out),
+        )
+    else:
+        report = geometry_report(
+            Path(args.train),
+            Path(args.eval),
+            Path(args.cal) if args.cal else None,
+        )
     print(json.dumps(report, indent=2))
     print("kill", report["kill"])
     print("geometry_pass", report["geometry_pass"])
@@ -218,6 +408,11 @@ def main(argv: list[str] | None = None) -> int:
     print("holdout_like_order", report["holdout_like_order"])
     print("prefer_logistic", report["prefer_logistic"])
     print("recommended_artifact", report["recommended_artifact"])
+    if args.merge:
+        print("wrote", report.get("wrote"))
+        print("merged_n", report.get("merged_n"))
+        if not report.get("wrote"):
+            return 2
     return 0
 
 

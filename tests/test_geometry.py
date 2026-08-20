@@ -45,6 +45,7 @@ def _unobserved(prompt: str, mid: str, tokens: int = 20) -> dict:
 
 def test_geometry_cli_prints_spearman_and_kill_without_opt_in(tmp_path, capsys, monkeypatch):
     monkeypatch.delenv("AIAND_TRAIN", raising=False)
+    monkeypatch.delenv("TRAINED_PATH", raising=False)
     train = _write_jsonl(
         tmp_path / "gold-sparse.jsonl",
         _cells("long train", 400, {"cheap/flash": True, "mid/kimi": False, "dear/pro": True})
@@ -264,6 +265,101 @@ def test_geometry_positive_spearman_allows_scorer_json(tmp_path, capsys, monkeyp
     assert report["geometry_pass"] is False
 
 
+def _holdout_patterns() -> list[dict[str, bool]]:
+    return [
+        {FLASH: False, QWEN: False, KIMI: True, PRO: False},
+        {FLASH: False, QWEN: False, KIMI: True, PRO: False},
+        {FLASH: True, QWEN: False, KIMI: False, PRO: False},
+        {FLASH: False, QWEN: True, KIMI: False, PRO: False},
+        {FLASH: False, QWEN: False, KIMI: False, PRO: False},
+    ]
+
+
+def test_merge_rejects_when_combined_order_fails(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("AIAND_TRAIN", raising=False)
+    base_rows: list[dict] = []
+    for i, oc in enumerate(_holdout_patterns()):
+        base_rows.extend(_cells(f"base{i}", 20, oc))
+    extra_rows: list[dict] = []
+    qwen_only = {FLASH: False, QWEN: True, KIMI: True, PRO: False}
+    for i in range(3):
+        extra_rows.extend(_cells(f"extra{i}", 20, qwen_only))
+    eval_rows: list[dict] = []
+    for i, oc in enumerate(_holdout_patterns()):
+        eval_rows.extend(_cells(f"eval{i}", 20, oc))
+    base = _write_jsonl(tmp_path / "base.jsonl", base_rows)
+    extra = _write_jsonl(tmp_path / "extra.jsonl", extra_rows)
+    ev = _write_jsonl(tmp_path / "eval.jsonl", eval_rows)
+    out = tmp_path / "merged.jsonl"
+    code = main(["--train", str(base), "--eval", str(ev), "--merge", str(extra), "--out", str(out)])
+    assert code == 2
+    captured = capsys.readouterr().out
+    report = json.loads(captured[captured.index("{") : captured.rindex("}") + 1])
+    assert report["geometry_pass"] is False
+    assert report["holdout_like_order"] is False
+    assert report["wrote"] is False
+    assert not out.exists()
+
+
+def test_merge_writes_when_combined_passes(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("AIAND_TRAIN", raising=False)
+    patterns = _holdout_patterns()
+    base_rows: list[dict] = []
+    extra_rows: list[dict] = []
+    eval_rows: list[dict] = []
+    for i, oc in enumerate(patterns):
+        base_rows.extend(_cells(f"base{i}", 20, oc))
+        extra_rows.extend(_cells(f"extra{i}", 20, oc))
+        eval_rows.extend(_cells(f"eval{i}", 20, oc))
+    base = _write_jsonl(tmp_path / "base.jsonl", base_rows)
+    extra = _write_jsonl(tmp_path / "extra.jsonl", extra_rows)
+    ev = _write_jsonl(tmp_path / "eval.jsonl", eval_rows)
+    out = tmp_path / "merged.jsonl"
+    code = main(["--train", str(base), "--eval", str(ev), "--merge", str(extra), "--out", str(out)])
+    assert code == 0
+    captured = capsys.readouterr().out
+    report = json.loads(captured[captured.index("{") : captured.rindex("}") + 1])
+    assert report["geometry_pass"] is True
+    assert report["standalone_geometry_pass"] is True
+    assert report["holdout_like_order"] is True
+    assert report["wrote"] is True
+    assert out.exists()
+    n = sum(1 for line in out.read_text(encoding="utf-8").splitlines() if line.strip())
+    assert n == len(base_rows) + len(extra_rows)
+
+
+def test_merge_refuses_when_standalone_fails_even_if_combined_passes(
+    tmp_path, capsys, monkeypatch,
+):
+    """Seed-14: standalone probe fails geometry; mix1-train merge would pass combined-only."""
+    monkeypatch.delenv("AIAND_TRAIN", raising=False)
+    base = Path("data/gold-sparse-hard-mix1-train.jsonl")
+    extra = Path("data/gold-sparse-hard-probe-seed14.jsonl")
+    ev = Path("data/gold-verified.jsonl")
+    if not (base.exists() and extra.exists() and ev.exists()):
+        import pytest
+
+        pytest.skip("operator gold not present")
+    from aiand_router.geometry import geometry_report, merge_gold_if_geometry
+
+    standalone = geometry_report(extra, ev)
+    assert standalone["geometry_pass"] is False
+    from aiand_router.geometry import concat_gold, geometry_from_rows, _load_gold
+
+    combined_report = geometry_from_rows(
+        concat_gold(_load_gold(base), _load_gold(extra)), _load_gold(ev)
+    )
+    assert combined_report["geometry_pass"] is True
+    out = tmp_path / "merged.jsonl"
+    report = merge_gold_if_geometry(base, extra, ev, out)
+    assert report["standalone_geometry_pass"] is False
+    assert report["refused"] == "standalone_geometry_pass=false"
+    assert report["wrote"] is False
+    assert not out.exists()
+    code = main(["--train", str(base), "--eval", str(ev), "--merge", str(extra), "--out", str(out)])
+    assert code == 2
+
+
 def test_geometry_cli_help_says_eval_only(capsys):
     try:
         main(["-h"])
@@ -274,3 +370,24 @@ def test_geometry_cli_help_says_eval_only(capsys):
     assert "eval-only" in help_text or "not fit" in help_text
     assert "spearman" in help_text
     assert "kill" in help_text
+
+
+def test_winner_pattern_counts_on_fixture():
+    from aiand_router.geometry import winner_diagnosis_row, winner_pattern_counts
+
+    rows = []
+    patterns = [
+        {FLASH: False, QWEN: False, KIMI: True, PRO: False},
+        {FLASH: False, QWEN: False, KIMI: True, PRO: False},
+        {FLASH: True, QWEN: False, KIMI: False, PRO: False},
+        {FLASH: False, QWEN: False, KIMI: False, PRO: False},
+    ]
+    for i, oc in enumerate(patterns):
+        for mid, ok in oc.items():
+            rows.append({"prompt": f"p{i}", "model_id": mid, "success": ok})
+    counts = winner_pattern_counts(rows)
+    assert counts["kimi-only"] == 2
+    assert counts["all-fail"] == 1
+    row = winner_diagnosis_row("fixture", rows)
+    assert row["prompts"] == 4
+    assert row["kimi-only"] == 2

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pitch numbers — measured vs marketing</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+  <style>
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin: 0.6rem 0 1.2rem; }
+    th, td { border: 1px solid var(--rule); padding: 0.35rem 0.5rem; text-align: left; vertical-align: top; }
+    th { background: var(--card); font-weight: 600; }
+    .safe { color: var(--ok); }
+    .unsafe { color: var(--bad); }
+  </style>
+</head>
+<body>
+  <article class="page">
+    <nav class="crumbs">
+      <a href="../lessons/0006-ideathon-four-minute.html">Lesson 0006 (stage clock)</a> ·
+      <a href="../lessons/0005-pitch-technical-fluency.html">Lesson 0005</a> ·
+      <a href="./ideathon-four-minute.html">4+3 stage card</a> ·
+      <a href="./glossary.html">Glossary</a>
+    </nav>
+    <header>
+      <h1>Pitch numbers — measured vs marketing</h1>
+      <p class="lede">Print this. Do not invent percentages on stage.</p>
+    </header>
+
+    <h2 class="safe">SAFE to say (from this repo)</h2>
+    <table>
+      <thead><tr><th>Claim</th><th>Number / fact</th></tr></thead>
+      <tbody>
+        <tr><td>Product</td><td>OpenAI-compatible gateway · <code>model: router/auto</code></td></tr>
+        <tr><td>Catalog</td><td>9 aiand models (Flash → K3; K3 gated behind <code>effort=max</code>)</td></tr>
+        <tr><td>Train queries</td><td><code>datasets/train-queries.jsonl</code> → <strong>2000</strong> rows</td></tr>
+        <tr><td>Scorer (<code>data/scorer.json</code>)</td><td><strong>n_gold=1600</strong>, <strong>n_silver=1000</strong>, <strong>n_cal=800</strong>, labeled <code>not_spec_floors</code></td></tr>
+        <tr><td>Hard-logistic</td><td><code>data/scorer-hard-logistic.json</code> · n_gold=160 · n_cal=664</td></tr>
+        <tr><td>Process spend</td><td><code>data/spend.txt</code> ≈ <strong>$8.16</strong> (soft budget file — not every gold dollar)</td></tr>
+        <tr><td>Hard-probe note</td><td><code>spend.before-h1.txt</code> ≈ <strong>$2.95</strong></td></tr>
+        <tr><td>Tests</td><td><strong>213</strong> pytest tests; CI FakeProvider — never spends</td></tr>
+        <tr><td>Hot path</td><td>In-process Scorer · no teacher LLM live · target &lt;10&nbsp;ms</td></tr>
+        <tr><td>Savings logging</td><td>vs <code>most_expensive_eligible</code> per request — never an invented global %</td></tr>
+        <tr><td>Honesty line</td><td>Rules are solid live; trained flips after operator gate; artifact ≠ SWE-bench Verified promotion</td></tr>
+      </tbody>
+    </table>
+
+    <h2 class="unsafe">UNSAFE without “illustrative / landing preview”</h2>
+    <table>
+      <thead><tr><th>Landing / hero line</th><th>Why hedge</th></tr></thead>
+      <tbody>
+        <tr><td>“62% cost reduction on SWE-Bench Verified”</td><td>Marketing card — no Verified promotion report in-repo to cite as fact</td></tr>
+        <tr><td>“40–60% token cost reduction”</td><td>Aspirational blurb on trained-vs-rules section</td></tr>
+        <tr><td>Hero hop savings 79–97%</td><td>Scripted <code>PioneerHero</code> scenarios, not measured session totals</td></tr>
+        <tr><td>“ECE ≤ 0.03” as proven</td><td>Design target — do not claim as a verified bench result</td></tr>
+        <tr><td>“We beat rules on holdout by X%”</td><td>Do not invent; early replay can show rules≡Flash</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Code map</h2>
+    <table>
+      <thead><tr><th>Piece</th><th>Path</th></tr></thead>
+      <tbody>
+        <tr><td>HTTP gateway</td><td><code>src/aiand_router/app.py</code></td></tr>
+        <tr><td>Rules / Pioneer pick</td><td><code>src/aiand_router/router.py</code></td></tr>
+        <tr><td>Scorer serve</td><td><code>src/aiand_router/scorer.py</code></td></tr>
+        <tr><td>Teacher / gold / fit</td><td><code>src/aiand_router/train.py</code></td></tr>
+        <tr><td>Model registry + prices</td><td><code>config/models.yaml</code></td></tr>
+        <tr><td>Landing + dashboard</td><td><code>web/app/page.tsx</code>, <code>web/app/routers/</code></td></tr>
+        <tr><td>Telemetry</td><td><code>data/requests.jsonl</code> · <code>/replay</code></td></tr>
+      </tbody>
+    </table>
+
+    <h2>One sentence on scale</h2>
+    <p>The gateway is a thin FastAPI process: add catalog models in YAML, fit a new Scorer offline, shadow it, then flip — clients never leave <code>/v1/chat/completions</code>.</p>
+
+    <p class="source">
+      <a href="../lessons/0005-pitch-technical-fluency.html">Lesson 0005 →</a> ·
+      <a href="../CONTEXT.md">CONTEXT.md</a> ·
+      <a href="../README.md">README</a>
+    </p>
+  </article>
+</body>
+</html>

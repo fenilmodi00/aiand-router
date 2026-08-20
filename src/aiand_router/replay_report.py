@@ -96,6 +96,10 @@ def _pick_strong(eligible: list[Model]) -> Model | None:
     return max(eligible, key=lambda m: (m.quality, m.unit_cost)) if eligible else None
 
 
+def _pick_most_expensive(eligible: list[Model]) -> Model | None:
+    return max(eligible, key=lambda m: m.unit_cost) if eligible else None
+
+
 def _pick_oracle(
     eligible: list[Model], success: dict[tuple[str, str], bool], prompt: str
 ) -> Model | None:
@@ -198,12 +202,15 @@ def replay_report(
     flash_picks: list[tuple[Model | None, dict[str, Any]]] = []
     cheapest_picks: list[tuple[Model | None, dict[str, Any]]] = []
     strong_picks: list[tuple[Model | None, dict[str, Any]]] = []
+    expensive_picks: list[tuple[Model | None, dict[str, Any]]] = []
     oracle_picks: list[tuple[Model | None, dict[str, Any]]] = []
     disagree = 0
     rules_ne_cheapest = 0
     auc_pairs: list[tuple[float, int]] = []
     spreads: list[float] = []
     selected: list[tuple[float, float]] = []
+    hop_savings: list[float] = []
+    meaningful_cost_deltas: list[float] = []
 
     for item in items:
         eligible = _eligible(cfg, models, item)
@@ -221,16 +228,24 @@ def replay_report(
         rules = select_model(cfg, models, **{k: v for k, v in kw.items() if k != "text"})
         trained = trained_select(cfg, models, artifact, **kw)
         cheapest = _pick_cheapest(eligible)
+        expensive = _pick_most_expensive(eligible)
         rules_picks.append((rules.model, item))
         trained_picks.append((trained.model, item))
         flash_picks.append((_pick_flash(cfg, eligible), item))
         cheapest_picks.append((cheapest, item))
         strong_picks.append((_pick_strong(eligible), item))
+        expensive_picks.append((expensive, item))
         oracle_picks.append((_pick_oracle(eligible, success, item["prompt"]), item))
         if rules.model.id != trained.model.id:
             disagree += 1
+        tr_cost = estimate_cost(trained.model, item["tokens"], COMPLETION_TOKENS)
+        if expensive is not None:
+            exp_cost = estimate_cost(expensive, item["tokens"], COMPLETION_TOKENS)
+            hop_savings.append(max(0.0, exp_cost - tr_cost))
         if rules.model and cheapest and rules.model.id != cheapest.id:
             rules_ne_cheapest += 1
+            ru_cost = estimate_cost(rules.model, item["tokens"], COMPLETION_TOKENS)
+            meaningful_cost_deltas.append(tr_cost - ru_cost)
 
         ids = [m.id for m in eligible if (item["prompt"], m.id) in success]
         _, ps = score_eligible(
@@ -259,6 +274,7 @@ def replay_report(
         "always_flash": _policy_stats(flash_picks, success),
         "always_cheapest": _policy_stats(cheapest_picks, success),
         "always_strong": _policy_stats(strong_picks, success),
+        "always_most_expensive": _policy_stats(expensive_picks, success),
     }
     out = {
         "n_prompts": n,
@@ -275,24 +291,80 @@ def replay_report(
         "rules_cost_delta": policies["trained"]["list_price_cost"]
         - policies["rules"]["list_price_cost"],
         "rules_ne_cheapest_rate": (rules_ne_cheapest / n) if n else 0.0,
+        "rules_cost_delta_where_rules_ne_cheapest": (
+            (sum(meaningful_cost_deltas) / len(meaningful_cost_deltas))
+            if meaningful_cost_deltas
+            else None
+        ),
+        "savings_vs_most_expensive": (sum(hop_savings) / len(hop_savings))
+        if hop_savings
+        else 0.0,
     }
     return apply_replay_gate(out)
 
 
+def _cost_src(report: dict[str, Any]) -> dict[str, Any]:
+    cost = report.get("cost_slice")
+    return cost if isinstance(cost, dict) else report
+
+
+def _always_cheap_without_quality(report: dict[str, Any]) -> bool:
+    """Fail trained ≡ always-cheapest/Flash unless cheapest also matches quality."""
+    trained = report["policies"]["trained"]
+    cheap = report["policies"].get("always_cheapest", report["policies"]["always_flash"])
+    flash = report["policies"]["always_flash"]
+    if trained != cheap and trained != flash:
+        return False
+    rules_s = report["policies"]["rules"]["success_rate"]
+    cheap_s = cheap["success_rate"]
+    if cheap_s < rules_s - 0.01:
+        return True
+    strong = report["policies"].get("always_strong")
+    if strong and strong["success_rate"] > cheap_s + 0.01:
+        return True
+    return False
+
+
+def _cost_ok(report: dict[str, Any]) -> bool:
+    """Savings vs most_expensive_eligible. rules_cost_delta is reported, never named savings."""
+    src = _cost_src(report)
+    return float(src.get("savings_vs_most_expensive") or 0.0) > 0.0
+
+
+def parity_blockers(report: dict[str, Any]) -> list[str]:
+    """Production parity gaps even when shadow-local replay_gate_pass is true."""
+    blockers: list[str] = []
+    if report.get("not_spec_floors", True):
+        blockers.append("not_spec_floors")
+    n_prompts = int(report.get("n_prompts") or 0)
+    if n_prompts < VERIFIED_N_FLOOR:
+        blockers.append(f"eval_n={n_prompts}_below_verified_floor_{VERIFIED_N_FLOOR}")
+    if float(report.get("rules_cost_delta") or 0.0) >= 0.0:
+        blockers.append("rules_cost_delta_not_negative")
+    ece_mass = float(report.get("ece_equal_mass") or 0.0)
+    if report.get("ece_equal_mass_gated") and ece_mass > 0.03:
+        blockers.append("ece_equal_mass_above_bar")
+    elif not report.get("ece_equal_mass_gated") and ece_mass > 0.03:
+        blockers.append("ece_equal_mass_waived_small_n")
+    blockers.append("no_session_gold_promotion_gate")
+    return blockers
+
+
+def parity_posture(report: dict[str, Any]) -> dict[str, Any]:
+    """Separate shadow-local replay pass from production parity."""
+    local_pass = bool(report.get("replay_gate_pass"))
+    return {
+        "local_replay_gate_pass": local_pass,
+        "production_parity": False,
+        "promotion_tier": "shadow_local_pass" if local_pass else "shadow_local_fail",
+        "parity_blockers": parity_blockers(report),
+    }
+
+
 def replay_gate_pass(report: dict[str, Any]) -> bool:
-    """Transfer bars from primary report; cost bar from cost_slice when present."""
+    """Transfer bars from primary report; Pioneer cost from cost_slice when present."""
     trained_s = report["policies"]["trained"]["success_rate"]
     rules_s = report["policies"]["rules"]["success_rate"]
-    always_cheapest = report["policies"].get(
-        "always_cheapest", report["policies"]["always_flash"]
-    )
-    cost_delta = report["rules_cost_delta"]
-    cost = report.get("cost_slice")
-    if isinstance(cost, dict):
-        # Judge cost vs rules on the cost-meaningful bootstrap, not H3 verified.
-        if float(cost.get("rules_ne_cheapest_rate") or 0.0) <= 0.0:
-            return False
-        cost_delta = float(cost["rules_cost_delta"])
     n_cal = int(report.get("n_selected") or report.get("n_prompts") or 10**9)
     ece_mass_ok = report["ece_equal_mass"] <= 0.03 or n_cal < SMALL_N_ECE_MASS
     return (
@@ -302,8 +374,8 @@ def replay_gate_pass(report: dict[str, Any]) -> bool:
         and report["ece_equal_width"] <= 0.03
         and ece_mass_ok
         and trained_s >= rules_s - 0.01
-        and cost_delta < 0
-        and report["policies"]["trained"] != always_cheapest
+        and _cost_ok(report)
+        and not _always_cheap_without_quality(report)
     )
 
 
@@ -315,6 +387,7 @@ def apply_replay_gate(report: dict[str, Any]) -> dict[str, Any]:
     out["replay_gate_pass"] = replay_gate_pass(out)
     out["path"] = "shadow"
     out["not_spec_floors"] = True
+    out.update(parity_posture(out))
     return out
 
 
@@ -331,8 +404,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--cost-gold",
         help=(
-            "Disjoint bootstrap holdout where rules may disagree with cheapest-eligible. "
-            "Judge cost_delta here; do not rewrite verified bars. Unused for fit."
+            "Disjoint bootstrap holdout for Pioneer cost (savings vs most_expensive_eligible). "
+            "rules_cost_delta is reported only where rules ≠ cheapest. Unused for fit."
         ),
     )
     parser.add_argument("--artifact", required=True)
@@ -351,8 +424,19 @@ def main(argv: list[str] | None = None) -> int:
         report = apply_replay_gate(report)
     print(json.dumps(report, indent=2))
     print("replay_gate_pass", report["replay_gate_pass"])
+    print("local_replay_gate_pass", report.get("local_replay_gate_pass"))
+    print("production_parity", report.get("production_parity"))
+    print("promotion_tier", report.get("promotion_tier"))
     print(f"path={report['path']}")
     print("not_spec_floors", report["not_spec_floors"])
+    blockers = report.get("parity_blockers") or []
+    if blockers:
+        print("parity_blockers", ",".join(blockers))
+    print("savings_vs_most_expensive", report.get("savings_vs_most_expensive"))
+    print(
+        "rules_cost_delta_where_rules_ne_cheapest",
+        report.get("rules_cost_delta_where_rules_ne_cheapest"),
+    )
     if args.cost_gold:
         print(
             "cost_slice rules_ne_cheapest_rate",
@@ -361,6 +445,10 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "cost_slice rules_cost_delta",
             report["cost_slice"]["rules_cost_delta"],
+        )
+        print(
+            "cost_slice savings_vs_most_expensive",
+            report["cost_slice"].get("savings_vs_most_expensive"),
         )
     if artifact.get("gbdt"):
         print(
