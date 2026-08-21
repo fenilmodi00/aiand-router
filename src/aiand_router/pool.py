@@ -887,8 +887,10 @@ def build_pool(
         if iid in blocked or prompt_key in blocked:
             continue
         kept.append(r)
-    if not any(r.get("source") in primary_sources for r in kept):
-        raise ValueError(_SMITH_EMPTY if "swe-smith" in primary_sources else _GYM_EMPTY)
+    # Invariant: every requested primary must survive collision filtering on its own (regressed once in 76e92e9).
+    for src in sorted(primary_sources):
+        if not any(r.get("source") == src for r in kept):
+            raise ValueError(_SMITH_EMPTY if src == "swe-smith" else _GYM_EMPTY)
     if verified_like:
         kept = verified_like_rows(
             kept,
@@ -900,8 +902,9 @@ def build_pool(
             near_miss_hi=near_miss_hi,
             max_fail_to_pass=max_fail_to_pass,
         )
-        if not any(r.get("source") in primary_sources for r in kept):
-            raise ValueError(_EMPTY_HARD)
+        for src in sorted(primary_sources):
+            if not any(r.get("source") == src for r in kept):
+                raise ValueError(_EMPTY_HARD)
         if not any(has_label_check(r) for r in kept):
             raise ValueError(_EMPTY_HARD)
     mixed = mix_sources(kept, n, seed)

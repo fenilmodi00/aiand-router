@@ -250,7 +250,6 @@ async def run_teacher(
 ) -> None:
     if any(tid.startswith(prefix) for tid in (CHEAP_TEACHER, ESCALATE_TEACHER) for prefix in EXCLUDED_PREFIXES):
         raise ValueError("teacher ids must exclude measured-trio and fallback providers")
-    _guard_manifest_for_queries(queries, allowed_splits={"teacher-silver"})
     spend._async_lock = asyncio.Lock()
     cap = max(1, int(len(queries) * 0.25))
     escalated = 0
@@ -398,8 +397,6 @@ async def run_gold(
     models_by_id: dict[str, Model],
     dense: bool = False,
 ) -> None:
-    allowed = {"dense-cal"} if dense else {"sparse-train"}
-    _guard_manifest_for_queries(queries, allowed_splits=allowed)
     jobs: list[tuple[list[dict[str, Any]], str, dict[str, Any]]] = []
     for q in queries:
         messages = _messages(q)
@@ -518,27 +515,54 @@ def _load_manifest_map(manifest_path: Path | None = None) -> dict[str, str]:
     return out
 
 
+def _resolve_manifest_path(
+    queries_path: Path | None, manifest_path: Path | None
+) -> Path | None:
+    """Explicit path wins; else the manifest beside the queries file; else repo default.
+
+    Ad-hoc query files away from data/ have no pool manifest — strict
+    pool-disjointness does not apply to them (intra-batch duplicates still do).
+    """
+    if manifest_path is not None:
+        return manifest_path
+    if queries_path is not None:
+        sibling = queries_path.parent / "split_manifest.json"
+        return sibling if sibling.exists() else None
+    default = Path("data/split_manifest.json")
+    return default if default.exists() else None
+
+
 def _guard_manifest_for_queries(
     queries: list[dict[str, Any]],
     *,
     allowed_splits: set[str] | None = None,
     manifest_path: Path | None = None,
+    queries_path: Path | None = None,
 ) -> None:
-    m = _load_manifest_map(manifest_path)
+    p = _resolve_manifest_path(queries_path, manifest_path)
+    m = _load_manifest_map(p) if p is not None else None
+    if m is None:
+        print(
+            "split_manifest_overlap: no split manifest beside "
+            f"{queries_path}; pool-disjointness guard limited to duplicate ids",
+            flush=True,
+        )
     seen: set[str] = set()
     for q in queries:
         prompt = _manifest_prompt_of_row(q)
         h = _prompt_hash(prompt)
-        if h not in m:
-            iid = q.get("instance_id") or q.get("id") or "?"
-            raise ValueError(f"split_manifest_overlap: absent id {iid!r} hash {h}")
         if h in seen:
             raise ValueError(f"split_manifest_overlap: double-assigned query hash {h}")
         seen.add(h)
+        if m is None:
+            continue
+        if h not in m:
+            iid = q.get("instance_id") or q.get("id") or "?"
+            raise ValueError(f"split_manifest_overlap: absent id {iid!r} hash {h}")
         if allowed_splits is not None and m[h] not in allowed_splits:
-            raise ValueError(f"split_manifest_overlap: query hash {h} split {m[h]!r} not in allowed {allowed_splits}")
-    if len(seen) != len(m) and False:
-        pass
+            raise ValueError(
+                f"split_manifest_overlap: query hash {h} split {m[h]!r} not in allowed {allowed_splits}"
+            )
 
 
 
@@ -1178,6 +1202,11 @@ def main(
         print("refusing: --dense --exclude left no queries to run", file=sys.stderr)
         return 2
     if args.cmd == "teacher":
+        _guard_manifest_for_queries(
+            queries,
+            allowed_splits={"teacher-silver"},
+            queries_path=Path(args.queries),
+        )
         asyncio.run(
             run_teacher(
                 queries,
@@ -1189,6 +1218,12 @@ def main(
             )
         )
         return 0
+    if args.cmd == "gold":
+        _guard_manifest_for_queries(
+            queries,
+            allowed_splits={"dense-cal"} if args.dense else {"sparse-train"},
+            queries_path=Path(args.queries),
+        )
     asyncio.run(
         run_gold(
             queries,
