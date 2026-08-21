@@ -829,6 +829,278 @@ def write_split_manifest(
     return p
 
 
+# --- Spec-margin validation + coverage report (Phase B6) ---
+
+SPEC_MARGIN_TOL = 0.03
+SPEC_COUNT_BAND = (4000, 5000)
+SPEC_STRATUM_FLOOR = 20
+
+
+def validate_spec_margins(
+    rows: list[dict[str, Any]], *, tolerance: float = SPEC_MARGIN_TOL
+) -> dict[str, Any]:
+    """Validate pool rows vs spec margins (bin/tools/family + stratum floors + count band).
+
+    Returns a dict with per-dimension counts, fractions, targets, ok flags, and an
+    overall_ok boolean plus errors list. Never raises on margin drift — caller
+    decides pass/fail via overall_ok / errors.
+    """
+    n = len(rows)
+    out: dict[str, Any] = {"total": n, "errors": []}
+    # bin
+    bin_counts: Counter[str] = Counter(_bin_of(r) for r in rows)
+    bin_detail: dict[str, Any] = {}
+    bin_ok = True
+    for k, target in BIN_FRAC.items():
+        cnt = bin_counts.get(k, 0)
+        frac = cnt / n if n else 0.0
+        ok = abs(frac - target) <= tolerance
+        if not ok:
+            bin_ok = False
+            out["errors"].append(f"bin {k}: {frac:.3f} vs target {target:.3f} (tol {tolerance})")
+        bin_detail[k] = {"n": cnt, "frac": round(frac, 4), "target": target, "ok": ok}
+    out["bin"] = bin_detail
+    out["bin_ok"] = bin_ok
+    # tools
+    tools_counts: Counter[bool] = Counter(bool(r.get("needs_tools")) for r in rows)
+    tools_detail: dict[str, Any] = {}
+    tools_ok = True
+    for k, target in TOOLS_FRAC.items():
+        cnt = tools_counts.get(k, 0)
+        frac = cnt / n if n else 0.0
+        ok = abs(frac - target) <= tolerance
+        if not ok:
+            tools_ok = False
+            out["errors"].append(f"tools {k}: {frac:.3f} vs target {target:.3f}")
+        tools_detail[str(k)] = {"n": cnt, "frac": round(frac, 4), "target": target, "ok": ok}
+    out["tools"] = tools_detail
+    out["tools_ok"] = tools_ok
+    # phase (family)
+    phase_counts: Counter[str] = Counter(str(r.get("phase") or "plan") for r in rows)
+    phase_detail: dict[str, Any] = {}
+    phase_ok = True
+    for k, target in PHASE_FRAC.items():
+        cnt = phase_counts.get(k, 0)
+        frac = cnt / n if n else 0.0
+        ok = abs(frac - target) <= tolerance
+        if not ok:
+            phase_ok = False
+            out["errors"].append(f"phase {k}: {frac:.3f} vs target {target:.3f}")
+        phase_detail[k] = {"n": cnt, "frac": round(frac, 4), "target": target, "ok": ok}
+    out["phase"] = phase_detail
+    out["phase_ok"] = phase_ok
+    # stratum floors: (bin, needs_tools, phase)
+    strata: Counter[tuple] = Counter(
+        (_bin_of(r), bool(r.get("needs_tools")), str(r.get("phase") or "plan")) for r in rows
+    )
+    all_bins = list(BIN_FRAC.keys())
+    all_tools = list(TOOLS_FRAC.keys())
+    all_phases = list(PHASE_FRAC.keys())
+    under_floor: list[tuple] = []
+    occupied = len(strata)
+    for b in all_bins:
+        for t in all_tools:
+            for p in all_phases:
+                cnt = strata.get((b, t, p), 0)
+                if 0 < cnt < SPEC_STRATUM_FLOOR:
+                    under_floor.append(((b, t, p), cnt))
+    # unoccupied are not violations per spec ("occupied-stratum floor >=20 (take-all below)")
+    # but we report them
+    unoccupied = sum(1 for b in all_bins for t in all_tools for p in all_phases if (b, t, p) not in strata)
+    stratum_ok = len(under_floor) == 0
+    if not stratum_ok:
+        for key, cnt in under_floor:
+            out["errors"].append(f"stratum {key} floor {cnt} < {SPEC_STRATUM_FLOOR}")
+    out["stratum"] = {
+        "distinct": occupied,
+        "possible": len(all_bins) * len(all_tools) * len(all_phases),
+        "unoccupied": unoccupied,
+        "under_floor": [{"stratum": list(k), "n": c} for k, c in under_floor],
+        "floor": SPEC_STRATUM_FLOOR,
+        "ok": stratum_ok,
+    }
+    # count band
+    lo, hi = SPEC_COUNT_BAND
+    count_ok = lo <= n <= hi
+    if not count_ok:
+        out["errors"].append(f"count {n} outside band {lo}-{hi}")
+    out["count_band"] = {"n": n, "band": list(SPEC_COUNT_BAND), "ok": count_ok}
+    out["overall_ok"] = bin_ok and tools_ok and phase_ok and stratum_ok and count_ok
+    return out
+
+
+def pool_coverage_report(
+    rows: list[dict[str, Any]],
+    *,
+    manifest_path: Path | None = None,
+    cost_per_row: float = 0.0015,
+    teacher_silver_n: int | None = None,
+) -> dict[str, Any]:
+    """Build coverage report dict for markdown rendering."""
+    margins = validate_spec_margins(rows)
+    n = len(rows)
+    report: dict[str, Any] = {"margins": margins, "total": n}
+    # cost projections
+    report["projected_cost"] = {
+        "cost_per_row": cost_per_row,
+        "full_pool_cost": round(n * cost_per_row, 4),
+        "fits_tranche_8": n * cost_per_row <= 8.0,
+    }
+    if teacher_silver_n is not None:
+        tc = teacher_silver_n * cost_per_row
+        report["teacher_cost"] = {
+            "teacher_silver_n": teacher_silver_n,
+            "cost": round(tc, 4),
+            "fits_tranche_8": tc <= 8.0,
+        }
+    # manifest consistency if path given
+    if manifest_path is not None:
+        try:
+            data = load_split_manifest(manifest_path)
+            meta = data.get("metadata") or {}
+            m_rows = data.get("rows") or []
+            # hash consistency vs pool
+            pool_hashes = {_prompt_hash(_manifest_prompt_of(r)) for r in rows}
+            man_hashes = {r.get("prompt_hash") for r in m_rows}
+            inter = pool_hashes & man_hashes
+            report["manifest"] = {
+                "metadata": meta,
+                "total": len(m_rows),
+                "pool_hashes": len(pool_hashes),
+                "manifest_hashes": len(man_hashes),
+                "intersection": len(inter),
+                "pool_not_in_manifest": len(pool_hashes - man_hashes),
+                "manifest_not_in_pool": len(man_hashes - pool_hashes),
+                "consistent": pool_hashes == man_hashes,
+                "splits": dict(Counter(r.get("split") for r in m_rows)),
+            }
+        except Exception as e:
+            report["manifest"] = {"error": str(e), "consistent": False}
+    return report
+
+
+def format_coverage_markdown(report: dict[str, Any]) -> str:
+    """Render coverage report dict as markdown."""
+    m = report.get("margins", {})
+    lines: list[str] = []
+    lines.append("# Query Pool Coverage Report")
+    lines.append("")
+    lines.append(f"Generated: {datetime.date.today().isoformat()}")
+    lines.append("")
+    lines.append(f"Total rows: **{report.get('total', 0)}**  (band {SPEC_COUNT_BAND[0]}–{SPEC_COUNT_BAND[1]})")
+    lines.append("")
+    # bin
+    lines.append("## Bin margins (target 15/40/30/15)")
+    lines.append("")
+    lines.append("| bin | n | frac | target | ok |")
+    lines.append("|-----|---:|-----:|-------:|----|")
+    for k in BIN_FRAC:
+        d = m.get("bin", {}).get(k, {})
+        lines.append(f"| {k} | {d.get('n',0)} | {d.get('frac',0):.3f} | {d.get('target',0):.2f} | {'PASS' if d.get('ok') else 'FAIL'} |")
+    lines.append("")
+    lines.append(f"Bin overall: {'PASS' if m.get('bin_ok') else 'FAIL'}")
+    lines.append("")
+    # tools
+    lines.append("## Tools margins (target 75/25)")
+    lines.append("")
+    lines.append("| needs_tools | n | frac | target | ok |")
+    lines.append("|-------------|---:|-----:|-------:|----|")
+    for k in TOOLS_FRAC:
+        d = m.get("tools", {}).get(str(k), {})
+        lines.append(f"| {k} | {d.get('n',0)} | {d.get('frac',0):.3f} | {d.get('target',0):.2f} | {'PASS' if d.get('ok') else 'FAIL'} |")
+    lines.append("")
+    lines.append(f"Tools overall: {'PASS' if m.get('tools_ok') else 'FAIL'}")
+    lines.append("")
+    # phase
+    lines.append("## Family / phase margins (target 30/25/15/15/10/5)")
+    lines.append("")
+    lines.append("| phase | n | frac | target | ok |")
+    lines.append("|-------|---:|-----:|-------:|----|")
+    for k in PHASE_FRAC:
+        d = m.get("phase", {}).get(k, {})
+        lines.append(f"| {k} | {d.get('n',0)} | {d.get('frac',0):.3f} | {d.get('target',0):.2f} | {'PASS' if d.get('ok') else 'FAIL'} |")
+    lines.append("")
+    lines.append(f"Phase overall: {'PASS' if m.get('phase_ok') else 'FAIL'}")
+    lines.append("")
+    # stratum
+    s = m.get("stratum", {})
+    lines.append("## Stratum floors (occupied ≥20, take-all below)")
+    lines.append("")
+    lines.append(f"Distinct occupied strata: **{s.get('distinct',0)} / {s.get('possible',0)}**  (unoccupied {s.get('unoccupied',0)})")
+    lines.append(f"Floor: {s.get('floor',20)} — under-floor violations: {len(s.get('under_floor',[]))}")
+    if s.get("under_floor"):
+        lines.append("")
+        lines.append("| stratum (bin, tools, phase) | n |")
+        lines.append("|------------------------------|---:|")
+        for e in s["under_floor"]:
+            lines.append(f"| {e['stratum']} | {e['n']} |")
+    else:
+        lines.append("All occupied strata ≥ floor — **PASS**.")
+    lines.append("")
+    # count band
+    cb = m.get("count_band", {})
+    lines.append("## Count band")
+    lines.append("")
+    lines.append(f"Rows {cb.get('n',0)} in band {cb.get('band')} — {'PASS' if cb.get('ok') else 'FAIL'}")
+    lines.append("")
+    # cost
+    pc = report.get("projected_cost", {})
+    lines.append("## Projected teacher cost")
+    lines.append("")
+    lines.append(f"Avg cost per row (incl. ≤25% escalate): **${pc.get('cost_per_row',0):.4f}**")
+    lines.append(f"Full pool ({report.get('total',0)} rows): **${pc.get('full_pool_cost',0):.2f}** — fits $8 tranche: {'YES' if pc.get('fits_tranche_8') else 'NO'}")
+    tc = report.get("teacher_cost")
+    if tc:
+        lines.append(f"Teacher-eligible only ({tc.get('teacher_silver_n')} rows): **${tc.get('cost',0):.2f}** — fits $8: {'YES' if tc.get('fits_tranche_8') else 'NO'}")
+    lines.append("")
+    # C1 arithmetic
+    lines.append("## C1 gate arithmetic (teacher → silver)")
+    lines.append("")
+    teacher_n = tc.get("teacher_silver_n", 0) if tc else 0
+    needed = 3500
+    shortfall = needed - teacher_n
+    # if every teacher row yields one silver row (no drops)
+    lines.append(f"Teacher-eligible rows available: **{teacher_n}**")
+    lines.append(f"C1 requires silver ≥ {needed} rows (escalate ≤25%)")
+    if shortfall > 0:
+        lines.append(f"Shortfall vs 1:1 yield: **{shortfall} rows** — need {needed} teacher rows for 3500 silver at 100% yield.")
+        # at realistic 90% yield (drops/invalid json)
+        need_90 = int(needed / 0.90) + 1
+        lines.append(f"At 90% yield: need ~{need_90} teacher rows (have {teacher_n}, shortfall {need_90 - teacher_n}).")
+        # at 75% escalate scenario doesn't change count — escalate is extra cost not extra rows, but teacher rows map 1:1
+        lines.append(f"Pool total {report.get('total',0)} rows @ $0.0015 avg = ${report.get('total',0)*0.0015:.2f} (within $8: {'YES' if report.get('total',0)*0.0015 <= 8 else 'NO'}).")
+        lines.append(f"**Honest assessment:** pool is {report.get('total',0)} rows; teacher-eligible subset is the C1 bottleneck. Growing pool to ≥~4000 teacher-eligible rows (total ~5000) would clear C1 at 90% yield.")
+    else:
+        lines.append(f"Teacher rows sufficient for C1 at 1:1 yield (surplus { -shortfall}). At 90% yield need {int(needed/0.90)+1}, surplus {teacher_n - int(needed/0.90)-1}.")
+    lines.append("")
+    # manifest
+    man = report.get("manifest")
+    if man is not None:
+        lines.append("## Manifest consistency")
+        lines.append("")
+        if "error" in man:
+            lines.append(f"Manifest error: {man['error']} — **FAIL**")
+        else:
+            lines.append(f"Manifest total {man.get('total')} (metadata total {man.get('metadata',{}).get('total')})")
+            lines.append(f"Pool hashes {man.get('pool_hashes')}, manifest hashes {man.get('manifest_hashes')}, intersection {man.get('intersection')}")
+            lines.append(f"Pool not in manifest: {man.get('pool_not_in_manifest')}, manifest not in pool: {man.get('manifest_not_in_pool')}")
+            lines.append(f"Consistent (sets equal): **{'PASS' if man.get('consistent') else 'FAIL'}**")
+            lines.append(f"Splits: {man.get('splits')}")
+            lines.append(f"spend_before_A: {man.get('metadata',{}).get('spend_before_A')}")
+        lines.append("")
+    # overall
+    lines.append("## Overall")
+    lines.append("")
+    lines.append(f"Spec margins overall: **{'PASS' if m.get('overall_ok') else 'FAIL'}**")
+    if m.get("errors"):
+        lines.append("")
+        lines.append("Errors:")
+        for e in m["errors"]:
+            lines.append(f"- {e}")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def build_pool(
     *,
     smith: Path | None,
