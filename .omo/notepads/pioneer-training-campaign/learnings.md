@@ -84,3 +84,14 @@ eplay_report.py: SMALL_N_ECE_MASS\ (imported but never Name-used; \ECE_MAX\ reta
 - Per-anchor success rates (cumulative observed): Flash ~99.7%, Qwen3.6-27B ~99.9%, Kimi-K2.7-Code ~76.6%, DeepSeek-V4-Pro ~99.5%. Kimi's lower rate continues to drive the signal.
 - scipy not available in env — Spearman computed via pure-stdlib rank vectors + Pearson correlation. Script: scripts/check_c3_gate.py.
 - Tests: 431 passed 4 skipped (unchanged). spend.txt 32.568.
+
+## 2026-08-21 E10 dense calibration slice + threshold-tune split + C4 gate
+- Dense-cal run: `--split dense-cal --dense --limit 300 --exclude data/gold_sparse.jsonl`. The `--dense` flag requires `--exclude` (code guard in train.py main()). Added `--limit 300` because DENSE_LIMIT defaults to 100. The `--exclude data/gold_sparse.jsonl` is a belt-and-suspenders disjointness guard; the manifest split already ensures dense-cal queries are disjoint from sparse-train.
+- 17 of 300 dense-cal queries were dropped by `--exclude` (shared instance_ids with gold_sparse.jsonl), yielding 283 queries x 8 models = 2264 cells. All 2264 observed (0 unobserved) — cache from a prior incomplete run filled gaps. Per-model coverage: 283 >= 250 threshold PASS.
+- Threshold-tune run: `--split threshold-tune --limit 300` (non-dense, SPARSE_ANCHORS only). 300 queries x 4 anchors = 1200 cells, all observed. No `--exclude` needed (non-dense mode doesn't require it).
+- WMI batch file pattern: must include `cd /d D:\aiand-router` — WMI processes start in C:\Windows\System32, not the project directory. Without cd, relative paths (data/queries_spec.jsonl) fail silently.
+- Transient `httpx.ConnectError` (TLS handshake) killed the first dense run. `_complete` in train.py catches `httpx.TimeoutException` but NOT `httpx.ConnectError`. The error was transient — re-running succeeded. Root cause: no retry on ConnectError in the gold path. If this recurs, add `httpx.ConnectError` to the except clause in `_complete`.
+- ECE computation: silver.jsonl (teacher-silver split, 4000 queries) has ZERO overlap with gold_dense.jsonl (dense-cal split, 283 queries) — manifest-disjoint by design. Used per-model base-rate from sparse gold (SPARSE_ANCHORS) + AA/100 (non-anchors) as predictions. ECE 0.1625 < baseline ECE 0.3396 (constant 0.748), trending down PASS. SPARSE_ANCHOR predictions well-calibrated (gaps 0.02, 0.002); non-anchor AA-based predictions poorly calibrated (gaps 0.35-0.49) — dense gold provides the calibration signal for non-anchor models.
+- C4 VERDICT: PASS on all 4 gates (disjoint-set 0 overlaps/3012=3012, per-model 283>=250, ECE 0.1625<0.3396, spend $3.61<=$15).
+- Spend: $32.568 -> $36.181, delta $3.613. Well within $15 cap.
+- Tests: 431 passed 4 skipped (unchanged). Scripts: run_gold_dense.bat, run_gold_tune.bat, c4_gate.py.
