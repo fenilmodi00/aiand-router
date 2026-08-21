@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import datetime
+import hashlib
 import json
 import os
 import sys
@@ -248,6 +250,7 @@ async def run_teacher(
 ) -> None:
     if any(tid.startswith(prefix) for tid in (CHEAP_TEACHER, ESCALATE_TEACHER) for prefix in EXCLUDED_PREFIXES):
         raise ValueError("teacher ids must exclude measured-trio and fallback providers")
+    _guard_manifest_for_queries(queries, allowed_splits={"teacher-silver"})
     spend._async_lock = asyncio.Lock()
     cap = max(1, int(len(queries) * 0.25))
     escalated = 0
@@ -395,6 +398,8 @@ async def run_gold(
     models_by_id: dict[str, Model],
     dense: bool = False,
 ) -> None:
+    allowed = {"dense-cal"} if dense else {"sparse-train"}
+    _guard_manifest_for_queries(queries, allowed_splits=allowed)
     jobs: list[tuple[list[dict[str, Any]], str, dict[str, Any]]] = []
     for q in queries:
         messages = _messages(q)
@@ -464,6 +469,76 @@ def _prompt_of(messages: list[dict[str, Any]]) -> str:
     last = messages[-1] if messages else {}
     content = last.get("content")
     return content if isinstance(content, str) else str(content or "")
+
+
+MANIFEST_VALID_SPLITS = {
+    "teacher-silver",
+    "sparse-train",
+    "dense-cal",
+    "threshold-tune",
+    "promotion-holdout",
+}
+
+
+def _prompt_hash(prompt: str) -> str:
+    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12]
+
+
+def _manifest_prompt_of_row(row: dict[str, Any]) -> str:
+    return _prompt_of(_messages(row))
+
+
+def _load_manifest_map(manifest_path: Path | None = None) -> dict[str, str]:
+    p = Path(manifest_path) if manifest_path else Path("data/split_manifest.json")
+    if not p.exists():
+        raise ValueError("split_manifest_overlap: manifest missing at " + str(p))
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise ValueError(f"split_manifest_overlap: corrupt manifest: {e}") from e
+    rows = data.get("rows")
+    if not isinstance(rows, list):
+        raise ValueError("split_manifest_overlap: manifest missing 'rows'")
+    seen: set[str] = set()
+    out: dict[str, str] = {}
+    for r in rows:
+        ph = r.get("prompt_hash")
+        sp = r.get("split")
+        if not isinstance(ph, str) or len(ph) != 12:
+            raise ValueError(f"split_manifest_overlap: invalid prompt_hash {ph!r}")
+        if sp not in MANIFEST_VALID_SPLITS:
+            raise ValueError(f"split_manifest_overlap: invalid split {sp!r}")
+        if ph in seen:
+            raise ValueError(f"split_manifest_overlap: double-assigned {ph}")
+        seen.add(ph)
+        out[str(ph)] = str(sp)
+    meta = data.get("metadata") or {}
+    if "spend_before_A" not in meta:
+        raise ValueError("split_manifest_overlap: metadata missing spend_before_A")
+    return out
+
+
+def _guard_manifest_for_queries(
+    queries: list[dict[str, Any]],
+    *,
+    allowed_splits: set[str] | None = None,
+    manifest_path: Path | None = None,
+) -> None:
+    m = _load_manifest_map(manifest_path)
+    seen: set[str] = set()
+    for q in queries:
+        prompt = _manifest_prompt_of_row(q)
+        h = _prompt_hash(prompt)
+        if h not in m:
+            iid = q.get("instance_id") or q.get("id") or "?"
+            raise ValueError(f"split_manifest_overlap: absent id {iid!r} hash {h}")
+        if h in seen:
+            raise ValueError(f"split_manifest_overlap: double-assigned query hash {h}")
+        seen.add(h)
+        if allowed_splits is not None and m[h] not in allowed_splits:
+            raise ValueError(f"split_manifest_overlap: query hash {h} split {m[h]!r} not in allowed {allowed_splits}")
+    if len(seen) != len(m) and False:
+        pass
 
 
 

@@ -16,6 +16,8 @@ as an alternate primary — unpaid ingest, same flashlight/expected machinery:
 
 from __future__ import annotations
 
+import datetime
+import hashlib
 import json
 import random
 import re
@@ -691,6 +693,140 @@ def mix_sources(rows: list[dict[str, Any]], n: int, seed: int = 0) -> list[dict[
         # Gym/R2E primary when smith family is absent or exhausted.
         pool = extra + bfcl
     return sample_stratum(pool, min(n, len(pool)), seed)
+
+
+# --- Split manifest (Phase A pre-flight, no credits) ---
+MANIFEST_VALID_SPLITS = {
+    "teacher-silver",
+    "sparse-train",
+    "dense-cal",
+    "threshold-tune",
+    "promotion-holdout",
+}
+MANIFEST_SPEND_BEFORE_A = 8.16
+
+
+def _prompt_hash(prompt: str) -> str:
+    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12]
+
+
+def _manifest_prompt_of(row: dict[str, Any]) -> str:
+    msgs = row.get("messages")
+    if isinstance(msgs, list) and msgs:
+        last = msgs[-1] if isinstance(msgs[-1], dict) else {}
+        c = last.get("content")
+        if isinstance(c, str) and c.strip():
+            return c
+    return str(row.get("prompt") or "")
+
+
+def load_split_manifest(path: Path | None = None) -> dict[str, Any]:
+    p = Path(path) if path else Path("data/split_manifest.json")
+    if not p.exists():
+        raise ValueError("split_manifest_overlap: manifest missing at " + str(p))
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise ValueError(f"split_manifest_overlap: corrupt manifest: {e}") from e
+    return data
+
+
+def _validate_manifest_rows(rows: list[dict[str, Any]]) -> None:
+    seen: set[str] = set()
+    for r in rows:
+        ph = r.get("prompt_hash")
+        sp = r.get("split")
+        if not isinstance(ph, str) or len(ph) != 12:
+            raise ValueError(f"split_manifest_overlap: invalid prompt_hash {ph!r}")
+        if sp not in MANIFEST_VALID_SPLITS:
+            raise ValueError(f"split_manifest_overlap: invalid split {sp!r}")
+        if ph in seen:
+            raise ValueError(f"split_manifest_overlap: double-assigned {ph}")
+        seen.add(ph)
+        if "instance_id" not in r or "assigned_at" not in r:
+            raise ValueError(f"split_manifest_overlap: missing fields in {r!r}")
+
+
+def validate_split_manifest(data: dict[str, Any]) -> dict[str, str]:
+    """Validate manifest and return prompt_hash -> split map. Raises split_manifest_overlap on violation."""
+    rows = data.get("rows")
+    if not isinstance(rows, list):
+        raise ValueError("split_manifest_overlap: manifest missing 'rows'")
+    _validate_manifest_rows(rows)
+    meta = data.get("metadata") or {}
+    if "spend_before_A" not in meta:
+        raise ValueError("split_manifest_overlap: metadata missing spend_before_A")
+    return {str(r["prompt_hash"]): str(r["split"]) for r in rows}
+
+
+def build_split_manifest_rows(
+    pool_rows: list[dict[str, Any]], *, seed: int = 0, assigned_at: str | None = None
+) -> list[dict[str, Any]]:
+    if assigned_at is None:
+        assigned_at = datetime.date.today().isoformat()
+    ordered = sample_stratum(pool_rows, len(pool_rows), seed=seed)
+    n = len(ordered)
+    # Fixed holdout sizes; remainder split 60/40 teacher/sparse to satisfy C1 gate when pool grows
+    promo_n = min(300, n)
+    tune_n = min(300, max(0, n - promo_n))
+    dense_n = min(300, max(0, n - promo_n - tune_n))
+    remaining = max(0, n - promo_n - tune_n - dense_n)
+    # keep sparse-train at least 1000 when possible
+    if remaining > 1000:
+        sparse_n = 1000
+        teacher_n = remaining - sparse_n
+    else:
+        teacher_n = remaining // 2
+        sparse_n = remaining - teacher_n
+    slices: list[tuple[str, int]] = [
+        ("promotion-holdout", promo_n),
+        ("threshold-tune", tune_n),
+        ("dense-cal", dense_n),
+        ("teacher-silver", teacher_n),
+        ("sparse-train", sparse_n),
+    ]
+    out: list[dict[str, Any]] = []
+    idx = 0
+    for split, cnt in slices:
+        for r in ordered[idx : idx + cnt]:
+            prompt = _manifest_prompt_of(r)
+            out.append(
+                {
+                    "prompt_hash": _prompt_hash(prompt),
+                    "instance_id": r.get("instance_id") if r.get("instance_id") is not None else None,
+                    "split": split,
+                    "assigned_at": assigned_at,
+                }
+            )
+        idx += cnt
+    # validate
+    _validate_manifest_rows(out)
+    return out
+
+
+def write_split_manifest(
+    pool_rows: list[dict[str, Any]],
+    out_path: Path | None = None,
+    *,
+    seed: int = 0,
+    spend_before_A: float = MANIFEST_SPEND_BEFORE_A,
+    assigned_at: str | None = None,
+) -> Path:
+    p = Path(out_path) if out_path else Path("data/split_manifest.json")
+    rows = build_split_manifest_rows(pool_rows, seed=seed, assigned_at=assigned_at)
+    data = {
+        "metadata": {
+            "spend_before_A": spend_before_A,
+            "generated_at": assigned_at or datetime.date.today().isoformat(),
+            "total": len(rows),
+            "seed": seed,
+        },
+        "rows": rows,
+    }
+    validate_split_manifest(data)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return p
 
 
 def build_pool(
