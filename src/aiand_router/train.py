@@ -15,7 +15,13 @@ import httpx
 
 from .cache import RequestCache, request_cache_key
 from .provider import HttpAiandProvider
-from .pool import run_pool, sample_stratum
+from .pool import (
+    MANIFEST_VALID_SPLITS,
+    load_split_manifest,
+    run_pool,
+    sample_stratum,
+    validate_split_manifest,
+)
 from .router import (
     SpendLog,
     eligible_models,
@@ -467,15 +473,6 @@ def _prompt_of(messages: list[dict[str, Any]]) -> str:
     return content if isinstance(content, str) else str(content or "")
 
 
-MANIFEST_VALID_SPLITS = {
-    "teacher-silver",
-    "sparse-train",
-    "dense-cal",
-    "threshold-tune",
-    "promotion-holdout",
-}
-
-
 def _prompt_hash(prompt: str) -> str:
     return hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12]
 
@@ -486,32 +483,8 @@ def _manifest_prompt_of_row(row: dict[str, Any]) -> str:
 
 def _load_manifest_map(manifest_path: Path | None = None) -> dict[str, str]:
     p = Path(manifest_path) if manifest_path else Path("data/split_manifest.json")
-    if not p.exists():
-        raise ValueError("split_manifest_overlap: manifest missing at " + str(p))
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except Exception as e:
-        raise ValueError(f"split_manifest_overlap: corrupt manifest: {e}") from e
-    rows = data.get("rows")
-    if not isinstance(rows, list):
-        raise ValueError("split_manifest_overlap: manifest missing 'rows'")
-    seen: set[str] = set()
-    out: dict[str, str] = {}
-    for r in rows:
-        ph = r.get("prompt_hash")
-        sp = r.get("split")
-        if not isinstance(ph, str) or len(ph) != 12:
-            raise ValueError(f"split_manifest_overlap: invalid prompt_hash {ph!r}")
-        if sp not in MANIFEST_VALID_SPLITS:
-            raise ValueError(f"split_manifest_overlap: invalid split {sp!r}")
-        if ph in seen:
-            raise ValueError(f"split_manifest_overlap: double-assigned {ph}")
-        seen.add(ph)
-        out[str(ph)] = str(sp)
-    meta = data.get("metadata") or {}
-    if "spend_before_A" not in meta:
-        raise ValueError("split_manifest_overlap: metadata missing spend_before_A")
-    return out
+    data = load_split_manifest(p)
+    return validate_split_manifest(data)
 
 
 def _resolve_manifest_path(
