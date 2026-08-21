@@ -10,7 +10,6 @@ from typing import Any, Iterable
 from .metrics import (
     ECE_MAX,
     QUALITY_TOLERANCE,
-    SMALL_N_ECE_MASS,
     VERIFIED_N_FLOOR,
     brier_score,
     brier_skill_score,
