@@ -669,9 +669,12 @@ def run_retune(
 ) -> str:
     """Search (threshold, max_regret) on a held-out tune split.
 
-    Loads dense gold rows (n >= 300), runs a grid search over threshold
-    [0, 1] step 0.01 and max_regret [0, 0.2] step 0.01, and picks the
+    Loads dense gold rows (n >= 300), runs a search over threshold
+    candidates × max_regret [0, 0.2] step 0.01, and picks the
     (t, r) that minimizes total list USD subject to:
+
+    init="grid" scans threshold [0, 1] step 0.01 (exhaustive).
+    init="quantile" scans only the 5 p_success quantile points (pruned).
 
         resolve_rate   >= rules_resolve_rate   - 0.01
         escalate_rate  >= rules_escalate_rate  - 0.01
@@ -798,18 +801,18 @@ def run_retune(
         vals = sorted(float(v) for v in (artifact.get("p_success") or {}).values())
         if vals:
             q_points = [vals[min(len(vals) - 1, int(round(q * (len(vals) - 1))))] for q in (0.1, 0.3, 0.5, 0.7, 0.9)]
-            _quantile_init_thresholds = [max(0.0, min(1.0, float(v))) for v in q_points]
+            thresholds = [max(0.0, min(1.0, float(v))) for v in q_points]
         else:
-            _quantile_init_thresholds = [0.5]
-        # Quantile initializes the search grid before exhaustive scan (exhaustive still covers [0,1] step 0.01).
+            thresholds = [0.5]
+    else:
+        thresholds = [i / 100.0 for i in range(101)]
 
-    # Grid search: threshold [0, 1] step 0.01, max_regret [0, 0.2] step 0.01
+    # Search: threshold candidates × max_regret [0, 0.2] step 0.01
     best_cost = float("inf")
     best_t: float | None = None
     best_r: float | None = None
 
-    for t_i in range(101):
-        t = t_i / 100.0
+    for t in thresholds:
         for r_i in range(21):
             r = r_i / 100.0
             total_cost = 0.0

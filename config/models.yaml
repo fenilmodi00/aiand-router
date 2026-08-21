@@ -14,12 +14,13 @@ redact_keys:
 
 max_regret: 8
 trained_effort:
-  # Pioneer ship defaults (scorer.py SHIP_EFFORT). Retune to 0.83+ was a GBDT
-  # workaround when scores were non-discriminative; revert until geometry_pass.
-  low: {threshold: 0.05, max_regret: 0.30}
-  medium: {threshold: 0.10, max_regret: 0.20}
-  high: {threshold: 0.20, max_regret: 0.15}
-  max: {threshold: 0.60, max_regret: 0.03}
+  # Retuned from threshold-tune split (H15): grid search minimizing list USD
+  # subject to resolve/escalate within 1pp of rules. Medium fitted; low/high/max
+  # derived via Pioneer offsets, walked to restore monotonicity.
+  low: {threshold: 0.00, max_regret: 0.19}
+  medium: {threshold: 0.00, max_regret: 0.09}
+  high: {threshold: 0.10, max_regret: 0.04}
+  max: {threshold: 0.50, max_regret: 0.00}
 cascade_lane:
   enabled: false
   cheap_model: deepseek-ai/deepseek-v4-flash

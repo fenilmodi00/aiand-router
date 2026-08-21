@@ -144,6 +144,26 @@ def _max_config(tmp_path: Path) -> Path:
     return p
 
 
+def _ship_config(tmp_path: Path) -> Path:
+    """Real config with trained_effort reset to SHIP_EFFORT defaults."""
+    import yaml
+
+    cfg = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / "config" / "models.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    cfg["trained_effort"] = {
+        "low": {"threshold": 0.05, "max_regret": 0.30},
+        "medium": {"threshold": 0.10, "max_regret": 0.20},
+        "high": {"threshold": 0.20, "max_regret": 0.15},
+        "max": {"threshold": 0.60, "max_regret": 0.03},
+    }
+    p = tmp_path / "models_ship.yaml"
+    p.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    return p
+
+
 def _client(
     tmp_path: Path,
     scorer_path: Path,
@@ -273,15 +293,15 @@ def test_max_effort_trivial_bin_flash_served_not_k3(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- #
 def test_default_effort_cheapest_within_regret_served(tmp_path, monkeypatch):
     _clean_env(monkeypatch)
-    # Default config: premium_aa_floor=58, K3 gated at medium
-    # effort=medium -> threshold=0.10, max_regret=0.20 (Pioneer ship defaults)
-    # Pro=0.90 (top), Flash=0.85 (clears threshold directly, cheapest) -> Flash served
+    # Real config (premium_aa_floor=58) with trained_effort reset to ship defaults
+    # (threshold=0.10, max_regret=0.20). K3 gated at medium; Flash/Pro/GLM eligible.
+    # Pro=0.90 (top), Flash=0.85 (clears threshold, cheapest) -> Flash served
     scorer = _scorer(
         tmp_path,
         {FLASH: 0.85, PRO: 0.90, GLM: 0.08, K27: 0.07, MOTIF: 0.06, QWEN: 0.05},
         bin="standard",
     )
-    client, provider = _client(tmp_path, scorer)
+    client, provider = _client(tmp_path, scorer, config_path=_ship_config(tmp_path))
     response = client.post(
         "/v1/chat/completions",
         json=CHAT,
@@ -298,13 +318,14 @@ def test_default_effort_cheapest_within_regret_served(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- #
 def test_nothing_clears_bar_fallback_declined(tmp_path, monkeypatch):
     _clean_env(monkeypatch)
-    # effort=medium -> threshold=0.10; all p_success below 0.10
+    # Real config with trained_effort reset to ship defaults (threshold=0.10);
+    # all p_success below 0.10 -> fallback_declined
     scorer = _scorer(
         tmp_path,
         {FLASH: 0.05, PRO: 0.08, GLM: 0.06},
         bin="standard",
     )
-    client, provider = _client(tmp_path, scorer)
+    client, provider = _client(tmp_path, scorer, config_path=_ship_config(tmp_path))
     response = client.post(
         "/v1/chat/completions",
         json=CHAT,
