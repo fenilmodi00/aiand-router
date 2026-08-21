@@ -1,0 +1,392 @@
+[
+  {
+    "instance_id": "synthetic__fix__000",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a + b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__001",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a + b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__002",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a + b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__003",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a + b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__004",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a + b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__005",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a + b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__006",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a + b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__007",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a + b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__008",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a + b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__009",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a + b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__010",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a + b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__011",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a + b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__012",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a + b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__013",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a + b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__014",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a + b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__015",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a + b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__016",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a + b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__017",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a + b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__018",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a + b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__019",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a + b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__020",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a - b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__021",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a - b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__022",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a - b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__023",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a - b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__024",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a - b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a + b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__025",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a - b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a - b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__026",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a - b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a - b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__027",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a - b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a - b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__028",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a - b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a - b"
+      }
+    }
+  },
+  {
+    "instance_id": "synthetic__fix__029",
+    "module": "fix.py",
+    "tests": "from fix import add\n\ndef test_add():\n    assert add(1, 2) == 3\n    assert add(-1, 1) == 0\n    assert add(0, 0) == 0",
+    "policies": {
+      "rules": {
+        "patch": "def add(a, b):\n    return a - b"
+      },
+      "trained": {
+        "patch": "def add(a, b):\n    return a - b"
+      }
+    }
+  }
+]
