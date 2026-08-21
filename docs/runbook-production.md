@@ -209,6 +209,7 @@ Every row is written by `append_jsonl` (adds `ts`) + `_jsonl_row` (base + condit
 | `baseline_model_id` | `_jsonl_row` conditional | `most_expensive_eligible` id for this request |
 | `savings_usd` | `_jsonl_row` conditional | Baseline cost - selected cost (>= 0 by construction) |
 | `rules_cost_delta_usd` | `_jsonl_row` conditional | Trained - rules cost on same request (shadow/promotion only; not called savings) |
+| `est_cache_aware` | `_jsonl_row` conditional | Whether the routing estimate applied cached-input pricing (true only on multi-turn hops for models with a catalog cached price) |
 | `effort` | `_jsonl_row` conditional | `low`, `medium`, `high`, or `max` |
 | `escalated_from` | call-site extra | Model id that was escalated from (if escalated) |
 | `tests_passed` | call-site extra | Flashlight test outcome (if available) |

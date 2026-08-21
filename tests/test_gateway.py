@@ -510,13 +510,12 @@ def test_failed_test_outcome_makes_debug_pick_a_stronger_model(tmp_path):
         headers={**AUTH, "x-agent-phase": "debug"},
     )
     assert outcome.status_code == 200
-    # Coding-agent priors: pioneer_score already prefers Pro on edit.
+    # Single-turn hops price input at list rate, so Flash edges Pro on edit;
     # debug_fail_threshold (53) still bars Flash (AA 52) after a failed test.
-    assert edit.headers["x-router-model"] == "deepseek-ai/deepseek-v4-pro"
+    assert edit.headers["x-router-model"] == "deepseek-ai/deepseek-v4-flash"
     assert debug.headers["x-router-model"] == "deepseek-ai/deepseek-v4-pro"
     assert debug.headers["x-router-model"] != "deepseek-ai/deepseek-v4-flash"
-    assert provider.calls[0]["model"] == "deepseek-ai/deepseek-v4-pro"
-    # Same prompt + Pro on both turns → debug is a cache hit, not a second upstream.
+    assert provider.calls[0]["model"] == "deepseek-ai/deepseek-v4-flash"
 
 
 def test_replay_page_shows_phase_winner_reason_cost_and_hides_secrets(tmp_path):
@@ -589,7 +588,7 @@ def test_flashlight_walks_phases_and_uses_stronger_model_after_test_fail(tmp_pat
     assert "debug" in phases
     assert "summarize" in phases
     by_phase = {r["phase"]: r for r in rows if r.get("selected")}
-    assert by_phase["edit"]["selected"] == "deepseek-ai/deepseek-v4-pro"
+    assert by_phase["edit"]["selected"] == "deepseek-ai/deepseek-v4-flash"
     assert by_phase["debug"]["selected"] == "deepseek-ai/deepseek-v4-pro"
     assert by_phase["debug"]["selected"] != "deepseek-ai/deepseek-v4-flash"
     assert by_phase["summarize"]["selected"] == "deepseek-ai/deepseek-v4-flash"
@@ -604,9 +603,10 @@ def test_eval_runs_three_baselines_on_five_tasks_and_rereads_log(tmp_path):
     spec = load_tasks(PROJECT_ROOT / "config" / "tasks.yaml")
     first = run_eval(client, "secret", spec, log_path=tmp_path / "requests.jsonl")
     calls_after_first = len(provider.calls)
-    # 5 tasks × 3 baselines, but rules pick Pro on plan/edit/debug (same as
-    # premium) so those three adaptive turns cache-hit → 12 unique upstream calls.
-    assert calls_after_first == 12
+    # 5 tasks × 3 baselines; single-turn list pricing makes adaptive pick Flash
+    # on every phase, so no adaptive turn shares premium's Pro cache key → 15
+    # unique upstream calls.
+    assert calls_after_first == 15
     second = run_eval(client, "secret", spec, log_path=tmp_path / "requests.jsonl")
     assert len(provider.calls) == calls_after_first
     report = report_from_log(tmp_path / "requests.jsonl")
@@ -619,7 +619,7 @@ def test_eval_runs_three_baselines_on_five_tasks_and_rereads_log(tmp_path):
         assert "models" in row
         assert "resolved" in row
     adaptive = report["baselines"]["adaptive"]
-    assert adaptive["tasks"] == 2  # discover + summarize; rest cache-hit Pro
+    assert adaptive["tasks"] == 5  # single-turn list pricing: Flash on every phase
     assert "cost_usd" in adaptive
     assert "latency_ms" in adaptive
     assert "resolved" in adaptive
@@ -628,7 +628,7 @@ def test_eval_runs_three_baselines_on_five_tasks_and_rereads_log(tmp_path):
     assert adaptive["models"] == ["deepseek-ai/deepseek-v4-flash"]
     assert "savings_pct" not in report
     assert first["stubbed"] == ["qwen-only", "flash-only", "glm-only", "random", "oracle"]
-    assert first["cache_hits"] == 3
+    assert first["cache_hits"] == 0
     assert second["cache_hits"] == 15
     assert "not_aiand" in report["quality_note"]
 

@@ -382,6 +382,7 @@ def create_app(
             streaming=bool(body.get("stream")),
             max_tokens=req_max_i,
             latency_limit_ms=_latency_limit(cfg, headers),
+            multi_turn=len(body.get("messages") or []) > 1,
         )
         prompt_text = "\n".join(
             _text(m.get("content"))
@@ -585,6 +586,7 @@ def create_app(
             streaming=bool(openai_body.get("stream")),
             max_tokens=req_max_i,
             latency_limit_ms=_latency_limit(cfg, headers),
+            multi_turn=len(openai_body.get("messages") or []) > 1,
         )
         prompt_text = "\n".join(
             _text(m.get("content"))
@@ -811,6 +813,8 @@ def _jsonl_row(decision: Decision, **extra: Any) -> dict[str, Any]:
         row["savings_usd"] = decision.savings_usd
     if decision.rules_cost_delta_usd is not None:
         row["rules_cost_delta_usd"] = decision.rules_cost_delta_usd
+    if decision.est_cache_aware is not None:
+        row["est_cache_aware"] = decision.est_cache_aware
     if decision.effort:
         row["effort"] = decision.effort
     return row

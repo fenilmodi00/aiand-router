@@ -63,6 +63,7 @@ class RulesPathPolicy:
             effort=req.effort,
             tokens=req.tokens,
             catalog=req.catalog,
+            multi_turn=bool(req.pick_kwargs.get("multi_turn", True)),
         )
 
 

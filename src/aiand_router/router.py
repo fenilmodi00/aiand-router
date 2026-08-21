@@ -122,6 +122,7 @@ class Decision:
     trained_confidence: float | None = None
     savings_usd: float | None = None
     rules_cost_delta_usd: float | None = None
+    est_cache_aware: bool | None = None
 
 
 def load_config(path: Path) -> dict[str, Any]:
@@ -313,7 +314,9 @@ def build_eligible_set(
     streaming: bool = False,
     max_tokens: int | None = None,
     latency_limit_ms: float | None = None,
+    multi_turn: bool = True,
 ) -> EligibleSet:
+    # Accepted unused: route_hop splats pick_kwargs here; hard constraints are turn-independent.
     threshold, models_ = eligible_models(
         cfg,
         models,
@@ -355,12 +358,13 @@ def select_from_eligible(
     effort: str,
     tokens: int,
     catalog: list[Model],
+    multi_turn: bool = True,
 ) -> Decision:
     threshold = eligible_set.threshold
     eligible = list(eligible_set.models)
     if not eligible:
         decision = fallback_decision(cfg, catalog, phase, threshold)
-        stamp_baseline(decision, [decision.model], tokens)
+        stamp_baseline(decision, [decision.model], tokens, multi_turn=multi_turn)
         return decision
     max_regret = 0.0 if effort == "low" else float(cfg.get("max_regret") or 0)
     best = max(eligible, key=lambda m: m.quality)
@@ -370,13 +374,13 @@ def select_from_eligible(
         if close:
             eligible = close
             best = max(eligible, key=lambda m: m.quality)
-    scores = {m.id: pioneer_score(m, phase, eligible) for m in eligible}
+    scores = {m.id: pioneer_score(m, phase, eligible, multi_turn=multi_turn) for m in eligible}
     if effort == "low":
-        eligible.sort(key=lambda m: (m.unit_cost, -m.quality))
+        eligible.sort(key=lambda m: (blended_unit_cost(m, multi_turn=multi_turn), -m.quality))
     elif effort == "max":
-        eligible.sort(key=lambda m: (-m.quality, -scores[m.id], m.unit_cost))
+        eligible.sort(key=lambda m: (-m.quality, -scores[m.id], blended_unit_cost(m, multi_turn=multi_turn)))
     else:
-        eligible.sort(key=lambda m: (-scores[m.id], -m.quality, m.unit_cost))
+        eligible.sort(key=lambda m: (-scores[m.id], -m.quality, blended_unit_cost(m, multi_turn=multi_turn)))
     chosen = eligible[0]
     score = scores[chosen.id]
     regret = best.quality - chosen.quality
@@ -386,12 +390,13 @@ def select_from_eligible(
         threshold=threshold,
         reason=(
             f"phase={phase} bar={threshold} score={score:.2f} regret={regret:g} "
-            f"picked {chosen.id} (aa={chosen.quality:g}, ${chosen.unit_cost:.2f}/1M blend) "
+            f"picked {chosen.id} (aa={chosen.quality:g}, "
+            f"${blended_unit_cost(chosen, multi_turn=multi_turn):.2f}/1M blend) "
             f"source={chosen.aa_source}/{chosen.measured_on}"
         ),
         candidates=[m.id for m in eligible],
     )
-    stamp_baseline(decision, eligible, tokens)
+    stamp_baseline(decision, eligible, tokens, multi_turn=multi_turn)
     return decision
 
 
@@ -410,6 +415,7 @@ def select_model(
     streaming: bool = False,
     max_tokens: int | None = None,
     latency_limit_ms: float | None = None,
+    multi_turn: bool = True,
 ) -> Decision:
     eligible_set = build_eligible_set(
         cfg,
@@ -427,19 +433,23 @@ def select_model(
         latency_limit_ms=latency_limit_ms,
     )
     return select_from_eligible(
-        cfg, eligible_set, phase=phase, effort=effort, tokens=tokens, catalog=models
+        cfg, eligible_set, phase=phase, effort=effort, tokens=tokens, catalog=models,
+        multi_turn=multi_turn,
     )
 
 
-def stamp_baseline(decision: Decision, eligible: list[Model], tokens: int) -> None:
+def stamp_baseline(
+    decision: Decision, eligible: list[Model], tokens: int, *, multi_turn: bool = True
+) -> None:
     """Named savings baseline = most expensive eligible model (list unit cost)."""
     if not eligible:
         return
     baseline = max(eligible, key=lambda m: m.unit_cost)
     decision.baseline_model_id = baseline.id
-    est_sel = estimate_cost(decision.model, tokens, 800)
-    est_base = estimate_cost(baseline, tokens, 800)
+    est_sel = estimate_cost(decision.model, tokens, 800, multi_turn=multi_turn)
+    est_base = estimate_cost(baseline, tokens, 800, multi_turn=multi_turn)
     decision.savings_usd = round(max(0.0, est_base - est_sel), 6)
+    decision.est_cache_aware = bool(multi_turn) and decision.model.cached_input_per_1m is not None
 
 
 def _phase_bar(cfg: dict[str, Any], phase: str) -> float:
@@ -466,14 +476,14 @@ def capability_match(model: Model, phase: str) -> float:
     return predicted_success(model)
 
 
-def pioneer_score(model: Model, phase: str, eligible: list[Model]) -> float:
+def pioneer_score(model: Model, phase: str, eligible: list[Model], *, multi_turn: bool = True) -> float:
     ps = predicted_success(model)
     cap = capability_match(model, phase)
     tool_rel = 1.0 if model.supports_tools else 0.5
     lat = 1.0 / (1.0 + model.latency_ms / 1000.0)
-    costs = [m.unit_cost for m in eligible] or [1.0]
+    costs = [blended_unit_cost(m, multi_turn=multi_turn) for m in eligible] or [1.0]
     max_c = max(costs) or 1.0
-    norm_c = 0.0 if max_c == 0 else model.unit_cost / max_c
+    norm_c = 0.0 if max_c == 0 else blended_unit_cost(model, multi_turn=multi_turn) / max_c
     return (
         0.40 * ps
         + 0.20 * cap
@@ -517,8 +527,18 @@ def append_jsonl(path: Path, row: dict[str, Any]) -> None:
         f.write(json.dumps(row, default=str) + "\n")
 
 
-def estimate_cost(model: Model, prompt_tokens: int, completion_tokens: int) -> float:
-    inp = model.cached_input_per_1m if model.cached_input_per_1m is not None else model.input_per_1m
+def blended_unit_cost(model: Model, *, multi_turn: bool = True) -> float:
+    """40/60 input/output blend; cached-in input honored on multi-turn hops only."""
+    inp = model.cached_input_per_1m if (multi_turn and model.cached_input_per_1m is not None) else model.input_per_1m
+    return inp * 0.4 + model.output_per_1m * 0.6
+
+
+def estimate_cost(
+    model: Model, prompt_tokens: int, completion_tokens: int, *, multi_turn: bool = True
+) -> float:
+    """Estimate USD for a hop. Cached-in input price applies to multi-turn only
+    (Fireworks lesson); post-response billing stays actual list-price accounting."""
+    inp = model.cached_input_per_1m if (multi_turn and model.cached_input_per_1m is not None) else model.input_per_1m
     return (prompt_tokens / 1_000_000) * inp + (completion_tokens / 1_000_000) * model.output_per_1m
 
 
