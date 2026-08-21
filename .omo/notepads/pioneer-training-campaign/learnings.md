@@ -71,3 +71,16 @@ eplay_report.py: SMALL_N_ECE_MASS\ (imported but never Name-used; \ECE_MAX\ reta
 - Cache resume: first ~400 queries overlapped with previous gold_sparse.jsonl (1720 rows from default SPARSE_LIMIT=400 run). Those cells served from cache (free). Merge produced 5258 unique (prompt, model_id) pairs.
 - C2 VERDICT: PASS (all 4 anchors >=800 rows, zero K3, spend $4.74 <= $15).
 - Tests: 431 passed 4 skipped (unchanged from baseline). spend.txt 27.757.
+
+## 2026-08-21 D9 sparse gold tranche B (n=1000 x 4 anchors) + C3 gate
+- Tranche B used --split sparse-train --limit 1000 --exclude data/gold_sparse_part_a.jsonl to select the second 1000 disjoint sparse-train queries. The --exclude flag drops prompts already labeled in tranche A, leaving 1112 sparse-train queries; --limit 1000 takes the first 1000. No code changes needed — the --exclude + --split + --limit combination works correctly after C8's fix.
+- Run: AIAND_TRAIN=1 BUDGET_LIMIT_USD=42.757 python -m aiand_router.train gold --queries data/queries_spec.jsonl --split sparse-train --limit 1000 --exclude data/gold_sparse_part_a.jsonl --out data/gold_sparse_part_b.jsonl. Launched via WMI batch file scripts/run_gold_sparse_b.bat. Completed in ~22 minutes.
+- Results: 4000 cells (1000 queries x 4 anchors). Spend delta .81 (cap ). Cumulative merged gold_sparse.jsonl: 9156 rows (deduped from 9258), 2296 unique queries (observed), 8954 observed cells.
+- Merge: appended part_b into gold_sparse.jsonl, deduped by (prompt, model_id). 102 duplicates removed (pre-existing rows from default SPARSE_LIMIT=400 run that overlapped with tranche B queries).
+- C3 VERDICT: PASS on all 3 gates.
+  - Count: 2296 unique queries >= 1800 threshold.
+  - Brier: held-out 0.0423 < base-rate 0.0501 (15.5% improvement). Logistic refit using fit.py _fit_binary_intercept on 80/20 prompt split.
+  - Spearman rho: 0.80 > 0. Anchor win-rate ordering stable across 50/50 halves. Kimi-K2.7-Code consistently rank 1 (lowest win-rate), DeepSeek-V4-Pro rank 2, Flash/Qwen3.6-27B ranks 3-4 (tied/near-tied at ~99.8%).
+- Per-anchor success rates (cumulative observed): Flash ~99.7%, Qwen3.6-27B ~99.9%, Kimi-K2.7-Code ~76.6%, DeepSeek-V4-Pro ~99.5%. Kimi's lower rate continues to drive the signal.
+- scipy not available in env — Spearman computed via pure-stdlib rank vectors + Pearson correlation. Script: scripts/check_c3_gate.py.
+- Tests: 431 passed 4 skipped (unchanged). spend.txt 32.568.
