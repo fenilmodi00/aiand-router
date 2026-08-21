@@ -766,13 +766,14 @@ def build_split_manifest_rows(
         assigned_at = datetime.date.today().isoformat()
     ordered = sample_stratum(pool_rows, len(pool_rows), seed=seed)
     n = len(ordered)
-    # Fixed holdout sizes; remainder split 60/40 teacher/sparse to satisfy C1 gate when pool grows
     promo_n = min(300, n)
     tune_n = min(300, max(0, n - promo_n))
     dense_n = min(300, max(0, n - promo_n - tune_n))
     remaining = max(0, n - promo_n - tune_n - dense_n)
-    # keep sparse-train at least 1000 when possible
-    if remaining > 1000:
+    if n >= 6500:
+        teacher_n = min(4000, remaining)
+        sparse_n = remaining - teacher_n
+    elif remaining > 1000:
         sparse_n = 1000
         teacher_n = remaining - sparse_n
     else:
@@ -829,10 +830,10 @@ def write_split_manifest(
     return p
 
 
-# --- Spec-margin validation + coverage report (Phase B6) ---
+# --- Spec-margin validation + coverage report (Phase B6, top-up to ~7000) ---
 
 SPEC_MARGIN_TOL = 0.03
-SPEC_COUNT_BAND = (4000, 5000)
+SPEC_COUNT_BAND = (4000, 7500)
 SPEC_STRATUM_FLOOR = 20
 
 

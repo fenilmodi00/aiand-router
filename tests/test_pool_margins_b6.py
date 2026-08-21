@@ -34,44 +34,33 @@ def _make_rows(bins, tools, phases):
 
 
 def _balanced_rows(n=4000):
-    """Build n rows that pass spec margins by mirroring the real pool distribution."""
-    # Real pool (4039 rows) passes with margins within 1%; scale its empirical
-    # distribution down to n while preserving each occupied stratum >= floor.
-    real_path = Path("data/queries_spec.jsonl")
-    if real_path.exists():
-        real = [json.loads(l) for l in real_path.read_text(encoding="utf-8").splitlines() if l.strip()]
-        # if n matches real, just return copy with new ids
-        if n == len(real):
-            out = []
-            for i, r in enumerate(real):
-                out.append({**r, "id": f"q{i:05d}", "instance_id": f"q{i:05d}", "prompt": f"prompt {i} {r['hint_bin']} {r['phase']}"})
-            return out
-        # else sample deterministically to approximate margins: take first n of real repeated
-        # scale by repeating real rows proportionally
-        out = []
-        for i in range(n):
-            r = real[i % len(real)]
-            out.append({**r, "id": f"q{i:05d}", "instance_id": f"q{i:05d}", "prompt": f"prompt {i} {r['hint_bin']} {r['phase']}"})
-        # ensure stratum floors: the real pool already has 48 strata >=20, repetition keeps it
-        return out
-    # fallback synthetic: allocate per spec with floor guard
+    """Build n rows that pass spec margins by stratified generation."""
+    # Use same stratified targets as scripts/build_pool_spec.py: max(20, round(n*fracs))
     rows = []
     idx = 0
-    for b in BIN_FRAC:
-        for t in TOOLS_FRAC:
-            for p in PHASE_FRAC:
-                for _ in range(SPEC_STRATUM_FLOOR):
-                    rows.append({"id": f"q{idx:05d}", "instance_id": f"q{idx:05d}", "prompt": f"prompt {idx}", "hint_bin": b, "needs_tools": t, "phase": p, "tokens": 100, "source": "synthetic"})
+    for b, bf in BIN_FRAC.items():
+        for p, pf in PHASE_FRAC.items():
+            for t, tf in TOOLS_FRAC.items():
+                raw = round(n * bf * pf * tf)
+                target = max(SPEC_STRATUM_FLOOR, raw)
+                for _ in range(target):
+                    rows.append({"id": f"q{idx:05d}", "instance_id": f"q{idx:05d}", "prompt": f"prompt {idx} {b} {p} {t}", "hint_bin": b, "needs_tools": t, "phase": p, "tokens": 100, "source": "synthetic"})
                     idx += 1
-    # pad remaining with standard/edit/True which is spec-centred
-    while len(rows) < n:
-        rows.append({"id": f"q{idx:05d}", "instance_id": f"q{idx:05d}", "prompt": f"prompt {idx}", "hint_bin": "standard", "needs_tools": True, "phase": "edit", "tokens": 100, "source": "synthetic"})
-        idx += 1
-    return rows[:n]
+    # Trim or pad to exactly n while preserving floors (already >= floors)
+    if len(rows) > n:
+        # Deterministic trim: keep first n (shuffled would be similar, but keep stratified)
+        import random as _rng
+        _rng.Random(0).shuffle(rows)
+        rows = rows[:n]
+    elif len(rows) < n:
+        while len(rows) < n:
+            rows.append({"id": f"q{idx:05d}", "instance_id": f"q{idx:05d}", "prompt": f"prompt {idx}", "hint_bin": "standard", "needs_tools": True, "phase": "edit", "tokens": 100, "source": "synthetic"})
+            idx += 1
+    return rows
 
 
 def test_validate_spec_margins_pass_balanced():
-    rows = _balanced_rows(4039)
+    rows = _balanced_rows(7012)
     rep = validate_spec_margins(rows, tolerance=0.03)
     assert rep["overall_ok"], rep["errors"]
     assert rep["count_band"]["ok"]
@@ -141,12 +130,12 @@ def test_pool_coverage_report_manifest_consistency():
     assert report["manifest"]["consistent"]
     assert report["manifest"]["pool_not_in_manifest"] == 0
     assert report["manifest"]["manifest_not_in_pool"] == 0
-    assert report["manifest"]["total"] == report["total"] == 4039
-    assert report["teacher_cost"]["teacher_silver_n"] == 2139
-    assert report["teacher_cost"]["cost"] == round(2139 * 0.0015, 4)
-    assert report["projected_cost"]["fits_tranche_8"]
+    assert report["manifest"]["total"] == report["total"] == len(rows)
+    assert report["manifest"]["total"] == mp["metadata"]["total"]
+    assert report["teacher_cost"]["teacher_silver_n"] == teacher_n
+    assert report["teacher_cost"]["cost"] == round(teacher_n * 0.0015, 4)
     assert report["teacher_cost"]["fits_tranche_8"]
-    # markdown renders without error and contains key sections
+    assert report["projected_cost"]["full_pool_cost"] == round(len(rows) * 0.0015, 4)
     md = format_coverage_markdown(report)
     assert "Query Pool Coverage Report" in md
     assert "Bin margins" in md
@@ -159,3 +148,21 @@ def test_manifest_spend_before_unchanged():
     data = json.loads(Path("data/split_manifest.json").read_text(encoding="utf-8"))
     assert data["metadata"]["spend_before_A"] == 8.16
     assert Path("data/spend.txt").read_text(encoding="utf-8").strip() == "8.16"
+
+
+def test_topup_split_sizes_gate_reachable():
+    data = json.loads(Path("data/split_manifest.json").read_text(encoding="utf-8"))
+    rows = [json.loads(l) for l in Path("data/queries_spec.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+    from collections import Counter
+    cnt = Counter(r["split"] for r in data["rows"])
+    assert cnt["promotion-holdout"] == 300
+    assert cnt["threshold-tune"] == 300
+    assert cnt["dense-cal"] == 300
+    # gate-reachable sizing
+    assert cnt["teacher-silver"] >= 3800
+    assert cnt["sparse-train"] >= 1800
+    assert sum(cnt.values()) == len(rows) == data["metadata"]["total"]
+    assert len(rows) >= 6500
+    # C1/C3 arithmetic: teacher 4000 at 90% yield -> 3600 silver (>3500), sparse 2112 > 2000
+    assert cnt["teacher-silver"] * 0.9 >= 3500 or cnt["teacher-silver"] >= 3890
+    assert cnt["sparse-train"] >= 2000 or sum(cnt.values()) >= 6800

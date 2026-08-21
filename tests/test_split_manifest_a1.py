@@ -33,7 +33,10 @@ def test_manifest_schema_and_valid_splits():
     data = json.loads(p.read_text(encoding="utf-8"))
     assert "metadata" in data and "rows" in data
     rows = data["rows"]
-    assert len(rows) == 4039
+    pool_n = len([l for l in Path("data/queries_spec.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()])
+    assert len(rows) == pool_n
+    assert len(rows) == data["metadata"]["total"]
+    assert 6500 <= len(rows) <= 7500
     for r in rows:
         assert set(r.keys()) == {"prompt_hash", "instance_id", "split", "assigned_at"}
         assert isinstance(r["prompt_hash"], str) and len(r["prompt_hash"]) == 12
@@ -54,7 +57,9 @@ def test_metadata_spend_before():
     meta = data["metadata"]
     assert meta["spend_before_A"] == 8.16
     assert meta["spend_before_A"] == MANIFEST_SPEND_BEFORE_A
-    assert meta["total"] == 4039
+    pool_n = len([l for l in Path("data/queries_spec.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()])
+    assert meta["total"] == pool_n
+    assert 6500 <= meta["total"] <= 7500
     assert meta["seed"] == 0
     # data/spend.txt stays single float line 8.16
     spend_raw = Path("data/spend.txt").read_text(encoding="utf-8")
@@ -130,9 +135,11 @@ def test_allowed_split_enforcement():
 
 
 def test_baseline_reader_behavior_today():
-    # characterization: _load_manifest_map succeeds and returns 4039 entries, disjoint splits
+    # characterization: _load_manifest_map succeeds and returns pool-sized entries, disjoint splits
     mp = _load_manifest_map()
-    assert len(mp) == 4039
+    pool_n = len([l for l in Path("data/queries_spec.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()])
+    assert len(mp) == pool_n
+    assert 6500 <= len(mp) <= 7500
     # no duplicate hashes (already validated)
     # spends: spend_before from metadata equals file total
     assert len(set(mp.values())) <= 5
