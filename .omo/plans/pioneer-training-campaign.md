@@ -41,23 +41,23 @@
 ### Phase B — Teacher silver at scale (cap $15, checkpoint C1)
 
 - [ ] 6. Build production query pool from dumps (~4–5k teacher rows, strata reported)
-- [ ] 7. Run teacher labeling (Motif-3 → GLM 5.2 escalate ≤25%) → `data/silver.jsonl` + C1 gate
+- [x] 7. Run teacher labeling (Motif-3 → GLM 5.2 escalate ≤25%) → `data/silver.jsonl` + C1 gate
 
 ### Phase C — Sparse gold tranche A (cap $15, checkpoint C2)
 
-- [ ] 8. Sparse gold — first half n≈1,000 × 4 anchors (Flash + measured trio), no K3 → C2 gate
+- [x] 8. Sparse gold — first half n≈1,000 × 4 anchors (Flash + measured trio), no K3 → C2 gate
 
 ### Phase D — Sparse gold tranche B (cap $15, checkpoint C3)
 
-- [ ] 9. Sparse gold — second half n≈1,000 × 4 anchors → cumulative sparse ~2,000 + C3 gate
+- [x] 9. Sparse gold — second half n≈1,000 × 4 anchors → cumulative sparse ~2,000 + C3 gate
 
 ### Phase E — Dense/cal expansion (cap $15, checkpoint C4)
 
-- [ ] 10. Dense/cal slice n≈300 held-out × eligible-except-K3 + threshold-tune split emission → `data/gold_dense.jsonl` + `data/threshold_tune.jsonl` + C4 gate
+- [x] 10. Dense/cal slice n≈300 held-out × eligible-except-K3 + threshold-tune split emission → `data/gold_dense.jsonl` + `data/threshold_tune.jsonl` + C4 gate
 
 ### Phase F — Calibration unlock attempt (cap $15, checkpoint C5)
 
-- [ ] 11. Dense/cal extension toward n_cal > 1,000 → isotonic unlock if n reached, else honest Platt + C5 gate
+- [x] 11. Dense/cal extension toward n_cal > 1,000 → isotonic unlock if n reached, else honest Platt + C5 gate
 
 ### Phase G — K3 onboarding (cap $30 across two $15 tranches, checkpoint C6)
 

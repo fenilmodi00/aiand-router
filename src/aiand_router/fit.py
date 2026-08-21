@@ -14,10 +14,12 @@ from typing import Any
 import random
 
 from .router import _text, estimate_tokens
+from .metrics import ece_equal_mass, ece_equal_width
 from .scorer import (
     BINS,
     _bilinear_z,
     _gbdt_z,
+    _isotonic_lookup,
     _query_latent,
     featurize,
     featurize_bilinear,
@@ -413,6 +415,7 @@ def fit_scorer(
     bilinear_distill_latent_dim: int = 0,
     bilinear_ridge_l2: float = 0.05,
     noise_alpha: float = 0.0,
+    calibrator: str = "auto",
 ) -> None:
     gold = _jsonl_rows(gold_path)
     silver = _jsonl_rows(silver_path) if silver_path and silver_path.exists() else []
@@ -576,13 +579,32 @@ def fit_scorer(
             zs_cal.append(ic + sum(w[i] * x[i] for i in range(len(w))))
         ys_cal.append(1.0 if row.get("success") else 0.0)
     n_cal = len(zs_cal)
-    if n_cal <= 1000:
-        a, b = _fit_platt(zs_cal, ys_cal)
-        calibrator: dict[str, Any] = {"mode": "platt", "a": a, "b": b}
-    else:
+    cal_mode = calibrator.lower()
+    if cal_mode == "isotonic" and n_cal <= 1000:
+        raise ValueError(
+            f"calibrator=isotonic requires n_cal > 1000, got n_cal={n_cal}"
+        )
+    use_isotonic = (
+        cal_mode == "isotonic"
+        or (cal_mode == "auto" and n_cal > 1000)
+    )
+    if use_isotonic:
         table = _fit_isotonic(zs_cal, ys_cal)
-        calibrator = {"mode": "isotonic", "table": table}
+        calibrator_artifact: dict[str, Any] = {"mode": "isotonic", "table": table}
         a, b = 1.0, 0.0
+    else:
+        a, b = _fit_platt(zs_cal, ys_cal)
+        calibrator_artifact = {"mode": "platt", "a": a, "b": b}
+    # Dual ECE on the cal slice (same set the calibrator was fit on).
+    cal_pairs: list[tuple[float, float]] = []
+    for z, y in zip(zs_cal, ys_cal):
+        if use_isotonic:
+            p = _isotonic_lookup(table, z)
+        else:
+            p = 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, a * z + b))))
+        cal_pairs.append((p, y))
+    ece_w = ece_equal_width(cal_pairs, M=10) if cal_pairs else 0.0
+    ece_m = ece_equal_mass(cal_pairs, M=10) if cal_pairs else 0.0
     bin_xs: list[list[float]] = []
     bin_ys: dict[str, list[float]] = {bn: [] for bn in BINS}
     for row in silver:
@@ -617,10 +639,12 @@ def fit_scorer(
         "intercepts": intercepts,
         "bin_weights": bin_weights,
         "platt": {"a": a, "b": b},
-        "calibrator": calibrator,
+        "calibrator": calibrator_artifact,
         "n_gold": len(gold),
         "n_cal": len(cal_gold),
         "n_silver": len(silver),
+        "cal_ece_equal_width": ece_w,
+        "cal_ece_equal_mass": ece_m,
     }
     if gbdt:
         artifact["head"] = "gbdt"

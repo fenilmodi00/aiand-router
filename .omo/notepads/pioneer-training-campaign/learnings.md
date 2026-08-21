@@ -95,3 +95,11 @@ eplay_report.py: SMALL_N_ECE_MASS\ (imported but never Name-used; \ECE_MAX\ reta
 - C4 VERDICT: PASS on all 4 gates (disjoint-set 0 overlaps/3012=3012, per-model 283>=250, ECE 0.1625<0.3396, spend $3.61<=$15).
 - Spend: $32.568 -> $36.181, delta $3.613. Well within $15 cap.
 - Tests: 431 passed 4 skipped (unchanged). Scripts: run_gold_dense.bat, run_gold_tune.bat, c4_gate.py.
+
+## 2026-08-21 F11 calibrator auto-select flag + C5 gate
+- fit.py fit_scorer gained `calibrator: str = "auto"` parameter. Modes: auto (isotonic iff n_cal > 1,000 else Platt), platt (force), isotonic (force, errors if n_cal ≤ 1,000). train.py `fit` subparser gained `--calibrator auto|platt|isotonic` CLI flag.
+- n_cal = 2,264 (283 queries × 8 models, all observed) already > 1,000 → dense extension run skipped per plan step 3. No additional API queries needed.
+- Artifact now includes `cal_ece_equal_width` and `cal_ece_equal_mass` computed on the cal slice after fitting the calibrator. Uses `ece_equal_width`/`ece_equal_mass` from metrics.py (M=10).
+- Isotonic PAVA produces near-perfect equal-width ECE (0.0000132) because the step function fits the cal set exactly by construction. Equal-mass ECE 0.0209 is the more honest signal — still ≤ 0.03 bar.
+- C5 VERDICT: PASS — isotonic path, dual ECE ≤ 0.03 (ece_w=0.0000132, ece_m=0.0209). Spend delta $0.00 (offline fit, no API calls).
+- Tests: 431 passed 4 skipped (unchanged). Artifact: data/scorer_c5.json. Report: data/gold_dense_c5_report.md.

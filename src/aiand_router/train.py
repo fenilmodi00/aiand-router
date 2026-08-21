@@ -1060,6 +1060,12 @@ def main(
         default=0.0,
         help="Gaussian noise std on numeric features before fitting heads (default 0.0 = off; pure-Python, no embedding dep)",
     )
+    f.add_argument(
+        "--calibrator",
+        choices=("auto", "platt", "isotonic"),
+        default="auto",
+        help="Calibrator mode: auto=isotonic iff n_cal>1000 else Platt; platt=force; isotonic=force (errors if n_cal<=1000)",
+    )
     r = sub.add_parser("relabel")
     r.add_argument("--gold", required=True)
     r.add_argument("--queries", required=True)
@@ -1165,6 +1171,7 @@ def main(
             bilinear_distill_latent_dim=int(args.bilinear_distill_latent_dim or 0),
             bilinear_ridge_l2=float(args.bilinear_ridge_l2),
             noise_alpha=float(args.noise_alpha or 0.0),
+            calibrator=str(args.calibrator or "auto"),
         )
         if geo_report:
             print("recommended_artifact", geo_report.get("recommended_artifact"))
