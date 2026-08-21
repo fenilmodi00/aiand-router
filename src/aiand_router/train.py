@@ -364,7 +364,16 @@ async def run_teacher(
 SPARSE_ANCHORS = (FLASH, *MEASURED_TRIO)
 
 
-def _gold_ids(q: dict[str, Any], models_by_id: dict[str, Model], *, dense: bool) -> list[str]:
+def _gold_ids(
+    q: dict[str, Any], models_by_id: dict[str, Model], *, dense: bool, include_k3: bool = False
+) -> list[str]:
+    if include_k3:
+        m = models_by_id.get(K3)
+        if m is None or not m.enabled:
+            return []
+        if q.get("needs_tools") and not m.supports_tools:
+            return []
+        return [K3]
     ids = list(SPARSE_ANCHORS)
     if dense:
         ids = [i for i in models_by_id if i != K3 and models_by_id[i].enabled]
@@ -408,11 +417,12 @@ async def run_gold(
     cache: RequestCache,
     models_by_id: dict[str, Model],
     dense: bool = False,
+    include_k3: bool = False,
 ) -> None:
     jobs: list[tuple[list[dict[str, Any]], str, dict[str, Any]]] = []
     for q in queries:
         messages = _messages(q)
-        for model_id in _gold_ids(q, models_by_id, dense=dense):
+        for model_id in _gold_ids(q, models_by_id, dense=dense, include_k3=include_k3):
             jobs.append((messages, model_id, q))
     spend._async_lock = asyncio.Lock()
     sem = asyncio.Semaphore(_concurrency())
@@ -973,6 +983,11 @@ def main(
     g.add_argument("--limit", type=int, default=None)
     g.add_argument("--dense", action="store_true")
     g.add_argument(
+        "--include-k3",
+        action="store_true",
+        help="Include K3 in the dense gold slice (default off; K3 stays excluded from sparse/dense).",
+    )
+    g.add_argument(
         "--exclude",
         action="append",
         default=[],
@@ -1201,6 +1216,9 @@ def main(
         if args.dense and not args.exclude:
             print("refusing: --dense requires --exclude so the cal slice stays disjoint", file=sys.stderr)
             return 2
+        if getattr(args, "include_k3", False) and not args.dense:
+            print("refusing: --include-k3 requires --dense (K3 is a dense-only slice)", file=sys.stderr)
+            return 2
         limit = args.limit if args.limit is not None else (DENSE_LIMIT if args.dense else SPARSE_LIMIT)
     else:
         limit = args.limit
@@ -1269,6 +1287,7 @@ def main(
                 cache=cache,
                 models_by_id=by_id,
                 dense=bool(getattr(args, "dense", False)),
+                include_k3=bool(getattr(args, "include_k3", False)),
             )
         )
         return 0
@@ -1307,6 +1326,7 @@ def main(
             cache=cache,
             models_by_id=by_id,
             dense=bool(getattr(args, "dense", False)),
+            include_k3=bool(getattr(args, "include_k3", False)),
         )
     )
     return 0

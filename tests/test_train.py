@@ -392,6 +392,78 @@ def test_dense_gold_runs_every_eligible_id_except_k3(tmp_path, monkeypatch):
             assert "success" in r and "success_tier" in r
 
 
+def test_dense_gold_include_k3_adds_k3(tmp_path, monkeypatch):
+    """--include-k3 with --dense runs K3 only (K3-only slice)."""
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    provider = FakeProvider()
+    spend = SpendLog(tmp_path / "spend.txt", 15)
+    queries = tmp_path / "q.jsonl"
+    queries.write_text(json.dumps({"prompt": "k3 slice prompt"}) + "\n", encoding="utf-8")
+    gold = tmp_path / "gold.jsonl"
+    empty = tmp_path / "none.jsonl"
+    empty.write_text("", encoding="utf-8")
+    assert (
+        main(
+            [
+                "gold",
+                "--queries",
+                str(queries),
+                "--out",
+                str(gold),
+                "--limit",
+                "1",
+                "--dense",
+                "--include-k3",
+                "--exclude",
+                str(empty),
+            ],
+            provider=provider,
+            spend=spend,
+            cache_dir=tmp_path / "cache",
+            models_path=Path("config/models.yaml"),
+        )
+        == 0
+    )
+    rows = [json.loads(line) for line in gold.read_text(encoding="utf-8").splitlines() if line.strip()]
+    models = {r["model_id"] for r in rows}
+    assert models == {K3}
+    assert len(provider.calls) == 1
+    assert provider.calls[0]["model"] == K3
+    assert provider.calls[0]["max_tokens"] == 4096
+    assert provider.calls[0]["reasoning_effort"] == "low"
+
+
+def test_include_k3_without_dense_refused(tmp_path, monkeypatch):
+    """--include-k3 without --dense is refused (K3 is dense-only)."""
+    monkeypatch.setenv(OPT_IN_ENV, "1")
+    provider = FakeProvider()
+    spend = SpendLog(tmp_path / "spend.txt", 15)
+    queries = tmp_path / "q.jsonl"
+    queries.write_text(json.dumps({"prompt": "x"}) + "\n", encoding="utf-8")
+    gold = tmp_path / "gold.jsonl"
+    assert (
+        main(
+            [
+                "gold",
+                "--queries",
+                str(queries),
+                "--out",
+                str(gold),
+                "--limit",
+                "1",
+                "--include-k3",
+            ],
+            provider=provider,
+            spend=spend,
+            cache_dir=tmp_path / "cache",
+            models_path=Path("config/models.yaml"),
+        )
+        == 2
+    )
+    assert provider.calls == []
+    assert spend.total() == 0
+
+
 def test_dense_gold_excludes_sparse_train_prompts(tmp_path, monkeypatch):
     """Dense/cal queries are disjoint from sparse train prompts used for feature fit."""
     monkeypatch.setenv(OPT_IN_ENV, "1")
