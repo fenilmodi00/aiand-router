@@ -103,3 +103,28 @@ eplay_report.py: SMALL_N_ECE_MASS\ (imported but never Name-used; \ECE_MAX\ reta
 - Isotonic PAVA produces near-perfect equal-width ECE (0.0000132) because the step function fits the cal set exactly by construction. Equal-mass ECE 0.0209 is the more honest signal — still ≤ 0.03 bar.
 - C5 VERDICT: PASS — isotonic path, dual ECE ≤ 0.03 (ece_w=0.0000132, ece_m=0.0209). Spend delta $0.00 (offline fit, no API calls).
 - Tests: 431 passed 4 skipped (unchanged). Artifact: data/scorer_c5.json. Report: data/gold_dense_c5_report.md.
+
+## 2026-08-21 G12 K3 dense slice part A (n≈150, capped )
+- Added --include-k3 flag to 	rain.py gold subparser (default off). When set with --dense, _gold_ids returns [K3] only (K3-only slice, not K3 + all others). Without --dense, refused with exit code 2. Flag-off behavior is byte-identical to previous (K3 excluded from sparse/dense).
+- Run: --split promotion-holdout --dense --include-k3 --limit 150 --exclude data/gold_sparse.jsonl → 150 K3-only cells, all in promotion-holdout split, zero leakage into sparse/dense ids.
+- Cost: projected .90 (150 × 4096 out × .50/1M + 150 × ~500 in × .00/1M). Actual spend delta .30 — K3 returned shorter completions than the 4096 cap. Well under  cap.
+- Spend before: .181042, after: .485095. BUDGET_LIMIT_USD=51.181.
+- QA: 150 rows (≥130), all model_id==K3, all dense==True, all in promotion-holdout, 0 unobserved/429, spend delta .30 ≤ .
+- Tests: 433 passed 4 skipped (2 new: test_dense_gold_include_k3_adds_k3, test_include_k3_without_dense_refused).
+- Artifact: data/gold_k3_part_a.jsonl (gitignored). Report: data/gold_k3_c6a_report.md (gitignored). Batch: scripts/run_gold_k3_part_a.bat.
+- Commit: 191bae1.
+- Feeds G13 (K3 slice B → n≥300 + ceiling re-probe + C6 gate).
+
+## 2026-08-21 H14 fit scorer (logistic+GBDT, Brier winner, K3 calibrated, APGR curve)
+- Merged gold_sparse (9156) + gold_k3 (290) into data/gold_combined.jsonl (9446 rows). CRITICAL: gold_k3 rows have `"dense": true` — if left in, fit_scorer puts them in tagged_cal (not train) when --cal is provided, silently dropping K3 from training. Stripped `dense` key from K3 rows so they become train gold.
+- Ran fit_scorer twice via CLI (AIAND_TRAIN=1, PYTHONPATH=src): logistic (no --gbdt) and GBDT (--gbdt). Both with --gold gold_combined --cal gold_dense --silver silver --calibrator auto. Both produced isotonic calibrator (n_cal=2264 > 1000).
+- Brier on held-out cal slice (gold_dense, 2264 rows): logistic 0.048943 vs GBDT 0.056879. Logistic wins (lower Brier). Tie-break rule: logistic (simpler) — not needed here, logistic won outright.
+- Post-processed winner artifact: added `label=bootstrap_partial`, `k3_prior=calibrated` (was `silver_only`), `features` list (16 names matching featurize()), `fit_summary` block with Brier numbers + winner. `not_spec_floors=True` preserved.
+- K3 now has fitted logistic weights (intercept=1.0352) — no longer silver-only prior. K3 p_success base-rate=0.7982 from 290 gold rows.
+- APGR from requests.jsonl: None (undefined) — both premium and kimi baselines have 100% accuracy (5/5 each), so AUC strong == weak. Curve section still emitted with 3 points (0.0→1.0, 0.5→0.5, 1.0→1.0). Acceptable: APGR guard triggered correctly.
+- ECE: logistic equal-width 0.0017, equal-mass 0.0116. Both well under 0.05 bar.
+- check_scorer_fit.py: 23 assertions, all pass. Added: 4-bin check, calibrator mode vs n_cal, k3_prior=calibrated, label=bootstrap_partial, features list, weights/intercepts/bin_weights keys, APGR section existence, fit_summary winner.
+- Tests: 433 passed 4 skipped (unchanged from G12). Spend: $38.038478 (unchanged, $0 — offline fit).
+- Artifacts: data/scorer.json (gitignored), data/scorer_report.md (gitignored), data/gold_combined.jsonl (gitignored). Commit: scripts/check_scorer_fit.py + plan/learnings updates.
+
+

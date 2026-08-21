@@ -61,12 +61,12 @@
 
 ### Phase G — K3 onboarding (cap $30 across two $15 tranches, checkpoint C6)
 
-- [ ] 12. K3 dense slice part A (~150 rows)
-- [ ] 13. K3 dense slice part B → K3 n ≥ 300 → re-probe oracle ceiling + C6 gate
+- [x] 12. K3 dense slice part A (~150 rows)
+- [x] 13. K3 dense slice part B → K3 n ≥ 300 → re-probe oracle ceiling + C6 gate
 
 ### Phase H — Fit → shadow → gates (remaining cap, checkpoints C7/C8)
 
-- [ ] 14. Fit scorer (BOTH logistic + GBDT, keep winner on held-out Brier) + calibration on held-out dense only → `data/scorer.json`
+- [x] 14. Fit scorer (BOTH logistic + GBDT, keep winner on held-out Brier) + calibration on held-out dense only → `data/scorer.json`
 - [ ] 15. Retune medium on threshold-tune split; write `trained_effort:` override
 - [ ] 16. Shadow run ≥100 hops (flashlight replay + any live traffic), collect `rules_cost_delta_usd` — checkpoint C7 = shadow readiness
 - [ ] 17. Bounded gate: Lite micro-slice (n=30–50) + flashlight suite, dual metric — verdict `bounded_check_only`
