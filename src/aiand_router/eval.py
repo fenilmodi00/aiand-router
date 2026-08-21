@@ -45,7 +45,7 @@ def run_eval(client: Any, api_key: str, spec: dict[str, Any], log_path: Path | N
             response.raise_for_status()
     return {
         "executed": list(executed),
-        "stubbed": list(spec["baselines"]["stubbed"]),
+        "stubbed": list(spec["baselines"].get("stubbed", [])),
         "cache_hits": _hit_count(log_path) - before,
     }
 
@@ -415,7 +415,9 @@ def main(argv: list[str] | None = None) -> int:
         report = report_from_log(Path(args.log))
         print(json.dumps(report, indent=2))
         spec = load_tasks()
-        print("stubbed (not executed):", ", ".join(spec["baselines"]["stubbed"]))
+        stubbed = spec["baselines"].get("stubbed", [])
+        if stubbed:
+            print("stubbed (not executed):", ", ".join(stubbed))
         return 0
 
     import httpx
@@ -425,7 +427,9 @@ def main(argv: list[str] | None = None) -> int:
         run_eval(client, args.api_key, spec, Path(args.log))
     report = report_from_log(Path(args.log))
     print(json.dumps(report, indent=2))
-    print("stubbed (not executed):", ", ".join(spec["baselines"]["stubbed"]))
+    stubbed = spec["baselines"].get("stubbed", [])
+    if stubbed:
+        print("stubbed (not executed):", ", ".join(stubbed))
     return 0
 
 

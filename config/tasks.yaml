@@ -10,12 +10,6 @@ baselines:
       model: moonshotai/kimi-k2.7-code
     adaptive:
       model: router/auto
-  stubbed:
-    - qwen-only
-    - flash-only
-    - glm-only
-    - random
-    - oracle
 
 tasks:
   - id: discover-repo

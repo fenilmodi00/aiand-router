@@ -627,7 +627,8 @@ def test_eval_runs_three_baselines_on_five_tasks_and_rereads_log(tmp_path):
     assert report["baselines"]["kimi"]["models"] == ["moonshotai/kimi-k2.7-code"]
     assert adaptive["models"] == ["deepseek-ai/deepseek-v4-flash"]
     assert "savings_pct" not in report
-    assert first["stubbed"] == ["qwen-only", "flash-only", "glm-only", "random", "oracle"]
+    assert set(first["executed"]) == {"premium", "kimi", "adaptive"}
+    assert first["stubbed"] == []
     assert first["cache_hits"] == 0
     assert second["cache_hits"] == 15
     assert "not_aiand" in report["quality_note"]
