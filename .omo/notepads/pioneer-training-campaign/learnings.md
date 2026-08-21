@@ -61,3 +61,13 @@ eplay_report.py: SMALL_N_ECE_MASS\ (imported but never Name-used; \ECE_MAX\ reta
 - Manifest: updated pool.py build_split_manifest_rows to handle n>=6500 with gate-reachable sizing (teacher 4000, sparse = remainder -4000). Regenerated via write_split_manifest(seed=0, spend_before_A=8.16) -> splits teacher-silver 4000 / sparse-train 2112 / dense-cal 300 / threshold-tune 300 / promotion-holdout 300 =7012 total, disjoint, spend_before_A 8.16 preserved. Re-shuffle of assignments is acceptable (no paid ids consumed yet; B7 guard will enforce new).
 - Coverage report regenerated: full pool cost 7012*0.0015=10.52 (full not tranche-bound), teacher-eligible 4000*0.0015=6.00 fits 8 tranche PASS, C1 now surplus 500 at 1:1 and 111 at 90pct (was shortfall 1361), C3 sparse 2112 >2000 PASS. Documented top-up note with deviation rationale.
 - Tests: updated test_split_manifest_a1.py to be pool-size dynamic (6500-7500 band), fixed test_pool_margins_b6.py to use 7012 and dynamic asserts, added test_topup_split_sizes_gate_reachable (teacher >=3800, sparse >=1800, sum==pool). Full suite 427 passed 4 skipped, spend.txt 8.16, zero network.
+
+## 2026-08-21 C8 sparse gold tranche A (n=1000 x 4 anchors)
+- Bug fix: `--limit` flag was ignored when `--split` was used in train.py gold path. The split branch read all_queries with limit=100000, filtered by split, but never applied the user-specified `--limit`. Fixed: `queries = filtered[:limit]` after split filtering (one-line fix, line ~1235).
+- Run: `AIAND_TRAIN=1 BUDGET_LIMIT_USD=38.021 python -m aiand_router.train gold --queries data/queries_spec.jsonl --split sparse-train --limit 1000 --out data/gold_sparse_part_a.jsonl`. Launched via WMI (Invoke-CimMethod Win32_Process.Create) with batch file scripts/run_gold_sparse_a.bat for detachment. Completed in ~18 minutes.
+- Results: 4000 cells (1000 queries x 4 anchors), all anchors eligible for all queries (no _gold_ids filter shortfalls). Spend delta $4.74 (cap $15). K3 rows: 0 (assert pass).
+- Per-anchor success rates: Flash 99.7%, Qwen3.6-27B 99.9%, Kimi-K2.7-Code 78.6%, DeepSeek-V4-Pro 99.4%. Kimi's lower rate is driven by weak-tier text-presence failures.
+- Tier distribution: 73.3% proxy (gateway rule), 26.7% weak (text presence), 0% verified/harness. No sparse-train queries have dump-provided tests/expected/schema, so harness labels are expectedly zero.
+- Cache resume: first ~400 queries overlapped with previous gold_sparse.jsonl (1720 rows from default SPARSE_LIMIT=400 run). Those cells served from cache (free). Merge produced 5258 unique (prompt, model_id) pairs.
+- C2 VERDICT: PASS (all 4 anchors >=800 rows, zero K3, spend $4.74 <= $15).
+- Tests: 431 passed 4 skipped (unchanged from baseline). spend.txt 27.757.

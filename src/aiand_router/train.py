@@ -1232,7 +1232,7 @@ def main(
             h = _prompt_hash(_manifest_prompt_of_row(q))
             if manifest_map.get(h) == split:
                 filtered.append(q)
-        queries = filtered
+        queries = filtered[:limit]
         if args.cmd == "gold" and getattr(args, "dense", False) and not queries:
             print("refusing: --dense --exclude left no queries to run", file=sys.stderr)
             return 2
