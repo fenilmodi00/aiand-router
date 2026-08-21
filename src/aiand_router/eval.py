@@ -50,7 +50,58 @@ def run_eval(client: Any, api_key: str, spec: dict[str, Any], log_path: Path | N
     }
 
 
-def report_from_log(log_path: Path) -> dict[str, Any]:
+def compute_apgr(auc_router: float, auc_weak: float, auc_strong: float) -> float:
+    """RouteLLM APGR = (AUC-router - AUC-weak)/(AUC-strong - AUC-weak).
+
+    Guard: strong == weak -> raise ValueError (AUC strong equals weak; APGR undefined).
+    """
+    denom = float(auc_strong) - float(auc_weak)
+    if abs(denom) < 1e-12:
+        raise ValueError("AUC strong equals weak; APGR undefined (division by zero)")
+    return (float(auc_router) - float(auc_weak)) / denom
+
+
+apgr = compute_apgr
+
+
+def auc_trapezoid(xs: list[float], ys: list[float]) -> float:
+    """Trapezoidal AUC over sorted xs. Pure stdlib."""
+    if len(xs) != len(ys) or len(xs) < 2:
+        return 0.0
+    pairs = sorted(zip(xs, ys), key=lambda p: p[0])
+    area = 0.0
+    for (x0, y0), (x1, y1) in zip(pairs, pairs[1:]):
+        area += 0.5 * (y0 + y1) * (x1 - x0)
+    return area
+
+
+def strong_pct_accuracy_curve(
+    points: list[tuple[float, float]] | list[dict[str, float]],
+) -> list[dict[str, float]]:
+    """Normalize strong% -> accuracy points for plotting.
+
+    Accepts list of (strong_pct, accuracy) tuples or dicts with
+    ``strong_pct``/``accuracy`` keys. Returns sorted list of dicts
+    ``{"strong_pct": x, "accuracy": y}`` with strong_pct in [0,1].
+    Pure stdlib, no network calls.
+    """
+    normalized: list[dict[str, float]] = []
+    for p in points:
+        if isinstance(p, dict):
+            sp = float(p.get("strong_pct", p.get("x", 0)))
+            acc = float(p.get("accuracy", p.get("y", 0)))
+        else:
+            sp, acc = float(p[0]), float(p[1])
+        normalized.append({"strong_pct": sp, "accuracy": acc})
+    normalized.sort(key=lambda d: d["strong_pct"])
+    return normalized
+
+
+# Alias for Phase H scorer_report consumption
+cost_quality_curve = strong_pct_accuracy_curve
+
+
+def report_from_log(log_path: Path, *, apgr: bool = False) -> dict[str, Any]:
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for line in log_path.read_text(encoding="utf-8").splitlines():
         row = json.loads(line)
@@ -73,10 +124,54 @@ def report_from_log(log_path: Path) -> dict[str, Any]:
             "latency_ms": sum(int(r.get("latency_ms") or 0) for r in rows),
             "models": models,
         }
-    return {
+    report: dict[str, Any] = {
         "baselines": baselines,
         "quality_note": "AA Intelligence Index scores are public priors (measured_on: not_aiand). Costs and models here are from the request log.",
     }
+    if apgr:
+        # Build cost_quality_curve only when --apgr passed (default-off = byte-identical).
+        # AUC proxy = accuracy (resolved/tasks) when cost not varying; real Phase H
+        # will call apgr()/strong_pct_accuracy_curve() directly with richer data.
+        def _acc(name: str) -> float | None:
+            b = baselines.get(name)
+            if not b or not b["tasks"]:
+                return None
+            return float(b["resolved"]) / float(b["tasks"])
+
+        acc_weak = _acc("kimi")
+        acc_strong = _acc("premium")
+        acc_router = _acc("adaptive")
+        auc_weak = acc_weak if acc_weak is not None else 0.0
+        auc_strong = acc_strong if acc_strong is not None else 0.0
+        auc_router = acc_router if acc_router is not None else 0.0
+        try:
+            apgr_val = compute_apgr(auc_router, auc_weak, auc_strong) if baselines else None
+        except ValueError:
+            apgr_val = None
+        # Curve points: strong_pct 0-> weak accuracy, 0.5-> router, 1.0-> strong
+        curve_pts: list[tuple[float, float]] = []
+        if acc_weak is not None:
+            curve_pts.append((0.0, acc_weak))
+        if acc_router is not None:
+            curve_pts.append((0.5, acc_router))
+        if acc_strong is not None:
+            curve_pts.append((1.0, acc_strong))
+        # Fallback: at least provide sorted points even for empty log
+        if not curve_pts:
+            curve_pts = [(0.0, 0.0), (1.0, 0.0)]
+        curve = strong_pct_accuracy_curve(curve_pts)
+        xs = [p["strong_pct"] for p in curve]
+        ys = [p["accuracy"] for p in curve]
+        report["cost_quality_curve"] = {
+            "apgr": apgr_val,
+            "auc_weak": auc_weak,
+            "auc_strong": auc_strong,
+            "auc_router": auc_router,
+            "curve": curve,
+            "auc_trapezoid": auc_trapezoid(xs, ys),
+            "note": "APGR = (AUC-router - AUC-weak)/(AUC-strong - AUC-weak); curve is strong% -> accuracy",
+        }
+    return report
 
 
 def _labeled_bool(val: Any) -> bool | None:
@@ -400,6 +495,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Print runbook §(a) four-bar gate verdict from log (+ optional --sessions)",
     )
     parser.add_argument("--run-tasks", action="store_true", help="Execute config/tasks.yaml baselines")
+    parser.add_argument(
+        "--apgr",
+        action="store_true",
+        default=False,
+        help="Include cost-quality curve + APGR (default off; off == byte-identical outputs)",
+    )
     args = parser.parse_args(argv)
 
     if args.gate:
@@ -412,7 +513,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if not args.run_tasks:
-        report = report_from_log(Path(args.log))
+        report = report_from_log(Path(args.log), apgr=bool(args.apgr))
         print(json.dumps(report, indent=2))
         spec = load_tasks()
         stubbed = spec["baselines"].get("stubbed", [])
@@ -425,7 +526,7 @@ def main(argv: list[str] | None = None) -> int:
     spec = load_tasks()
     with httpx.Client(base_url=args.base_url.rstrip("/"), timeout=120.0) as client:
         run_eval(client, args.api_key, spec, Path(args.log))
-    report = report_from_log(Path(args.log))
+    report = report_from_log(Path(args.log), apgr=bool(args.apgr))
     print(json.dumps(report, indent=2))
     stubbed = spec["baselines"].get("stubbed", [])
     if stubbed:

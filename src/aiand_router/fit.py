@@ -11,6 +11,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+import random
+
 from .router import _text, estimate_tokens
 from .scorer import (
     BINS,
@@ -410,6 +412,7 @@ def fit_scorer(
     bilinear_hash_seed: int = 17,
     bilinear_distill_latent_dim: int = 0,
     bilinear_ridge_l2: float = 0.05,
+    noise_alpha: float = 0.0,
 ) -> None:
     gold = _jsonl_rows(gold_path)
     silver = _jsonl_rows(silver_path) if silver_path and silver_path.exists() else []
@@ -491,6 +494,22 @@ def fit_scorer(
                         mid,
                     )
                 )
+    if noise_alpha < 0:
+        raise ValueError("noise_alpha must be >= 0")
+    if noise_alpha > 0:
+        rng = random.Random(0)
+        for xs in by_model_x.values():
+            for x in xs:
+                for i in range(len(x)):
+                    x[i] += rng.gauss(0, float(noise_alpha))
+        for idx in range(len(bilinear_cells)):
+            x, y, mid = bilinear_cells[idx]
+            jittered = [v + rng.gauss(0, float(noise_alpha)) for v in x]
+            bilinear_cells[idx] = (jittered, y, mid)
+        for idx in range(len(teacher_cells)):
+            x, y, mid = teacher_cells[idx]
+            jittered = [v + rng.gauss(0, float(noise_alpha)) for v in x]
+            teacher_cells[idx] = (jittered, y, mid)
     weights: dict[str, list[float]] = {}
     intercepts = {}
     gbdt_heads: dict[str, dict[str, Any]] = {}

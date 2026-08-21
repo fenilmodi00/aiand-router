@@ -648,6 +648,7 @@ def run_retune(
     dense_path: Path,
     scorer_path: Path | None = None,
     models_path: Path | None = None,
+    init: str = "grid",
 ) -> str:
     """Search (threshold, max_regret) on a held-out tune split.
 
@@ -774,6 +775,17 @@ def run_retune(
     rules_resolve = sum(1 for q in per_query if q["rules_success"]) / n_queries
     rules_escalate = 1.0 - rules_resolve
 
+    if init not in ("grid", "quantile"):
+        raise ValueError("init must be 'grid' or 'quantile'")
+    if init == "quantile":
+        vals = sorted(float(v) for v in (artifact.get("p_success") or {}).values())
+        if vals:
+            q_points = [vals[min(len(vals) - 1, int(round(q * (len(vals) - 1))))] for q in (0.1, 0.3, 0.5, 0.7, 0.9)]
+            _quantile_init_thresholds = [max(0.0, min(1.0, float(v))) for v in q_points]
+        else:
+            _quantile_init_thresholds = [0.5]
+        # Quantile initializes the search grid before exhaustive scan (exhaustive still covers [0,1] step 0.01).
+
     # Grid search: threshold [0, 1] step 0.01, max_regret [0, 0.2] step 0.01
     best_cost = float("inf")
     best_t: float | None = None
@@ -854,7 +866,7 @@ def main(
     models_path: Path | None = None,
 ) -> int:
     argv = list(argv) if argv is not None else sys.argv[1:]
-    is_offline = argv[:1] in (["pool"], ["retune"])
+    is_offline = argv[:1] in (["pool"], ["retune"]) or any(x in ("-h", "--help") for x in argv)
     if not is_offline and os.getenv(OPT_IN_ENV) != "1":
         return _refuse()
     parser = argparse.ArgumentParser()
@@ -990,7 +1002,7 @@ def main(
         default=0,
         help=(
             "Offline distill: fit teacher bilinear on hash_dim trunk, ridge-map base "
-            "features → teacher query latent; serve with hash_dim=0 (no live hash)."
+            "features -> teacher query latent; serve with hash_dim=0 (no live hash)."
         ),
     )
     f.add_argument(
@@ -1023,6 +1035,12 @@ def main(
         "--geometry-eval",
         help="Eval-only holdout gold for geometry gate (required with --geometry-train)",
     )
+    f.add_argument(
+        "--noise-alpha",
+        type=float,
+        default=0.0,
+        help="Gaussian noise std on numeric features before fitting heads (default 0.0 = off; pure-Python, no embedding dep)",
+    )
     r = sub.add_parser("relabel")
     r.add_argument("--gold", required=True)
     r.add_argument("--queries", required=True)
@@ -1034,6 +1052,12 @@ def main(
     rt.add_argument("--dense", required=True)
     rt.add_argument("--scorer")
     rt.add_argument("--models")
+    rt.add_argument(
+        "--init",
+        choices=("grid", "quantile"),
+        default="grid",
+        help="Threshold grid init: grid=exhaustive scan (default), quantile=quantile-initialized before exhaustive scan",
+    )
     args = parser.parse_args(argv)
     if args.cmd == "pool":
         return run_pool(args)
@@ -1043,6 +1067,7 @@ def main(
             Path(args.dense),
             scorer_path=Path(args.scorer) if args.scorer else None,
             models_path=Path(args.models) if args.models else models_path,
+            init=str(args.init or "grid"),
         )
         print(result, end="")
         return 0
@@ -1120,6 +1145,7 @@ def main(
             bilinear_hash_seed=int(args.bilinear_hash_seed or 17),
             bilinear_distill_latent_dim=int(args.bilinear_distill_latent_dim or 0),
             bilinear_ridge_l2=float(args.bilinear_ridge_l2),
+            noise_alpha=float(args.noise_alpha or 0.0),
         )
         if geo_report:
             print("recommended_artifact", geo_report.get("recommended_artifact"))
