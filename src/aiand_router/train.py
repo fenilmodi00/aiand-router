@@ -54,7 +54,6 @@ OPT_IN_ENV = "AIAND_TRAIN"
 CHEAP_TEACHER = "motif-technologies/motif-3"
 ESCALATE_TEACHER = "zai-org/glm-5.2"
 BINS = {"trivial", "standard", "hard", "frontier"}
-EXCLUDED_PREFIXES = ("qwen/", "moonshotai/", "deepseek-ai/")
 TEACHER_LIMIT = 1000
 SPARSE_LIMIT = 400
 DENSE_LIMIT = 100
@@ -65,6 +64,7 @@ MEASURED_TRIO = (
 )
 FLASH = "deepseek-ai/deepseek-v4-flash"
 K3 = "moonshotai/kimi-k3"
+TEACHER_LADDER = [FLASH, CHEAP_TEACHER, ESCALATE_TEACHER, K3]
 # Catalog min published effort (GET /v1/models). Omit → upstream default (Qwen defaults high).
 MIN_REASONING_EFFORT = {
     FLASH: "none",
@@ -253,47 +253,54 @@ async def run_teacher(
     cache: RequestCache,
     models_by_id: dict[str, Model],
 ) -> None:
-    if any(tid.startswith(prefix) for tid in (CHEAP_TEACHER, ESCALATE_TEACHER) for prefix in EXCLUDED_PREFIXES):
-        raise ValueError("teacher ids must exclude measured-trio and fallback providers")
     spend._async_lock = asyncio.Lock()
-    cap = max(1, int(len(queries) * 0.25))
-    escalated = 0
-    esc_lock = asyncio.Lock()
     sem = asyncio.Semaphore(_concurrency())
+    existing: list[dict[str, Any]] = []
+    labeled_prompts: set[str] = set()
+    if out.exists():
+        for line in out.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                r = json.loads(line)
+                if not r.get("unlabeled"):
+                    existing.append(r)
+                    labeled_prompts.add(r.get("prompt", ""))
+            except json.JSONDecodeError:
+                pass
+    pending = [q for q in queries if _prompt_of(_messages(q)) not in labeled_prompts]
+    if not pending:
+        print(f"teacher: all {len(queries)} queries already labeled, skipping", flush=True)
+        return
+    print(f"teacher: {len(pending)}/{len(queries)} pending ({len(existing)} cached)", flush=True)
 
     async def one(q: dict[str, Any]) -> dict[str, Any]:
-        nonlocal escalated
         async with sem:
             messages = _messages(q)
-            label = await _teacher_call(
-                provider, CHEAP_TEACHER, messages, cache=cache, spend=spend, models_by_id=models_by_id
-            )
-            parse_fail = label is None
-            needs_esc = True
-            if label is not None:
-                needs_esc = (
-                    label["complexity_bin"] in {"hard", "frontier"}
-                    or float(label["label_confidence"]) < 0.60
+            label = None
+            teacher_used = None
+            for tier_model in TEACHER_LADDER:
+                tier_label = await _teacher_call(
+                    provider, tier_model, messages, cache=cache, spend=spend, models_by_id=models_by_id
                 )
-            do_esc = False
-            async with esc_lock:
-                if needs_esc and (parse_fail or escalated < cap):
-                    do_esc = True
-                    if not parse_fail:
-                        escalated += 1
-            if do_esc:
-                esc = await _teacher_call(
-                    provider, ESCALATE_TEACHER, messages, cache=cache, spend=spend, models_by_id=models_by_id
-                )
-                if esc:
-                    label = esc
+                if tier_label is not None:
+                    teacher_used = tier_model
+                    confidence = float(tier_label["label_confidence"])
+                    complexity = tier_label["complexity_bin"]
+                    if confidence >= 0.60 and complexity not in {"hard", "frontier"}:
+                        label = tier_label
+                        break
+                    if tier_model == TEACHER_LADDER[-1]:
+                        label = tier_label
+                        break
+                    label = tier_label
             if not label:
                 return {"prompt": _prompt_of(messages), "unlabeled": True}
             row = {
                 "prompt": _prompt_of(messages),
                 "complexity_bin": label["complexity_bin"],
                 "p_success": label["p_success"],
-                "teacher": CHEAP_TEACHER,
+                "teacher": teacher_used or TEACHER_LADDER[0],
                 "tokens": estimate_tokens(messages),
                 "needs_tools": bool(q.get("needs_tools")),
                 "phase": str(q.get("phase") or "plan"),
@@ -303,13 +310,13 @@ async def run_teacher(
                 row["bloom_level"] = label["bloom_level"]
             return row
 
-    rows: list[dict[str, Any]] = []
-    for coro in asyncio.as_completed([one(q) for q in queries]):
+    rows: list[dict[str, Any]] = list(existing)
+    for coro in asyncio.as_completed([one(q) for q in pending]):
         rows.append(await coro)
-        if len(rows) % 10 == 0:
+        if (len(rows) - len(existing)) % 10 == 0:
             out.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
             print(
-                f"teacher {len(rows)}/{len(queries)} spend={spend.total():.4f}",
+                f"teacher {len(rows) - len(existing)}/{len(pending)} total={len(rows)} spend={spend.total():.4f}",
                 flush=True,
             )
     labeled = sum(1 for r in rows if not r.get("unlabeled"))

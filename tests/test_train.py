@@ -18,6 +18,7 @@ from aiand_router.fit import (
 from aiand_router.gold_label import _expected_match, _gold_label, _gold_success
 from aiand_router.train import (
     ESCALATE_TEACHER,
+    FLASH,
     K3,
     MIN_REASONING_EFFORT,
     OPT_IN_ENV,
@@ -95,11 +96,11 @@ def test_teacher_writes_silver_and_uses_motif_then_cache(tmp_path, monkeypatch):
     assert row["needs_tools"] is True
     assert row.get("hint_bin") == "standard"
     assert 0 <= row["p_success"]["deepseek-ai/deepseek-v4-flash"] <= 1
-    assert provider.calls[0]["model"] == MOTIF
+    assert provider.calls[0]["model"] == FLASH
     assert provider.calls[0]["temperature"] == 0
     assert provider.calls[0]["response_format"]["type"] == "json_schema"
     assert provider.calls[0]["max_completion_tokens"] == 1024
-    assert provider.calls[0].get("reasoning_effort") == "low"
+    assert provider.calls[0].get("reasoning_effort") == "none"
     first_spend = spend.total()
     assert first_spend > 0
     assert main(["teacher", "--queries", str(queries), "--out", str(out), "--limit", "1"], **kwargs) == 0
@@ -127,7 +128,7 @@ def test_parse_fail_still_escalates_after_quality_cap(tmp_path, monkeypatch):
     monkeypatch.setenv(OPT_IN_ENV, "1")
     script = []
     for _ in range(5):
-        script.extend([_ok("not json"), _ok("not json"), _label(confidence=0.9)])
+        script.extend([_ok("not json"), _ok("not json"), _ok("not json"), _ok("not json"), _label(confidence=0.9)])
     provider = FakeProvider(script)
     spend = SpendLog(tmp_path / "spend.txt", 15)
     queries = tmp_path / "q.jsonl"
