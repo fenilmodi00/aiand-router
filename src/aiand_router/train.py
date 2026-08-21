@@ -954,6 +954,12 @@ def main(
     t.add_argument("--queries", required=True)
     t.add_argument("--out", required=True)
     t.add_argument("--limit", type=int, default=TEACHER_LIMIT)
+    t.add_argument(
+        "--split",
+        choices=sorted(MANIFEST_VALID_SPLITS),
+        default=None,
+        help="manifest split to filter queries (teacher-silver|sparse-train|dense-cal|threshold-tune|promotion-holdout); filters BEFORE guard",
+    )
     g = sub.add_parser("gold")
     g.add_argument("--queries", required=True)
     g.add_argument("--out", required=True)
@@ -966,6 +972,12 @@ def main(
         help="JSONL of already-labeled queries/gold (repeatable). Drops matching prompt or instance_id.",
     )
     g.add_argument("--seed", type=int, default=0, help="Stratum sample seed after --exclude")
+    g.add_argument(
+        "--split",
+        choices=sorted(MANIFEST_VALID_SPLITS),
+        default=None,
+        help="manifest split to filter queries (teacher-silver|sparse-train|dense-cal|threshold-tune|promotion-holdout); filters BEFORE guard",
+    )
     f = sub.add_parser("fit")
     f.add_argument("--gold", required=True)
     f.add_argument("--cal")
@@ -1196,6 +1208,56 @@ def main(
         exclude_ids=blocked_ids or None,
         seed=gold_seed,
     )
+    split = getattr(args, "split", None)
+    if split is not None:
+        if split not in MANIFEST_VALID_SPLITS:
+            raise ValueError(f"split_manifest_overlap: unknown split {split!r}")
+        manifest_map = _load_manifest_map(_resolve_manifest_path(Path(args.queries), None))
+        all_queries = _read_queries(
+            Path(args.queries),
+            100000,
+            exclude=blocked or None,
+            exclude_ids=blocked_ids or None,
+            seed=gold_seed,
+        )
+        filtered: list[dict[str, Any]] = []
+        for q in all_queries:
+            h = _prompt_hash(_manifest_prompt_of_row(q))
+            if manifest_map.get(h) == split:
+                filtered.append(q)
+        queries = filtered
+        if args.cmd == "gold" and getattr(args, "dense", False) and not queries:
+            print("refusing: --dense --exclude left no queries to run", file=sys.stderr)
+            return 2
+        _guard_manifest_for_queries(
+            queries,
+            allowed_splits={split},
+            queries_path=Path(args.queries),
+        )
+        if args.cmd == "teacher":
+            asyncio.run(
+                run_teacher(
+                    queries,
+                    Path(args.out),
+                    provider=upstream,
+                    spend=spend_log,
+                    cache=cache,
+                    models_by_id=by_id,
+                )
+            )
+            return 0
+        asyncio.run(
+            run_gold(
+                queries,
+                Path(args.out),
+                provider=upstream,
+                spend=spend_log,
+                cache=cache,
+                models_by_id=by_id,
+                dense=bool(getattr(args, "dense", False)),
+            )
+        )
+        return 0
     if args.cmd == "gold" and args.dense and not queries:
         print("refusing: --dense --exclude left no queries to run", file=sys.stderr)
         return 2

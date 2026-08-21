@@ -61,11 +61,11 @@ def test_metadata_spend_before():
     assert meta["total"] == pool_n
     assert 6500 <= meta["total"] <= 7500
     assert meta["seed"] == 0
-    # data/spend.txt stays single float line 8.16
+    # data/spend.txt stays single float line >= spend_before_A (paid tranches may increase it)
     spend_raw = Path("data/spend.txt").read_text(encoding="utf-8")
-    assert spend_raw.strip() == "8.16"
-    assert spend_raw.count("\n") == 1 or spend_raw.strip().count("\n") == 0
     assert spend_raw.strip().replace(".", "", 1).isdigit()
+    assert float(spend_raw.strip()) >= 8.16
+    assert spend_raw.count("\n") == 1 or spend_raw.strip().count("\n") == 0
 
 
 def test_deterministic_rerun():
