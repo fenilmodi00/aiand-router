@@ -1,0 +1,3 @@
+# Prototype demo is MET; production Fireworks–Pioneer parity is still a compute ladder
+
+The user now has an honest split: reframed prototype/demo bar is **MET** (shadow hard-logistic, session-gold path 10/12, Modal/sb-cli adapter wired), while **production** parity remains incomplete. Fresh unpaid replay on `data/scorer-hard-logistic.json` / gold-verified: rank_auc≈0.754, trained succ≈0.112 vs rules≈0.022, ship rcd≈+0.000687, `production_parity=false`. Overlay t=0.15 clears rcd with succ≈0.090 (shadow-only). Full parity is achievable with Modal + paid dual-policy gold toward n≥300 — not claimed as done. Lesson `0007-prototype-to-parity.html` + card `reference/prototype-parity-metrics.html` lock SAFE pitch/Q&A wording; do not re-teach “parity already shipped.”

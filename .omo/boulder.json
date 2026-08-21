@@ -1,0 +1,83 @@
+{
+  "schema_version": 2,
+  "active_work_id": "pioneer-capacity-01f2cdb2",
+  "works": {
+    "pioneer-capacity-68f3b11c": {
+      "work_id": "pioneer-capacity-68f3b11c",
+      "active_plan": "D:\\aiand-router\\.omo\\plans\\pioneer-capacity.md",
+      "plan_name": "pioneer-capacity",
+      "status": "active",
+      "started_at": "2026-08-15T13:16:33.097Z",
+      "updated_at": "2026-08-15T13:16:33.097Z",
+      "session_ids": [
+        "opencode:ses_ffa6edd27ffeh95MyXfoMX9xvp"
+      ],
+      "session_origins": {
+        "opencode:ses_ffa6edd27ffeh95MyXfoMX9xvp": "direct"
+      },
+      "agent": "sisyphus",
+      "task_sessions": {}
+    },
+    "pioneer-capacity-b27064ab": {
+      "work_id": "pioneer-capacity-b27064ab",
+      "active_plan": "D:\\aiand-router\\.omo\\plans\\pioneer-capacity.md",
+      "plan_name": "pioneer-capacity",
+      "status": "active",
+      "started_at": "2026-08-15T13:16:33.142Z",
+      "updated_at": "2026-08-15T13:16:33.142Z",
+      "session_ids": [
+        "opencode:ses_ffa6edd27ffeh95MyXfoMX9xvp"
+      ],
+      "session_origins": {
+        "opencode:ses_ffa6edd27ffeh95MyXfoMX9xvp": "direct"
+      },
+      "agent": "sisyphus",
+      "task_sessions": {}
+    },
+    "pioneer-capacity-49afafa5": {
+      "work_id": "pioneer-capacity-49afafa5",
+      "active_plan": "D:\\aiand-router\\.omo\\plans\\pioneer-capacity.md",
+      "plan_name": "pioneer-capacity",
+      "status": "active",
+      "started_at": "2026-08-15T13:16:45.940Z",
+      "updated_at": "2026-08-15T13:16:45.940Z",
+      "session_ids": [
+        "opencode:ses_ffa6edd27ffeh95MyXfoMX9xvp"
+      ],
+      "session_origins": {
+        "opencode:ses_ffa6edd27ffeh95MyXfoMX9xvp": "direct"
+      },
+      "agent": "sisyphus",
+      "task_sessions": {}
+    },
+    "pioneer-capacity-01f2cdb2": {
+      "work_id": "pioneer-capacity-01f2cdb2",
+      "active_plan": "D:\\aiand-router\\.omo\\plans\\pioneer-capacity.md",
+      "plan_name": "pioneer-capacity",
+      "status": "active",
+      "started_at": "2026-08-15T13:16:45.953Z",
+      "updated_at": "2026-08-15T13:16:45.953Z",
+      "session_ids": [
+        "opencode:ses_ffa6edd27ffeh95MyXfoMX9xvp"
+      ],
+      "session_origins": {
+        "opencode:ses_ffa6edd27ffeh95MyXfoMX9xvp": "direct"
+      },
+      "agent": "sisyphus",
+      "task_sessions": {}
+    }
+  },
+  "active_plan": "D:\\aiand-router\\.omo\\plans\\pioneer-capacity.md",
+  "started_at": "2026-08-15T13:16:45.953Z",
+  "status": "active",
+  "updated_at": "2026-08-15T13:16:45.953Z",
+  "session_ids": [
+    "opencode:ses_ffa6edd27ffeh95MyXfoMX9xvp"
+  ],
+  "session_origins": {
+    "opencode:ses_ffa6edd27ffeh95MyXfoMX9xvp": "direct"
+  },
+  "plan_name": "pioneer-capacity",
+  "task_sessions": {},
+  "agent": "sisyphus"
+}

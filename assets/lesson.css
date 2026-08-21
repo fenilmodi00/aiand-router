@@ -225,6 +225,52 @@ footer {
 
 .source { font-size: 0.92rem; }
 
+.metrics {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  margin: 0.9rem 0 1.2rem;
+}
+
+.metrics th,
+.metrics td {
+  text-align: left;
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+
+.metrics th {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.metrics td.num {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.metrics tr.ok td.num { color: var(--ok); }
+.metrics tr.warn td.num { color: var(--accent); }
+
+.tag {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  padding: 0.12rem 0.4rem;
+  border-radius: 3px;
+  border: 1px solid var(--rule);
+  background: #efeae2;
+  color: var(--muted);
+}
+
+.tag.ok { border-color: #86efac; background: #ecfdf3; color: var(--ok); }
+.tag.warn { border-color: #fdba74; background: #fff7ed; color: var(--accent); }
+
 @media print {
   body { background: #fff; }
   .quiz, .rungs { break-inside: avoid; }

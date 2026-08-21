@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>0007 — Prototype to parity</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+  <article class="page">
+    <nav class="crumbs">
+      <a href="../MISSION.md">Mission</a> ·
+      <a href="../reference/prototype-parity-metrics.html">Metrics card</a> ·
+      <a href="../reference/glossary.html">Glossary</a> ·
+      <a href="./0006-ideathon-four-minute.html">Lesson 0006</a>
+    </nav>
+
+    <header>
+      <h1>Prototype works. Production parity is still a ladder.</h1>
+      <p class="lede">
+        For the Ideathon, SAFE claims need one clear split: the routing approach is a runnable
+        <em>prototype</em> — not Fireworks/Pioneer production parity yet.
+      </p>
+    </header>
+
+    <div class="callout ok">
+      <strong>Tangible win.</strong> After this page you can quote the measured accuracy numbers
+      and say, without hedging or inventing floors: <span class="tag ok">prototype MET</span>
+      · <span class="tag warn">production incomplete</span>.
+    </div>
+
+    <h2>What we did (reframed goal)</h2>
+    <p>
+      The bar moved from “match FireRouter/Pioneer as a product” to:
+      <em>with enough compute (Modal/remote eval + paid gold), this routing approach works</em>.
+      Under that bar the kit is ready.
+      Evidence: <a href="../.scratch/scorer-pioneer-lift/prototype-demo-2026-08-20.md">prototype demo kit</a>,
+      <a href="../.scratch/scorer-pioneer-lift/completion-audit-2026-08-20.md">completion audit</a>.
+    </p>
+    <ul>
+      <li>Diagnosed scorer failure (geometry / features / thresholds) and falsified dead paths.</li>
+      <li>Froze Mix1 hard-logistic as shadow serve: <code>data/scorer-hard-logistic.json</code>.</li>
+      <li>Proved session-gold path on local images (<strong>10/12</strong>) + stickiness + session_id cost join.</li>
+      <li>Wired disk-light resolve: <code>SWE_EVAL_BACKEND=modal|sb-cli|local</code> (Modal auth still pending).</li>
+    </ul>
+
+    <h2>Current accuracy (re-ran unpaid)</h2>
+    <p>
+      Frozen verified holdout, ship artifact, <code>n=89</code> prompts.
+      <code>replay_gate_pass=true</code>, <code>production_parity=false</code>, <code>not_spec_floors</code>.
+    </p>
+    <table class="metrics">
+      <thead>
+        <tr><th>Metric</th><th>Ship serve</th><th>Note</th></tr>
+      </thead>
+      <tbody>
+        <tr class="ok"><td>rank_auc</td><td class="num">≈ 0.754</td><td>Ranking quality on gold-verified</td></tr>
+        <tr class="ok"><td>trained success</td><td class="num">≈ 0.112</td><td>Proxy ≫ rules ≈ 0.022</td></tr>
+        <tr class="warn"><td>rules_cost_delta</td><td class="num">≈ +0.000687</td><td>Ship still more costly than rules</td></tr>
+        <tr><td>savings vs most expensive</td><td class="num">≈ 0.000899</td><td>Proxy only</td></tr>
+        <tr class="ok"><td>session_gold (local)</td><td class="num">10 / 12</td><td>Canary; floor is n≥300</td></tr>
+        <tr><td>joined rcd (sample)</td><td class="num">≈ −0.00162</td><td>Tiny n; not promotion</td></tr>
+        <tr class="warn"><td>cascade redirects</td><td class="num">0</td><td>Ship knobs; lane default-off</td></tr>
+      </tbody>
+    </table>
+    <p>
+      Shadow-only overlay (medium <code>t=0.15</code>): clears rcd to ≈ <strong>−0.000688</strong>, trained succ ≈ <strong>0.090</strong>.
+      Do <strong>not</strong> promote overlay or flip <code>TRAINED_PATH=trained</code>.
+      Card: <a href="../reference/prototype-parity-metrics.html">prototype-parity-metrics</a>.
+    </p>
+
+    <h2>Is full Fireworks–Pioneer parity achievable?</h2>
+    <p>
+      <strong>Yes, with compute — not yet achieved.</strong>
+      Competitors do not require a ~1TB local image farm; official SWE-bench cloud is Modal / sb-cli
+      (<a href="https://www.swebench.com/SWE-bench/faq">SWE-bench FAQ</a>).
+      Pioneer’s documented policy (complexity → calibrated P(success) → cheapest above threshold/max_regret)
+      already matches our scorer shape
+      (<a href="https://docs.pioneer.ai/concepts/router">Pioneer router</a>).
+      FireRouter is a different product shape: binary redirect vs pass-through
+      (<a href="https://docs.fireworks.ai/ecosystem/firerouter/overview">FireRouter overview</a>).
+      Our cascade seam is a dormant prototype (0 redirects at ship knobs) — not FireRouter parity.
+    </p>
+
+    <h2>Prototype → production</h2>
+    <ol class="ladder">
+      <li>
+        <span class="n">1</span>
+        <div>
+          <strong>Keep shadow serve</strong>
+          Artifact frozen. Demo unpaid replay + local 10/12 gate. No TRAINED flip.
+        </div>
+      </li>
+      <li>
+        <span class="n">2</span>
+        <div>
+          <strong>Auth Modal (or sb-cli)</strong>
+          <code>modal token new</code> → gold-patch smoke. Disk-light path:
+          <a href="../.scratch/scorer-pioneer-lift/disk-light-parity-path-2026-08-20.md">disk-light note</a>.
+        </div>
+      </li>
+      <li>
+        <span class="n">3</span>
+        <div>
+          <strong>Paid dual-policy session gold</strong>
+          Scale toward n≥300 resolved remotely. Edit context stays git/docker_cp.
+        </div>
+      </li>
+      <li>
+        <span class="n">4</span>
+        <div>
+          <strong>Re-gate cost + calibration</strong>
+          Ship rcd≤0 (or explicit overlay trade with session evidence). Then — and only then — discuss trained.
+        </div>
+      </li>
+    </ol>
+
+    <h2>Where we stopped</h2>
+    <div class="callout warn">
+      Still needed: Modal auth on this host, session floor n≥300, ship cost parity (or justified overlay),
+      calibration at scale, operator sign-off before any <code>TRAINED_PATH=trained</code>.
+      Optional: real FireRouter-class cascade product — soft-t sweeps are not that.
+      Handoff: <a href="../.scratch/scorer-pioneer-lift/operator-handoff-2026-08-20.md">operator-handoff</a>.
+    </div>
+
+    <h2>Retrieve it</h2>
+    <p>Answers are the same length on purpose. Recall, then click.</p>
+    <div class="quiz" id="quiz"></div>
+
+    <p class="source">
+      <strong>Primary source:</strong>
+      <a href="../.scratch/trained-router/research/scorer-router-fireworks-pioneer-debate.md">scorer-router-fireworks-pioneer-debate.md</a>
+      — how FireRouter vs Pioneer differ, what we got wrong, and the winning strategy.
+      External anchors:
+      <a href="https://docs.pioneer.ai/concepts/router">Pioneer Model Router</a>,
+      <a href="https://docs.fireworks.ai/ecosystem/firerouter/overview">FireRouter overview</a>,
+      <a href="https://www.swebench.com/SWE-bench/faq">SWE-bench FAQ (Modal / disk)</a>,
+      <a href="https://modal.com/docs/guide">Modal guide</a>.
+    </p>
+
+    <footer>
+      If any number, bar, or claim feels fuzzy, ask in this chat — that is the point of a teacher.
+      Print the <a href="../reference/prototype-parity-metrics.html">metrics card</a> beside your pitch notes.
+    </footer>
+  </article>
+  <script src="../assets/quiz.js"></script>
+  <script>
+    mountQuiz(document.getElementById("quiz"), [
+      {
+        prompt: "Under the reframed goal, which claim is honest today?",
+        options: [
+          { text: "Prototype bar is met" },
+          { text: "Production bar is met" },
+          { text: "Trained path is live" }
+        ],
+        answer: "Prototype bar is met",
+        ok: "Yes. Demo/prototype MET; production parity stays incomplete; serve stays shadow.",
+        no: "Production floors and TRAINED_PATH=trained are explicitly not claimed."
+      },
+      {
+        prompt: "On the ship serve knobs, rules_cost_delta is:",
+        options: [
+          { text: "Positive on ship knobs" },
+          { text: "Negative on ship knobs" },
+          { text: "Zeroed on ship knobs" }
+        ],
+        answer: "Positive on ship knobs",
+        ok: "Yes — ≈ +0.000687. Overlay t=0.15 clears it only as a shadow experiment.",
+        no: "Ship still overspends vs rules. Overlay is not the serve candidate."
+      },
+      {
+        prompt: "What still blocks production parity most?",
+        options: [
+          { text: "Session floor still short" },
+          { text: "Fireworks docs still gone" },
+          { text: "Scorer file still gone" }
+        ],
+        answer: "Session floor still short",
+        ok: "Yes. Local 10/12 ≪ n≥300; Modal/remote resolve is the disk-light unlock.",
+        no: "Research is done; hard-logistic already serves shadow. The floor is the binding gap."
+      }
+    ]);
+  </script>
+</body>
+</html>

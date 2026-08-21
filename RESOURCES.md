@@ -2,6 +2,28 @@
 
 ## Knowledge
 
+- [Fireworks: FireRouter overview](https://docs.fireworks.ai/ecosystem/firerouter/overview)
+  Official product shape: binary redirect vs pass-through, research preview. Use for: what “Fireworks parity” actually means (not multi-candidate P(success)).
+- [Fireworks: FireRouter routing preferences](https://docs.fireworks.ai/ecosystem/firerouter/routing-preferences)
+  Quality/savings dial 1–5 and conversation caching. Use for: cascade stickiness claims vs our dormant `cascade_lane`.
+- [Pioneer: Model Router concepts](https://docs.pioneer.ai/concepts/router)
+  Documented policy: complexity → calibrated P(success) → cheapest above threshold/max_regret. Use for: our scorer policy shape and effort presets.
+- [SWE-bench FAQ](https://www.swebench.com/SWE-bench/faq)
+  Docker required; `--cache_level=env` + `--clean=True` for disk; Modal for cloud eval. Use for: why a local 1TB farm is unnecessary.
+- [SWE-bench evaluation guide](https://www.swebench.com/SWE-bench/guides/evaluation)
+  Harness flags and Modal cloud path. Use for: `SWE_EVAL_BACKEND=modal` wiring.
+- [sb-cli overview](https://www.swebench.com/sb-cli)
+  Submit predictions to SWE-bench API (all on the cloud). Use for: alternate remote resolve when Modal is unavailable.
+- [Modal docs — guide](https://modal.com/docs/guide)
+  Auth (`modal setup` / token) and serverless containers. Use for: human unlock before remote session gold.
+- [Research: Scorer vs Fireworks/Pioneer debate](.scratch/trained-router/research/scorer-router-fireworks-pioneer-debate.md)
+  Primary local synthesis: architectures, failure modes, winning strategy. Use for: lesson 0007 primary source.
+- [Prototype demo kit (2026-08-20)](.scratch/scorer-pioneer-lift/prototype-demo-2026-08-20.md)
+  Reframed bar MET; unpaid demo commands; serve freeze. Use for: SAFE prototype wording.
+- [Completion audit (2026-08-20)](.scratch/scorer-pioneer-lift/completion-audit-2026-08-20.md)
+  Prototype-ready vs production-incomplete checklist. Use for: what is still blocked.
+- [Disk-light parity path](.scratch/scorer-pioneer-lift/disk-light-parity-path-2026-08-20.md)
+  Modal/sb-cli/ephemeral VM ranked options; no mass docker pull. Use for: prototype → production roadmap.
 - [Spec: Pioneer-grade trained hop](.scratch/trained-hop/spec.md)
   The contract for this cycle: shadow default, `TRAINED_PATH=trained` only after shadow looks sane, `$100` smoke is `not_spec_floors`, not Verified. Use for: any go-live decision on this repo.
 - [README — Trained path](README.md#trained-path)
@@ -37,9 +59,15 @@
 - Starter smoke prompts exist at `datasets/smoke-queries.jsonl` (48 rows). Still no production dump at teacher ≤1000 / gold ≤200.
 - No production runbook (Nginx, systemd, TLS). Intentionally out of scope for the hop spec.
 - Landing-page SWE-Bench “62% cost reduction” / “40–60% token savings” are marketing visuals — no matching measured Verified gate report in this repo to cite as fact.
+- Modal auth on this host still pending (`modal_not_configured`); no n≥300 session-gold promotion report yet.
+- FireRouter does not publish calibration/ECE; Pioneer does not publish training recipe — product parity claims cannot copy undocumented internals.
 
 ## Pitch knowledge (Mahakaathan)
 
+- [Lesson: prototype → parity](lessons/0007-prototype-to-parity.html)
+  SAFE split: prototype MET vs production incomplete + measured accuracy. Use for: Ideathon Q&A on Fireworks/Pioneer claims.
+- [Reference: prototype parity metrics](reference/prototype-parity-metrics.html)
+  One-page numbers + ladder. Use for: print beside pitch notes.
 - [Lesson: 6-minute technical fluency](lessons/0005-pitch-technical-fluency.html)
   Timed pitch + quiz on safe claims. Use for: rehearsal before judges.
 - [Reference: pitch card](reference/pitch-six-minute.html)

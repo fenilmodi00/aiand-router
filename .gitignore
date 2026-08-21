@@ -8,7 +8,15 @@
 .scratch/*.js
 .scratch/*.py
 .scratch/*.json
+.scratch/**/review-*.diff
+.scratch/**/_*.py
+.scratch/**/__pycache__/
+.omo/run-continuation/
+.omo/qa/
+logs/
 *.log
+.tmp-tavily*.json
+.tmp-tavily-raw/
 
 # python
 .venv/
