@@ -304,7 +304,8 @@ returned unchanged, so the dashboard shows the same data.
 | --------------------------------- | ---------------------------- | ------- |
 | `ROUTER_DEFAULT_STRATEGY`         | `cluster`                    | Strategy used when an installation has no persisted strategy. Change only after the policy rollout gate passes. |
 | `ROUTER_CLUSTER_VERSION`          | *(reads `artifacts/latest`)* | Pin a specific cluster artifact version (e.g. `v0.27`). |
-| `ROUTER_CLUSTER_EMBED_TIMEOUT_MS` | `200`                        | Per-request ONNX embed timeout. Increase for slower hosts. |
+| `ROUTER_CLUSTER_EMBED_TIMEOUT_MS` | `3000`                       | Per-request ONNX embed timeout. Increase for slower hosts. |
+| `ROUTER_RESPONSE_HEADER_TIMEOUT_SECONDS` | `120`               | Upstream time-to-first-byte guard for provider HTTP clients. Streaming idle/output stalls use separate knobs. |
 | `ROUTER_EMBED_ONLY_USER_MESSAGE`  | `true`                       | Feed only user-role text to the embedder. Set `false` to embed the full concatenated turn. |
 | `ROUTER_STICKY_DECISION_TTL_MS`   | `0` (disabled)               | Reuse a routing decision per API key for this many ms. |
 | `ROUTER_SESSION_PIN_ENABLED`      | `true`                       | Pin a session to its first-routed model so multi-turn conversations stay coherent. |

@@ -237,6 +237,12 @@ func TestResponsesSSEIdleTimeoutFromEnv_OverrideRespected(t *testing.T) {
 // TLSNextProto["h2"] is populated only by ConfigureTransports (ForceAttemptHTTP2
 // alone defers h2 setup to first use, leaving the map nil), so its presence
 // proves PING health checking was wired.
+// Reasoning upstreams can legitimately hold response headers for >30s on
+// non-streaming calls; the stock default must not clip them at the old 30s cap.
+func TestDefaultResponseHeaderTimeout_AccommodatesSlowReasoningTTFB(t *testing.T) {
+	assert.GreaterOrEqual(t, DefaultResponseHeaderTimeout, 120*time.Second)
+}
+
 func TestNewTransport_ConfiguresHTTP2Keepalives(t *testing.T) {
 	tr := NewTransport(10*time.Second, 10*time.Second)
 
@@ -255,7 +261,7 @@ func TestH2KeepaliveFor_BudgetFitsInsideCallerGuard(t *testing.T) {
 	}{
 		{"stock guard leaves the configured budget untouched", DefaultResponseHeaderTimeout, false},
 		{"generous guard leaves the configured budget untouched", 4 * DefaultResponseHeaderTimeout, false},
-		{"guard too short for the budget scales both halves", DefaultResponseHeaderTimeout / 3, true},
+		{"guard too short for the budget scales both halves", 10 * time.Second, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

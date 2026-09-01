@@ -138,9 +138,10 @@ func idleTimeoutFromEnv(envVar string, fallback time.Duration) time.Duration {
 }
 
 // DefaultResponseHeaderTimeout is the time-to-first-byte guard applied by
-// NewTransport. Streaming upstreams return headers immediately, so 30s is ample
-// for them; it only bites a non-streaming upstream that buffers a slow response.
-var DefaultResponseHeaderTimeout = idleTimeoutFromEnv("ROUTER_RESPONSE_HEADER_TIMEOUT_SECONDS", 30*time.Second)
+// NewTransport. Reasoning models can hold headers on non-streaming calls for
+// tens of seconds; 30s clipped hard/agentic prompts at ~30.65s in prod.
+// Streaming inactivity is still bounded by StreamBody's idle watchdog.
+var DefaultResponseHeaderTimeout = idleTimeoutFromEnv("ROUTER_RESPONSE_HEADER_TIMEOUT_SECONDS", 120*time.Second)
 
 // DefaultH2ReadIdleTimeout is how long a pooled HTTP/2 connection may sit
 // idle before the client sends a keepalive PING. Without it, Go can't
@@ -213,8 +214,8 @@ func NewTransport(dialTimeout, tlsTimeout time.Duration) *http.Transport {
 
 // NewTransportWithResponseHeaderTimeout is NewTransport with a caller-chosen
 // time-to-first-byte guard. Pass a larger value for upstreams whose first byte
-// can legitimately arrive later than 30s (e.g. gpt-5.x high-effort reasoning
-// via Responses API). Streaming inactivity is still bounded separately by
+// can legitimately arrive later than the stock default (e.g. high-effort
+// reasoning via Responses API). Streaming inactivity is still bounded separately by
 // StreamBody's idle watchdog, so this can't reintroduce an unbounded hang.
 func NewTransportWithResponseHeaderTimeout(dialTimeout, tlsTimeout, responseHeaderTimeout time.Duration) *http.Transport {
 	return newTransport(dialTimeout, tlsTimeout, responseHeaderTimeout, publicDestinationsOnly)

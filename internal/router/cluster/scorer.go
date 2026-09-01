@@ -41,7 +41,9 @@ func DefaultConfig() Config {
 	return Config{
 		TopP:           4,
 		MaxPromptChars: 1024,
-		EmbedTimeout:   1500 * time.Millisecond,
+		// Shared-CPU deploys (build.io c=0.5–1) can exceed 1.5s p95 on Jina
+		// INT8; stress-test prod saw ~2.4s /v1/route latency at the old cap.
+		EmbedTimeout: 3000 * time.Millisecond,
 	}
 }
 

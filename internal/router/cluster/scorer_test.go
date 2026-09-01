@@ -827,6 +827,16 @@ func TestScorer_ReturnsErrOnEmbedTimeout(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrClusterUnavailable))
 }
 
+// Default EmbedTimeout must admit production-class ONNX latency on shared CPU.
+// Prod stress-test saw ~2.4s /v1/route failures when the cap was 1.5s.
+func TestScorer_DefaultEmbedTimeoutAccommodatesSlowEmbed(t *testing.T) {
+	slow := &slowEmbedder{delay: 2 * time.Second, vec: makeOpusVec()}
+	s := newScorerForTest(t, slow, cfgForTest())
+
+	_, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
+	require.NoError(t, err)
+}
+
 type slowEmbedder struct {
 	vec   []float32
 	delay time.Duration

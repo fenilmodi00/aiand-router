@@ -9,8 +9,8 @@
       "required": true
     },
     "AIAND_API_KEY": {
-      "description": "AI& API key for model routing",
-      "required": true
+      "description": "Optional deploy-wide fallback ai& key. Leave unset for public BYOK mode — users log in with their own sk- key; per-user keys bill their own account.",
+      "required": false
     },
     "EXTERNAL_KEY_ENCRYPTION_KEY": {
       "description": "Tink AES-256-GCM keyset JSON for BYOK encryption",
@@ -18,7 +18,7 @@
     },
     "ROUTER_CLUSTER_VERSION": {
       "description": "Cluster artifact version to serve",
-      "default": "v0.76",
+      "default": "v0.78",
       "required": false
     },
     "OTEL_EXPORTER_OTLP_ENDPOINT": {
