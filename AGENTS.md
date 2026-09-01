@@ -1,0 +1,251 @@
+# router — AGENTS
+
+> **Mirror notice.** Verbatim sync with [CLAUDE.md](CLAUDE.md). Claude Code reads `CLAUDE.md`; Cursor + generic agents read `AGENTS.md`. **Update both together** — divergence = bug.
+
+Root guide for AI agents in the `router/` subproject. Covers cross-cutting design + the layer model. **First read for any task:** [README](README.md), then this file. Then read the `CLAUDE.md` inside the package you're editing — each subpackage has its own with focused recipes + invariants.
+
+**Deploy identity.** This tree is a **single-provider ai& (aiand)** router: `cmd/router/main.go` registers only `providers.ProviderAiand` into `providerMap` / `envKeyedProviders` / `ProviderFamilies`. Catalog rows bind solely to aiand (`AIAND_API_KEY` / `AIAND_API_URL`). `FamilyAnthropic` (`internal/providers/provider.go`) stays as the **inbound wire format** for `/v1/messages` — translated to OpenAI-compat before aiand dispatch — not a second upstream. HTTP header prefixes like `x-aiand-*` are load-bearing wire names in this codebase; they do not mean a multi-provider product surface.
+
+## Engineering principles
+
+- **Patterns of Enterprise Application Architecture** (Fowler)
+- **Designing Data-Intensive Applications** (Kleppmann)
+- **Design Patterns** (GoF)
+- **CLEAN architecture** (Martin) — especially dependency inversion
+- **DRY**
+- **Ponytail** — write the least code that works. YAGNI, stdlib first, one line before many. Skills: `ponytail`, `ponytail-review`, `ponytail-audit`, `ponytail-debt`, `ponytail-gain`, `ponytail-help` in `.agents/skills/ponytail*/`
+- **Small expert team** — explicit composition, readable wiring; reject DI containers, reflection, framework magic
+- **Concise comments, sparingly** — default to none. Only when *why* is non-obvious (hidden constraint, subtle invariant, workaround, surprising behavior). Never rehash code, never reference current task/PR/caller, no multi-paragraph. If removing wouldn't confuse, don't write.
+- **Non-tautological tests** — every test must assert behavior that breaks if prod code deleted.
+
+## Layer model and import rules
+
+Three concentric layers. Imports flow inward only.
+
+```
++-------------------------------------------------------------------+
+|  cmd/router/main.go             (composition root — wires all)    |
+|                                                                   |
+|  +-------------------------------------------------------------+  |
+|  |  internal/api/admin       (presentation: dashboard data     |  |
+|  |                            plane /v1/*, /health, /validate) |  |
+|  |  internal/api/anthropic   (/v1/messages, passthrough,       |  |
+|  |                            /v1/route)                       |  |
+|  |  internal/api/openai      (/v1/chat/completions,           |  |
+|  |                            /v1/responses, /v1/models)      |  |
+|  |  internal/api/feedback    (/router-feedback in-chat        |  |
+|  |                            command surface; the /f/<token> |  |
+|  |                            HTTP pages were removed — do    |  |
+|  |                            not remount them)                |  |
+|  |  internal/api/analytics   (/v1/analytics/* read-only        |  |
+|  |                            routing-decision export;         |  |
+|  |                            ra_ keys only)                   |  |
+|  |  internal/server          (route registration)              |  |
+|  |  internal/server/middleware (auth, timeout, cluster/embed   |  |
+|  |                              overrides, OTel timing)        |  |
+|  |  internal/postgres        (adapter: SQLC over pgx;           |  |
+|  |                            session-pin store impls)          |  |
+|  |  internal/sqlc            (generated; regenerate via        |  |
+|  |                            `make generate`)                 |  |
+|  |  internal/router/cluster  (Router impl: AvengersPro,        |  |
+|  |                            Multiversion)                    |  |
+|  |  internal/providers/*     (Client impls: openaicompat for   |  |
+|  |                            aiand; httputil shared transport)|  |
+|  |  internal/observability/otel (span emitter; adapter)        |  |
+|  |  internal/observability/apm  (second OTel/SigNoz adapter:   |  |
+|  |                            gin HTTP spans + Go runtime      |  |
+|  |                            metrics; independent of otel's   |  |
+|  |                            per-decision span emitter)       |  |
+|  |                                                             |  |
+|  |  +-------------------------------------------------------+  |  |
+|  |  |  internal/auth      (identity domain: types,          |  |  |
+|  |  |                      repos, Service.VerifyAPIKey,     |  |  |
+|  |  |                      APIKeyCache, id/hashing, Tink    |  |  |
+|  |  |                      encryptor)                       |  |  |
+|  |  |  internal/feedback  (pure HMAC signer for the         |  |  |
+|  |  |                      no-login feedback-link token;    |  |  |
+|  |  |                      no I/O)                            |  |  |
+|  |  |  internal/analytics (routing-decision export domain:  |  |  |
+|  |  |                      Decision row shape, keyset       |  |  |
+|  |  |                      cursor, schema + price book;     |  |  |
+|  |  |                      Service + Repository iface,      |  |  |
+|  |  |                      Postgres impl in                 |  |  |
+|  |  |                      internal/postgres)                |  |  |
+|  |  |  internal/proxy     (routing/dispatch service:        |  |  |
+|  |  |                      Route, ProxyMessages,            |  |  |
+|  |  |                      ProxyOpenAIChatCompletion,       |  |  |
+|  |  |                      action loop,                       |  |  |
+|  |  |                      handover adapter, cache writer,  |  |  |
+|  |  |                      session-key derivation)          |  |  |
+|  |  |  internal/router    (Router iface + Request/Decision  |  |  |
+|  |  |                      + ModelSpec/ModelRegistry)       |  |  |
+|  |  |  internal/router/cache      (semantic response cache) |  |  |
+|  |  |  internal/router/catalog    (single source of truth   |  |  |
+|  |  |                              for per-model data:      |  |  |
+|  |  |                              tier, provider bindings, |  |  |
+|  |  |                              pricing, cost math)      |  |  |
+|  |  |  internal/router/handover   (Summarizer iface +       |  |  |
+|  |  |                              envelope rewrite)        |  |  |
+|  |  |  internal/router/planner    (cache-aware EV policy)   |  |  |
+|  |  |  internal/router/sessionpin (Pin types + Store iface) |  |  |
+|  |  |  internal/router/turntype   (turn-type detector)      |  |  |
+|  |  |  internal/router/banditexplore (Router decorator:     |  |  |
+|  |  |                              bounded quality-tie-band |  |  |
+|  |  |                              exploration, env-flag    |  |  |
+|  |  |                              gated)                    |  |  |
+|  |  |  internal/providers (Client iface + types + canonical |  |  |
+|  |  |                      Provider* name constants)        |  |  |
+|  |  |  internal/translate (cross-format wire-format         |  |  |
+|  |  |                      conversion: OpenAI <-> Anthropic |  |  |
+|  |  |                      <-> Gemini; pure, no I/O)        |  |  |
+|  |  |  internal/sse       (zero-alloc SSE framing helpers)  |  |  |
+|  |  |  internal/timing    (Timing value type: per-request   |  |  |
+|  |  |                      latency stamps, no otel dep)     |  |  |
+|  |  +-------------------------------------------------------+  |  |
+|  +-------------------------------------------------------------+  |
+|                                                                   |
+|  internal/config         (env helpers: MustGet, GetOr)            |
+|  internal/observability  (slog logger + gin middleware)           |
++-------------------------------------------------------------------+
+```
+
+### Hard rules
+
+- **Layering is load-bearing.** Imports flow inward only. Inner-ring packages must not import adapter or presentation packages; adapters never import each other; only `cmd/router/main.go` constructs concrete things. Inner-ring packages may import each other (e.g. `proxy.Service.Route` returns `router.Decision`; `proxy.Service` calls `translate`, `sessionpin`, `planner`, `handover`, `cache`, `catalog`, `turntype` to compose an action).
+- **Small utility third-party libs allowed at every layer.** Layering = about *where I/O and behavior live*, not banning go.mod entries. Reach for vetted small lib (`golang-lru`, `uuid`, error helpers) before rolling own. Reject heavyweight frameworks (DI containers, ORMs, metaprogramming kits).
+- **Inner-ring packages are I/O-free.** `internal/router`, `internal/providers`, `internal/translate`, `internal/sse`, `internal/timing`, `internal/feedback`, `internal/router/{cache,catalog,handover,planner,sessionpin,turntype,banditexplore}` define interfaces, value types, pure functions only. Adding I/O method (HTTP, DB, queue, FS) = layering violation; put on `auth.Service` / `proxy.Service` or adapter subpackage. Pure-Go utility libs fine.
+- **Adapters depend only on inner ring.** `internal/postgres` may also import `internal/sqlc`. Adapters never import each other — `internal/postgres` doesn't know `internal/api/admin` etc. Note: provider adapters (`internal/providers/<name>/`) import `internal/proxy` for `OnUpstreamMeta` callback so streaming responses record usage/headers back to proxy — one of few inward-pointing adapter→inner-ring imports, intentional. `internal/server/middleware` and `internal/providers/httputil` (both adapters) stamp/read request latency via `internal/timing`'s `Timing` value type instead of importing `internal/observability/otel` directly — `Timing` used to live in `otel` and was pulled out specifically so these adapters (and `internal/providers/openaicompat`) don't need a concrete dependency on the OTel exporter adapter just to stamp a timestamp. `internal/proxy` also imports `internal/timing` (an inner-ring package importing another inner-ring package, which is allowed) to read timing back into span attributes.
+- **`internal/api/*` and `internal/server`** depend on `internal/auth` (Service handle + middleware-context types), `internal/proxy` (routing/dispatch service handle), and `internal/router` (`Router` interface + `Request`/`Decision` types — `internal/server/middleware/auth.go` and `routing_knobs_override.go` construct/read `router.Request`/`router.Decision` for header-driven overrides). May import `internal/observability` for logging, `internal/providers` for shared sentinel errors, `internal/router/cluster` for `ErrClusterUnavailable` sentinel + `DeployedModelsSource` interface (API handlers map sentinel → HTTP 503). Must not import `internal/postgres`, any concrete `internal/providers/*` adapter, or `internal/translate` directly. Concrete instances reach presentation only via constructor params from composition root.
+- **`internal/config` and `internal/observability` are leaf utilities** — must not import any other package under `internal/`. Third-party utility deps fine; today pull only stdlib + gin (request-scoped logger middleware). `internal/observability/otel` subpackage *is* an adapter (builds real OTLP exporter) and can import other internal packages; parent `internal/observability` stays a leaf.
+- **Composition happens in `cmd/router/main.go`.** Only file that constructs concrete adapters + injects them. No other place wires things. See [`cmd/CLAUDE.md`](cmd/CLAUDE.md).
+
+If wanting to import something that violates these rules, design is wrong — surface as interface in appropriate inner-ring package and implement in adapter subpackage.
+
+## Where to put new code
+
+Pick by responsibility, then read that package's `CLAUDE.md`:
+
+| Responsibility | Package | Guide |
+|---|---|---|
+| HTTP endpoint (handler + route) | `internal/api/<group>/` | [internal/api/CLAUDE.md](internal/api/CLAUDE.md) |
+| Identity / API-key logic | `internal/auth` (method on `*Service`) | [internal/auth/CLAUDE.md](internal/auth/CLAUDE.md) |
+| Routing / dispatch / per-action orchestration | `internal/proxy` (method on `*Service`) | [internal/proxy/CLAUDE.md](internal/proxy/CLAUDE.md) |
+| Feedback-link token signing (no I/O; HTTP pages removed) | `internal/feedback` | — |
+| Routing-decision export row shape / cursor / schema | `internal/analytics` | — |
+| Cross-format wire conversion (no I/O) | `internal/translate` | [internal/translate/CLAUDE.md](internal/translate/CLAUDE.md) |
+| New upstream provider | `internal/providers/<name>/` | [internal/providers/CLAUDE.md](internal/providers/CLAUDE.md) |
+| New `Router` implementation | `internal/router/<name>/` | [internal/router/CLAUDE.md](internal/router/CLAUDE.md) |
+| Cluster scorer / artifacts | `internal/router/cluster/` | [internal/router/cluster/CLAUDE.md](internal/router/cluster/CLAUDE.md) |
+| New model / per-model pricing data | `internal/router/catalog/` | [internal/router/catalog/CLAUDE.md](internal/router/catalog/CLAUDE.md) |
+| Cache-aware action routing internals | `internal/router/{planner,handover,cache,sessionpin,turntype}/` | each has its own CLAUDE.md |
+| Bounded quality-tie-band exploration | `internal/router/banditexplore/` | — |
+| New column / SQL query | `db/queries/` + `internal/postgres/` | [db/CLAUDE.md](db/CLAUDE.md), [internal/postgres/CLAUDE.md](internal/postgres/CLAUDE.md) |
+| Doc under `docs/` | `docs/` | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) |
+
+**Default rule:** put logic in the package that uses it. Only promote to a shared home (`auth`, `proxy`, `translate`, `config`, `observability`, `sse`, `timing`) when 3+ packages need the same logic.
+
+## Adding a new helper
+
+Don't, unless same logic needed in 3+ places and no plausible existing home. Canonical homes:
+
+- **Auth helpers** (token prefix, ID gen, hashing, encryption) → [`internal/auth`](internal/auth) alongside types they support.
+- **Env parsing** → [`internal/config`](internal/config).
+- **Logging / tracing** → [`internal/observability`](internal/observability) (OTel exporter in `otel` subpackage).
+- **SSE framing** → [`internal/sse`](internal/sse).
+- **Per-request latency stamps** → [`internal/timing`](internal/timing) — pure value type shared by adapters (`server/middleware`, `providers/*`) and `proxy.Service`; deliberately has zero otel dependency so those adapters don't need one just to stamp a timestamp.
+
+If new helper doesn't fit, justify new package in code comment before creating.
+
+## Conventions
+
+### Go style
+
+- **No magic strings for provider/model names.** Use named constants from `internal/providers` (`providers.ProviderAiand`, and other `Provider*` names still used by wire-family / BYOK / test fixtures) everywhere provider names appear as values — map keys, switch cases, `router.Decision.Provider` literals, log fields, test fixtures. For new model name constants, add to appropriate package before use. Bare string literals = review-blocking.
+- Keep files small. Split distinct logic into separate files, especially when shared between multiple places.
+- Avoid unnecessary nesting — flatten conditionals with early returns + combined conditions.
+- All exported symbols carry godoc starting with symbol name (`Foo does X` or `// Foo is …`).
+- Use `errors.Is` / `errors.As`, never `==` or `!=` on errors. For no-rows checks: `errors.Is(err, sql.ErrNoRows)`.
+- Use `slog`, not `fmt.Println` or `log.Print*`. **On the request path, acquire the logger from the context** — `observability.FromContext(ctx)`, or `observability.FromGin(c)` in a handler. Both inherit the correlation fields `observability.Middleware` binds at first touch (`request_id`, plus `session_key` / `client_session_id` once `bindRequestLogger` runs), which is what makes one session's logs filterable end to end. `observability.Get()` returns the global logger with **no** request correlation, so a request-path line emitted through it cannot be found when filtering by session — reserve it for genuinely off-request-path code (startup, background listeners, `SafeGo` fire-and-forget). Enforced by `TestGlobalLoggerBudget`; fix a failure by threading ctx, not by raising the budget.
+- Errors flow up. Don't swallow; don't log-and-continue on request path. The one documented exception is a **best-effort, off-request-path fire-and-forget** — always wrapped in [`observability.SafeGo`](internal/observability/safego.go) (bounded timeout, panic-recovering, logs its own failure), never a raw `go func(){}()`. Current call sites: `fireMarkUsed` ([auth/service.go](internal/auth/service.go)), `fireTelemetry` + `reportHMMOutcome` ([proxy/service.go](internal/proxy/service.go)).
+- Sentinel errors typed (`var ErrFoo = errors.New(...)`) + live in same package as function that returns them. HTTP layer maps to status codes; do not export HTTP semantics from inner-ring packages.
+- Constructor injection over package-level singletons. Inject clock (`auth.Clock = func() time.Time`), logger, HTTP client, etc.
+
+### Tests
+
+- Tests live next to code (`foo_test.go` next to `foo.go`). Prefer `<pkg>_test` external test packages so public API exercised; use internal package only when test needs unexported state (`*_internal_test.go` files in `internal/proxy` are canonical).
+- Real assertions only. Compare value code-under-test produced to value test author chose. Tautological assertions (`x == x`, "constructor returns instance", "mock called with X") rejected.
+- Use `testify/assert` + `testify/require`. Use `require.Eventually` for async (see [service_test.go](internal/auth/service_test.go) `fireMarkUsed` assertion).
+- In-memory fakes for repos/routers/provider clients are cheap + far better than mocks for unit testing Service.
+- No DB-backed integration tests in `internal/`. If need real Postgres, `docker compose` stack is runtime fixture; write scripts under `scripts/` rather than `*_test.go`.
+- **Pre-merge end-to-end smoke suite** (`smoke/`, `smoke` build tag) boots the real router against real upstream providers via a record/replay MITM proxy — catches what unit/conformance tests can't see (real provider acceptance of translated wire formats, prompt-cache accounting, SSE lifecycle). Path-gated in CI to `internal/proxy/**`, `internal/translate/**`, `internal/providers/**`, `internal/router/catalog/**`, `cmd/router/**`. Add a scenario when a change touches one of those surfaces AND the bug class needs a real upstream call to catch (wire-format translation, dispatch error classification, streaming order) — not for pure unit-testable logic already covered elsewhere. See [docs/SMOKE.md](docs/SMOKE.md) for when it runs, how to add a scenario, and how to refresh cassettes.
+
+### Logging
+
+- Log message explains in plain English what happened. Include `err` + relevant context (IDs, counts, status codes).
+- Keep log statements on single line with all args inline.
+- Use `log.With("key", value)` to attach repeated context once, rather than repeating same key-value on every call.
+- snake_case for log attribute keys (`api_key_id`, not `apiKeyID`).
+- Log `Debug` for routine ops (auth checks, repo calls); `Info` for major business events (server start, key issuance). Reserve `Error` for genuine failures needing on-call attention; auth-401 is `Debug`, not `Error`.
+- Never log raw bearer tokens or hashes. 8-char prefix + 4-char suffix (`KeyPrefix`/`KeySuffix` columns on `auth.APIKey`) are safe; full token is not.
+
+**Every line must be findable.** Correlation tags are what let an operator pull one session's full log trail; a line without them is effectively lost even though it was written. The tags are attached in two layers, and both are automatic — inherit them, never re-add by hand:
+
+| Field | Bound by | Present from |
+|---|---|---|
+| `name` | `initLogger` (from `NAME`, else `OTEL_SERVICE_NAME`, else `router`) | process start — every line |
+| `request_id` | `observability.Middleware` | first touch, before the body is read |
+| `session_key`, `api_key_id`, `ingress` | `bindRequestLogger` | after the envelope parses |
+| `client_session_id` | `bindRequestLogger` | after the envelope parses, when the client sent one |
+
+`request_id` is bound before parsing on purpose: pre-parse failures ("Failed to parse Anthropic request") used to be untagged, which made exactly the errors you go hunting for the ones you could not find. It is echoed as the `X-Request-Id` response header. An inbound `X-Request-Id` is **not** adopted — it lands in `upstream_request_id` (sanitized, length-bounded) instead, so one client reusing a value can't make `request_id` stop identifying a single request.
+
+A helper that logs on the request path takes `ctx` and calls `observability.FromContext(ctx)`. Do not add a `msg`-only log helper that reaches for `observability.Get()` internally — that silently drops every tag (this is what made upstream 4xx/5xx error bodies unfindable by session; see `httputil.LogUpstreamStatus`, which now takes `ctx` for that reason).
+
+**Never pass a bound key as a call-site attribute.** `slog` does not dedupe: re-passing `request_id`, `session_key`, `client_session_id`, `api_key_id`, `ingress`, or `name` emits the key twice and JSON consumers keep the **last** value, overwriting the bound one — so the line goes missing from exactly the search that should find it. A different-meaning value gets a distinct key (`upstream_request_id`, `rated_request_id`, `tool_name`); an identical value is simply dropped. Enforced by `TestNoReservedLogKeyShadowing`.
+
+## Things to NEVER do
+
+- **Never put customer/company/org names or private identifiers in anything committed here.** This repo is public — commit messages, branch names, PR titles/descriptions, code comments, tests, and fixtures are world-readable. This holds even when a change is motivated by one customer's investigation (e.g. a loop-break or spiral fix found from a specific org's agentic session): describe the trigger generically ("a customer", "a large agentic session", "an org's monorepo"). No org names, org IDs, account emails, internal ticket/Linear links, or verbatim private Slack/support excerpts — those stay in the private Aiand repo + Linear.
+- **Never import code from outside this subproject.** Router is standalone Go module (`module aiand/router`) with no cross-project deps. If need utility from elsewhere in monorepo, copy into appropriate `internal/` package with own godoc.
+- **Never write raw SQL outside `db/queries/`** or call `pgx.Pool` directly from anywhere except `internal/postgres/`. SQLC is only data mapper.
+- **Never reach across layers.** Handler in `internal/api/` calling `*sqlc.Queries` directly = layering violation; surface Service method instead. Repo calling another repo = layering violation; put orchestration in `auth.Service` / `proxy.Service`.
+- **Never add FKs to tables outside router's own schema.** Such tables don't exist in this project. `organization_id` + `created_by` = opaque external strings, not FKs.
+- **Never panic on request path.** Reserve `panic` for startup-time fail-fast (`config.MustGet`, cluster-scorer boot failure) where misconfiguration must abort process.
+- **Never introduce DI container, reflection-based wiring, or service locator.** Composition = plain Go function calls in `cmd/router/main.go`.
+- **Never log secrets, raw API keys, or full request bodies.** First 8 + last 4 chars on `auth.APIKey` are safe form. BYOK secrets at rest go through `auth.Encryptor` (Tink AES-256-GCM); plaintext only in memory for request lifetime.
+- **Never edit generated files** under `internal/sqlc/`. Regenerate with `make generate`. SQLC's "DO NOT EDIT" header is load-bearing.
+
+## Hosted mode (single mode)
+
+The router runs one "hosted" mode: the dashboard is mounted at `/ui/*` and its
+data plane at `/v1/*`. Users sign in with an ai& `sk-` key —
+[`internal/providers/aiand.KeyVerifier`](internal/providers/aiand) probes
+`GET /v1/models` (`AIAND_IDENTITY_URL`) and takes the org from the `X-Org-Id`
+response header (sk- keys are org-scoped; one org → one installation; key
+rotation within the org reuses it). `account.id` = installation `external_id`.
+`AIAND_API_KEY` is the deploy baseline; per-user BYOK keys bill
+Models/Playground when no deploy key is set.
+
+When adding a new dashboard endpoint, gate it in `server.Register` / the
+`dashboardRoutes` table.
+
+## Eval harness (sibling `router-internal/eval/`)
+
+The eval harness is a sibling Poetry package, **not in this repo** — lives at `router-internal/eval/` in the Aiand monorepo and runs as a Modal app. It exercises the router via staging headers; see that package's README.
+
+**Per-request router selection (server side):**
+
+- [`internal/server/middleware`](internal/server/middleware).`WithClusterVersionOverride` reads `x-aiand-cluster-version: v0.X` header + stashes version on request context. `cluster.Multiversion.Route` reads via `cluster.VersionFromContext` + dispatches to matching `Scorer`. Customer traffic (no header) always serves deployment's default version (`ROUTER_CLUSTER_VERSION` → `artifacts/latest`).
+- `WithEmbedOnlyUserMessageOverride` honors `x-aiand-embed-only-user-message: true|false` header, flipping proxy between embedding user-role text only (default) + concatenated action stream.
+
+**What to NOT do:**
+
+- **Do NOT re-introduce heuristic-vs-cluster A/B switch.** Heuristic retired because silent-fallback behavior masked cluster regressions. If need to compare strategies, ship alternate strategy as another `internal/router/X` package + promote on own merits, not as runtime fallback.
+- **Do NOT add runtime override that picks specific model directly.** Whole point is comparing *router strategies*, not per-request model overrides.
+
+## Quick reference
+
+- **"Should I commit `internal/sqlc/`?"** Yes. Dockerfile + CI builds depend on generated code being present. Run `make generate` before committing migration or query changes.
+- **"How do I run one-off query against local DB?"** `docker compose exec postgres psql -U router -d router`. Migrate step has already applied schema. (Router lives in `router` schema; pool's `AfterConnect` hook pins `search_path` so accidental writes to `public.*` are impossible.)
+- **"How do I add a model on this aiand-only deploy?"** Append a `Model` with `ProviderAiand` binding in [`internal/router/catalog/catalog.go`](internal/router/catalog/catalog.go), update the cluster bundle registry if it should be scored, run `go run ./cmd/genprices`. See [docs/adding-glm-5-3.md](docs/adding-glm-5-3.md) and [internal/router/catalog/CLAUDE.md](internal/router/catalog/CLAUDE.md).
+- **"How do I add a second upstream provider?"** This fork does not — composition root registers aiand only. Extending beyond aiand means a new `Provider*` + `APIKeyEnvVars` + `ProviderFamilies` entry, an `openaicompat` (or native) client, and a registration block in `cmd/router/main.go`. See [internal/providers/CLAUDE.md](internal/providers/CLAUDE.md).

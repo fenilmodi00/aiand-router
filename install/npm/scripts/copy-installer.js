@@ -1,0 +1,74 @@
+#!/usr/bin/env node
+// Run by `npm pack` / `npm publish` (prepack hook). Copies the canonical
+// install scripts from ../install/*.sh into the npm package root so the
+// published tarball is self-contained. Keeps a single source of truth for
+// the shell installer.
+
+const { copyFileSync, cpSync, chmodSync, mkdirSync, readdirSync, lstatSync, realpathSync } = require("node:fs");
+const path = require("node:path");
+
+const root = path.resolve(__dirname, "..");
+const installDir = path.resolve(root, "..");
+const repoRoot = path.resolve(installDir, "..");
+
+const files = ["install.sh", "uninstall.sh", "cc-statusline.sh", "codex-status.sh"];
+for (const f of files) {
+  const src = path.join(installDir, f);
+  const dst = path.join(root, f);
+  copyFileSync(src, dst);
+  chmodSync(dst, 0o755);
+  console.log(`Copied ${f}.`);
+}
+
+// Mirror install/commands/ into the package root. install.sh resolves the
+// commands dir relative to its own location, so colocating it alongside the
+// script makes the bundle self-contained for `npx aiand-router`.
+const commandsSrc = path.join(installDir, "commands");
+const commandsDst = path.join(root, "commands");
+const commandsSrcReal = realpathSync(commandsSrc);
+mkdirSync(commandsDst, { recursive: true });
+for (const f of readdirSync(commandsSrc)) {
+  if (!f.endsWith(".md")) continue;
+  const src = path.join(commandsSrc, f);
+  const stat = lstatSync(src);
+  if (stat.isSymbolicLink()) {
+    throw new Error(`Refusing to package symlinked command file: ${src}`);
+  }
+  const srcReal = realpathSync(src);
+  if (!srcReal.startsWith(commandsSrcReal + path.sep)) {
+    throw new Error(`Refusing to package command outside commands dir: ${src}`);
+  }
+  copyFileSync(srcReal, path.join(commandsDst, f));
+  console.log(`Copied commands/${f}.`);
+}
+
+// Codex discovers local skills under $CODEX_HOME/skills. Bundle the one
+// installer-owned template explicitly, refusing a source symlink just as the
+// command-file packaging path above does.
+const codexSkillSrc = path.join(installDir, "codex-skills", "disable-routing", "SKILL.md");
+const codexSkillDst = path.join(root, "codex-skills", "disable-routing", "SKILL.md");
+if (lstatSync(codexSkillSrc).isSymbolicLink()) {
+  throw new Error(`Refusing to package symlinked Codex skill: ${codexSkillSrc}`);
+}
+mkdirSync(path.dirname(codexSkillDst), { recursive: true });
+copyFileSync(codexSkillSrc, codexSkillDst);
+console.log("Copied codex-skills/disable-routing/SKILL.md.");
+
+// Bundle the pi extension so the single aiand-router package is BOTH the
+// installer and the pi-router extension: pi loads it via the "pi.extensions"
+// field in package.json, and install.sh adds `npm:aiand-router` to pi's
+// settings. Source of truth lives at install/pi-router/src.
+const piSrc = path.join(installDir, "pi-router", "src");
+const piDst = path.join(root, "pi-router", "src");
+mkdirSync(path.dirname(piDst), { recursive: true });
+cpSync(piSrc, piDst, { recursive: true });
+// package.json marks the sources as ESM (type:module); README is docs.
+for (const f of ["package.json", "README.md"]) {
+  copyFileSync(path.join(installDir, "pi-router", f), path.join(root, "pi-router", f));
+}
+console.log("Copied pi-router/ (extension).");
+
+// LICENSE lives at the repo root and applies to the whole project. npm
+// surfaces it on the package page when bundled alongside package.json.
+copyFileSync(path.join(repoRoot, "LICENSE"), path.join(root, "LICENSE"));
+console.log("Copied LICENSE.");

@@ -1,0 +1,56 @@
+package admin
+
+import (
+	"net/http"
+	"sort"
+
+	"aiand/router/internal/observability"
+	"aiand/router/internal/router/hmm"
+	"aiand/router/internal/router/policy"
+
+	"github.com/gin-gonic/gin"
+)
+
+// hmmClusterDTO is one classifier cluster with its ordered default catalog
+// roster arms and catalog model IDs (index 0 = highest serving priority).
+type hmmClusterDTO struct {
+	Cluster string `json:"cluster"`
+	// Arms are the roster-native IDs, including provider prefixes and effort
+	// suffixes. Models is the catalog-facing projection used by settings.
+	Arms   []string `json:"arms"`
+	Models []string `json:"models"`
+}
+
+type hmmRosterResponse struct {
+	Clusters     []hmmClusterDTO `json:"clusters"`
+	RosterSHA256 string          `json:"roster_sha256"`
+}
+
+// HMMRosterHandler returns the frozen HMM roster mapped from roster IDs to
+// catalog model IDs. Unauthed — read-only and non-sensitive (same as /v1/router/models).
+func HMMRosterHandler(source policy.RosterSource) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		snapshot, err := source.ClusterRoster(c.Request.Context())
+		if err != nil {
+			observability.FromGin(c).Warn("HMM roster fetch failed", "err", err)
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "hmm_roster_unavailable"})
+			return
+		}
+		clusters := make([]hmmClusterDTO, 0, len(snapshot.Clusters))
+		for cluster, arms := range snapshot.Clusters {
+			models := make([]string, 0, len(arms))
+			for _, arm := range arms {
+				models = append(models, hmm.CatalogIDForRoster(arm))
+			}
+			clusters = append(clusters, hmmClusterDTO{
+				Arms:    append([]string(nil), arms...),
+				Cluster: cluster,
+				Models:  models,
+			})
+		}
+		sort.SliceStable(clusters, func(i, j int) bool {
+			return clusters[i].Cluster < clusters[j].Cluster
+		})
+		c.JSON(http.StatusOK, hmmRosterResponse{Clusters: clusters, RosterSHA256: snapshot.RosterSHA256})
+	}
+}

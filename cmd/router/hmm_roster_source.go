@@ -1,0 +1,148 @@
+package main
+
+import (
+	"context"
+	"strings"
+	"sync"
+	"time"
+
+	"golang.org/x/sync/singleflight"
+
+	"aiand/router/internal/observability"
+	"aiand/router/internal/policyclient"
+	"aiand/router/internal/router/cluster"
+	"aiand/router/internal/router/hmm"
+)
+
+// hmmRosterTTL reuses the same freshness window as the control plane's own
+// deployed-models cache; the HMM roster only changes on a bandit-state swap.
+const hmmRosterTTL = 5 * time.Minute
+
+// hmmRosterRetryBackoff caps how often a failing refresh re-hits the sidecar
+// while stale data is being served, to avoid hammering it during an outage.
+const hmmRosterRetryBackoff = 30 * time.Second
+
+// rosterFetcher is the subset of the policy sidecar client the roster source
+// needs; satisfied by *policyclient.Client.
+type rosterFetcher interface {
+	Roster(ctx context.Context) ([]string, error)
+}
+
+// hmmRosterSource adapts HMM sidecar roster arms to deployed-model entries.
+// On fetch failure it serves the prior snapshot rather than blanking the roster.
+type hmmRosterSource struct {
+	fetch        rosterFetcher
+	fetchTimeout time.Duration
+
+	// group collapses concurrent refreshes via singleflight — exactly one
+	// writer per refresh, no clobber risk from a slow fetch racing a newer one.
+	group singleflight.Group
+
+	mu              sync.Mutex
+	cached          []cluster.DeployedEntry
+	fetchedAt       time.Time
+	haveCache       bool
+	warnedRosterKey string
+}
+
+// newHMMRosterSource initializes the cached HMM roster source.
+func newHMMRosterSource(fetch rosterFetcher, fetchTimeout time.Duration) *hmmRosterSource {
+	if fetchTimeout <= 0 {
+		fetchTimeout = policyclient.DefaultTimeout
+	}
+	return &hmmRosterSource{fetch: fetch, fetchTimeout: fetchTimeout}
+}
+
+// HMMDeployedModels returns catalog entries for the HMM roster. Serves a
+// cached snapshot when fresh; collapses concurrent refreshes via singleflight.
+// On failure with a prior snapshot returns stale; otherwise surfaces the error.
+func (s *hmmRosterSource) HMMDeployedModels(ctx context.Context) (entries []cluster.DeployedEntry, err error) {
+	s.mu.Lock()
+	if s.haveCache && time.Since(s.fetchedAt) < hmmRosterTTL {
+		cached := cloneDeployedEntries(s.cached)
+		s.mu.Unlock()
+		return cached, nil
+	}
+	s.mu.Unlock()
+
+	// singleflight collapses concurrent callers onto one refresh; the shared
+	// fetch runs under a detached context so a cancelling caller doesn't abort
+	// others. Each caller honors its own ctx via the select below.
+	ch := s.group.DoChan("roster", func() (any, error) {
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.fetchTimeout)
+		defer cancel()
+		return s.refresh(fetchCtx)
+	})
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-ch:
+		if res.Err != nil {
+			return nil, res.Err
+		}
+		return cloneDeployedEntries(res.Val.([]cluster.DeployedEntry)), nil
+	}
+}
+
+// refresh fetches the roster from the sidecar and updates the cache;
+// on failure with a prior snapshot backs off rather than erroring.
+func (s *hmmRosterSource) refresh(ctx context.Context) ([]cluster.DeployedEntry, error) {
+	// TTL check in HMMDeployedModels isn't atomic with the singleflight join;
+	// re-check under lock so a stampede costs one sidecar fetch, not one per straggler.
+	s.mu.Lock()
+	if s.haveCache && time.Since(s.fetchedAt) < hmmRosterTTL {
+		cached := cloneDeployedEntries(s.cached)
+		s.mu.Unlock()
+		return cached, nil
+	}
+	s.mu.Unlock()
+
+	rosterIDs, fetchErr := s.fetch.Roster(ctx)
+	if fetchErr != nil {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.haveCache {
+			s.fetchedAt = time.Now().Add(hmmRosterRetryBackoff - hmmRosterTTL)
+			return cloneDeployedEntries(s.cached), nil
+		}
+		return nil, fetchErr
+	}
+	s.warnRosterDiagnostics(ctx, rosterIDs)
+
+	mapped := hmm.DeployedModelsForRosterIDs(rosterIDs)
+	s.mu.Lock()
+	s.cached = mapped
+	s.fetchedAt = time.Now()
+	s.haveCache = true
+	s.mu.Unlock()
+	return mapped, nil
+}
+
+// warnRosterDiagnostics logs, once per distinct roster snapshot, arms that
+// fail catalog validation. Log-only: the mapped roster is unaffected.
+func (s *hmmRosterSource) warnRosterDiagnostics(ctx context.Context, rosterIDs []string) {
+	diagnostics := hmm.ValidateRosterIDs(rosterIDs)
+	key := ""
+	if len(diagnostics) > 0 {
+		key = strings.Join(rosterIDs, ",")
+	}
+	s.mu.Lock()
+	repeat := key == s.warnedRosterKey
+	s.warnedRosterKey = key
+	s.mu.Unlock()
+	if len(diagnostics) == 0 || repeat {
+		return
+	}
+	invalid := make([]string, 0, len(diagnostics))
+	for _, d := range diagnostics {
+		invalid = append(invalid, d.RosterID+" ("+string(d.Reason)+")")
+	}
+	observability.FromContext(ctx).Warn("hmm roster arms failed catalog validation and cannot be routed", "invalid_arms", invalid, "invalid_count", len(invalid), "roster_size", len(rosterIDs))
+}
+
+func cloneDeployedEntries(in []cluster.DeployedEntry) []cluster.DeployedEntry {
+	out := make([]cluster.DeployedEntry, len(in))
+	copy(out, in)
+	return out
+}
