@@ -52,6 +52,9 @@ func (r *cacheHitTelemetryRepo) GetTelemetryModelBreakdown(context.Context, stri
 func (r *cacheHitTelemetryRepo) GetTelemetryModelBreakdownAll(context.Context, time.Time, time.Time, string) ([]TelemetryModelBucket, error) {
 	return nil, nil
 }
+func (r *cacheHitTelemetryRepo) GetSessionCost(context.Context, string, string) (SessionCost, error) {
+	return SessionCost{}, ErrSessionCostNotFound
+}
 func (r *cacheHitTelemetryRepo) GetTelemetryBySessionSequence(context.Context, uuid.UUID, []byte, string, int) (TelemetryTurnResult, error) {
 	return TelemetryTurnResult{}, nil
 }

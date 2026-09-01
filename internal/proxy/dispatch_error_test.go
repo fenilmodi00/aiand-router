@@ -211,3 +211,16 @@ func TestClassifyDispatchError_ReasoningIncompatibleClassifiesAsRoutedModelIncom
 	assert.Equal(t, proxy.DispatchErrorRoutedModelIncompatible, cls.Kind)
 	assert.Equal(t, http.StatusBadGateway, cls.Status)
 }
+
+func TestClassifyDispatchError_ResponsesChatCompletionsBodyIs400ClientError(t *testing.T) {
+	// ProxyOpenAIResponses' exact wrapping of the ingress rejection.
+	err := fmt.Errorf("translate responses request: %w", translate.ErrResponsesChatCompletionsBody)
+
+	cls, ok := proxy.ClassifyDispatchError(err)
+
+	require.True(t, ok, "a Chat Completions body on the Responses surface must be classified")
+	assert.Equal(t, proxy.DispatchErrorResponsesChatCompletionsBody, cls.Kind)
+	assert.Equal(t, http.StatusBadRequest, cls.Status)
+	assert.Contains(t, cls.Message, "moved to 'input'")
+	assert.True(t, cls.Kind.IsClientError(), "the caller sent the wrong wire format; not an upstream failure")
+}

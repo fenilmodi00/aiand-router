@@ -317,6 +317,7 @@ See [install/README.md](install/README.md#choosing-which-models-the-router-may-p
 | `GET /v1/router/policies` &nbsp;·&nbsp; `GET /v1/router/models` &nbsp;·&nbsp; `GET /v1/router/routing-distribution` | Unauthed strategy catalog, model list, dial projection |
 | `GET /v1/router/hmm-roster`   | HMM sidecar roster, when wired          |
 | `GET /health` &nbsp;·&nbsp; `GET /readyz` &nbsp;·&nbsp; `GET /validate` &nbsp;·&nbsp; `GET /v1/version` | liveness + dependency readiness + key check + build info |
+| `GET /v1/sessions/:session_id/cost` | One session's committed cost + savings, scoped to your key |
 | `GET /v1/analytics/routing-decisions` | Raw routing decisions as cursor-paginated NDJSON, `ra_` key ([docs](docs/ANALYTICS_EXPORT.md)) |
 | `GET /v1/analytics/schema` &nbsp;·&nbsp; `GET /v1/analytics/models` | Export field dictionary + price book |
 

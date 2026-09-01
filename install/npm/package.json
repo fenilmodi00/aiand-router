@@ -1,6 +1,6 @@
 {
   "name": "aiand-router",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "One-command installer that points Claude Code, Codex, opencode, or pi at the Aiand Router. For pi it also ships the routing extension, loaded via pi.extensions.",
   "bin": {
     "aiand-router": "bin.js",

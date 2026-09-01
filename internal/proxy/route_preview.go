@@ -83,6 +83,7 @@ func (s *Service) openAIRoutingRequest(ctx context.Context, body []byte, headers
 		PromptText:                   promptText,
 		ConversationMessages:         conversationMessagesForRouting(env),
 		AvailableTools:               availableToolsForRouting(env),
+		Tools:                        toolsForRouting(env),
 		OrganizationID:               organizationID,
 		InstallationID:               installationID,
 		ClientSessionID:              clientSessionIDForRequest(ctx, env),

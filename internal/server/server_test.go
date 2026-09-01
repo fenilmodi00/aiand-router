@@ -54,6 +54,9 @@ func TestRegister_HostedMode(t *testing.T) {
 		"POST /v1/messages/count_tokens",
 		"GET /v1/models",
 		"GET /v1/models/:model",
+		// The Codex status hook reads this on hosted (managed) installs, so
+		// mounting it inside the selfhosted block would strand every customer.
+		"GET /v1/sessions/:session_id/cost",
 	}
 
 	// Hosted dashboard surface: data plane under /v1/*, login at

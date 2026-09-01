@@ -25,14 +25,14 @@ func (e *RequestEnvelope) TranslationRequirements(endpoint router.TranslationEnd
 		req.PromptCacheControl = containsKey(e.body, "cache_control")
 		req.StructuredOutput = gjson.GetBytes(e.body, "output_config.format").Exists()
 		req.Audio, req.Files = anthropicMediaRequirements(e.body)
-		req.CitationsOrSearch = containsAnyKey(e.body, "web_search", "web_fetch", "citations")
+		req.CitationsOrSearch = len(e.NativeServerTools()) > 0
 	case FormatOpenAI:
 		req.SourceFormat = router.WireFormatOpenAI
 		req.ReasoningReplay = hasContentType(e.body, "reasoning") || gjson.GetBytes(e.body, "reasoning").Exists()
 		req.StructuredOutput = gjson.GetBytes(e.body, "response_format").Exists()
 		req.UsageDetail = gjson.GetBytes(e.body, "stream_options.include_usage").Bool()
 		req.Audio, req.Files = openAIMediaRequirements(e.body)
-		req.CitationsOrSearch = containsAnyKey(e.body, "web_search", "web_search_preview", "file_search", "computer_use")
+		req.CitationsOrSearch = len(e.NativeServerTools()) > 0
 	}
 	return req
 }

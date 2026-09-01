@@ -20,23 +20,24 @@ test("normalizes Pi, dated, and context-tier model ids", () => {
 
 test("calculates savings against identical usage", () => {
 	const entry = createSavingsEntry(
-		{ requestedModel: "claude-sonnet-4-6", routedModel: "moonshotai/kimi-k2.7" },
+		{ requestedModel: "zai-org/glm-5.3", routedModel: "moonshotai/kimi-k2.7" },
 		usage,
 	);
 	assert.equal(entry.priced, true);
-	assert.equal(entry.requestedCostUsd, 3);
-	assert.equal(entry.routedCostUsd, 0.95);
-	assert.ok(Math.abs((entry.savingsUsd ?? 0) - 2.05) < 1e-12);
+	assert.equal(entry.requestedCostUsd, 1);
+	assert.equal(entry.routedCostUsd, 0.75);
+	assert.ok(Math.abs((entry.savingsUsd ?? 0) - 0.25) < 1e-12);
 });
 
 test("applies cache write and cache read multipliers", () => {
 	const entry = createSavingsEntry(
-		{ requestedModel: "claude-sonnet-4-6", routedModel: "claude-haiku-4-5" },
+		{ requestedModel: "qwen/qwen3.8-27b", routedModel: "motif-technologies/motif-3" },
 		{ input: 100, output: 50, cacheRead: 100, cacheWrite: 100 },
 	);
-	const effectiveInput = 100 + 1.25 * 100 + 0.1 * 100;
-	const expectedRequested = (effectiveInput * 3 + 50 * 15) / 1_000_000;
-	const expectedRouted = (effectiveInput * 1 + 50 * 5) / 1_000_000;
+	const requestedInput = 100 + 1.25 * 100 + 0.5 * 100;
+	const routedInput = 100 + 1.25 * 100 + 0.4 * 100;
+	const expectedRequested = (requestedInput * 0.4 + 50 * 3) / 1_000_000;
+	const expectedRouted = (routedInput * 0.5 + 50 * 2) / 1_000_000;
 	assert.equal(entry.requestedCostUsd, expectedRequested);
 	assert.equal(entry.routedCostUsd, expectedRouted);
 });
@@ -50,7 +51,7 @@ test("same-model routes have an exact zero delta without requiring a catalog pri
 
 test("unknown swapped models are explicit instead of fabricated zero savings", () => {
 	const entry = createSavingsEntry(
-		{ requestedModel: "claude-sonnet-4-6", routedModel: "private-model" },
+		{ requestedModel: "zai-org/glm-5.3", routedModel: "private-model" },
 		usage,
 	);
 	assert.equal(entry.priced, false);
@@ -61,26 +62,26 @@ test("unknown swapped models are explicit instead of fabricated zero savings", (
 
 test("negative deltas render as added cost", () => {
 	const entry = createSavingsEntry(
-		{ requestedModel: "claude-haiku-4-5", routedModel: "claude-opus-4-8" },
+		{ requestedModel: "moonshotai/kimi-k2.7", routedModel: "moonshotai/kimi-k3" },
 		usage,
 	);
-	assert.equal(formatSavings(aggregateSavings([entry])), "extra $4.00");
+	assert.equal(formatSavings(aggregateSavings([entry])), "extra $2.25");
 });
 
 test("aggregates restored entry data and rejects malformed entries", () => {
 	const first = createSavingsEntry(
-		{ requestedModel: "claude-sonnet-4-6", routedModel: "moonshotai/kimi-k2.7" },
+		{ requestedModel: "zai-org/glm-5.3", routedModel: "moonshotai/kimi-k2.7" },
 		usage,
 	);
 	const second = createSavingsEntry(
-		{ requestedModel: "claude-sonnet-4-6", routedModel: "private-model" },
+		{ requestedModel: "zai-org/glm-5.3", routedModel: "private-model" },
 		usage,
 	);
 	const aggregate = aggregateSavings([first, second]);
 	assert.equal(aggregate.pricedResponses, 1);
 	assert.equal(aggregate.unpricedResponses, 1);
 	assert.equal(aggregate.lastEntry, second);
-	assert.equal(formatSavings(aggregate), "saved $2.05 · 1 unpriced");
+	assert.equal(formatSavings(aggregate), "saved $0.25 · 1 unpriced");
 	assert.equal(isSavingsEntryData(first), true);
 	assert.equal(isSavingsEntryData({ ...first, usage: { input: -1 } }), false);
 });
@@ -102,7 +103,7 @@ test("persists routed-response savings in RPC mode", async () => {
 	const ctx = {
 		mode: "rpc",
 		hasUI: true,
-		model: { id: "claude-sonnet-4-6" },
+		model: { id: "zai-org/glm-5.3" },
 		sessionManager: { getBranch: () => [] },
 		ui: {
 			notify() {},
@@ -125,13 +126,13 @@ test("persists routed-response savings in RPC mode", async () => {
 		},
 		ctx,
 	);
-	assert.equal(statuses.at(-1), "AIAND ROUTER — moonshotai/kimi-k2.7 ← claude-sonnet-4-6 · saved —");
+	assert.equal(statuses.at(-1), "AIAND ROUTER — moonshotai/kimi-k2.7 ← zai-org/glm-5.3 · saved —");
 	await handlers.get("turn_end")?.(
 		{
 			type: "turn_end",
 			message: {
 				role: "assistant",
-				model: "claude-sonnet-4-6",
+				model: "zai-org/glm-5.3",
 				usage,
 			},
 		},
@@ -146,5 +147,5 @@ test("persists routed-response savings in RPC mode", async () => {
 	assert.equal(saved.data.routedModel, "moonshotai/kimi-k2.7");
 	assert.equal(saved.data.provider, "openrouter");
 	assert.equal(saved.data.decision, "automatic");
-	assert.equal(statuses.at(-1), "AIAND ROUTER — moonshotai/kimi-k2.7 ← claude-sonnet-4-6 · saved $2.05");
+	assert.equal(statuses.at(-1), "AIAND ROUTER — moonshotai/kimi-k2.7 ← zai-org/glm-5.3 · saved $0.25");
 });
