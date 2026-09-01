@@ -4,15 +4,16 @@
 export interface ModelPricing {
 	inputUsdPerMillion: number;
 	outputUsdPerMillion: number;
+	cacheReadMultiplier: number;
 }
 
-export const PRICING_VERSION = "catalog-sha256:3e8a76259d3419bd";
+export const PRICING_VERSION = "catalog-sha256:e2af205acebc95a7";
 
 export const MODEL_PRICING: Readonly<Record<string, ModelPricing>> = Object.freeze({
-	"deepseek-ai/deepseek-v4-flash": { inputUsdPerMillion: 0.15, outputUsdPerMillion: 0.25 },
-	"moonshotai/kimi-k2.7": { inputUsdPerMillion: 0.75, outputUsdPerMillion: 3.5 },
-	"moonshotai/kimi-k3": { inputUsdPerMillion: 3, outputUsdPerMillion: 12.5 },
-	"motif-technologies/motif-3": { inputUsdPerMillion: 0.5, outputUsdPerMillion: 2 },
-	"qwen/qwen3.8-27b": { inputUsdPerMillion: 0.4, outputUsdPerMillion: 3 },
-	"zai-org/glm-5.3": { inputUsdPerMillion: 1, outputUsdPerMillion: 4 },
+	"deepseek-ai/deepseek-v4-flash": { inputUsdPerMillion: 0.15, outputUsdPerMillion: 0.25, cacheReadMultiplier: 0.5333333333333333 },
+	"moonshotai/kimi-k2.7": { inputUsdPerMillion: 0.75, outputUsdPerMillion: 3.5, cacheReadMultiplier: 0.26666666666666666 },
+	"moonshotai/kimi-k3": { inputUsdPerMillion: 3, outputUsdPerMillion: 12.5, cacheReadMultiplier: 0.16666666666666666 },
+	"motif-technologies/motif-3": { inputUsdPerMillion: 0.5, outputUsdPerMillion: 2, cacheReadMultiplier: 0.4 },
+	"qwen/qwen3.8-27b": { inputUsdPerMillion: 0.4, outputUsdPerMillion: 3, cacheReadMultiplier: 0.5 },
+	"zai-org/glm-5.3": { inputUsdPerMillion: 1, outputUsdPerMillion: 4, cacheReadMultiplier: 0.3 },
 });

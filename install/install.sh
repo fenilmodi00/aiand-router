@@ -2898,6 +2898,15 @@ install_codex_status_script() {
 # keeps the last known routed model per session and reflects it in the terminal
 # title, so the active router remains visible between turns without injecting
 # another message into the conversation.
+#
+# Savings come from the router, not from local arithmetic. Codex records its
+# own requested model on every turn and never the served one, so the per-turn
+# pricing the Claude Code statusline does cannot be reproduced here — it would
+# price both sides of the comparison at the same model and report zero. The
+# router already sums the real thing per session, so the hook fetches
+# GET <base>/v1/sessions/<id>/cost and renders what it returns. The fetch runs
+# in a detached subshell writing a cache the NEXT turn reads, so no turn ever
+# blocks on the network, and every failure path leaves the title model-only.
 
 set -euo pipefail
 
@@ -2905,6 +2914,11 @@ state_root="${XDG_CACHE_HOME:-$HOME/.cache}/aiand-router/codex"
 helper_dir="$(cd "$(dirname "$0")" 2>/dev/null && pwd -P)"
 disabled_marker="$helper_dir/.aiand-router-disabled"
 router_badge_sentinel=$'⁣⁠⁣⁠'
+# Must stay verbatim in sync with install.sh / uninstall.sh: the endpoint read
+# below is scoped to this block so a key-shaped string elsewhere in the user's
+# config.toml is never adopted.
+codex_begin_marker="# >>> aiand-router managed (do not edit between markers) >>>"
+codex_end_marker="# <<< aiand-router managed <<<"
 
 emit_title() {
   local title="$1"
@@ -2952,6 +2966,129 @@ write_state() {
   printf 'requested_model=%s\nrouted_model=%s\n' "$requested_model" "$routed_model" >"$tmp"
   chmod 600 "$tmp"
   mv "$tmp" "$file"
+}
+
+cost_file_for() {
+  local id
+  id="$(safe_session_id "$1")" || return 1
+  printf '%s/%s.cost' "$state_root" "$id"
+}
+
+# Reads the router base URL and key out of the Codex config this install owns.
+# Resolved from the helper's own location first so a project-scope install never
+# reads (or leaks) the user-scope key: the project helper lives in the same
+# .codex directory as its config, while the user-scope helper sits in ~/.aiand
+# and reads ~/.codex. Values are scoped to the managed block so a key-shaped
+# string the user wrote elsewhere in the file is never adopted. awk, not a TOML
+# parser, because the Codex target deliberately does not require jq for config
+# reads.
+read_codex_endpoint() {
+  local config=""
+  # Project/custom installs name the helper aiand-status.sh and keep it next
+  # to their config.toml. Falling through to ~/.codex would fetch another
+  # installation's session cost with that key. The user-scope helper
+  # (codex-status.sh in ~/.aiand) has no adjacent config and owns HOME.
+  if [ -f "$helper_dir/config.toml" ]; then
+    config="$helper_dir/config.toml"
+  elif [ "$(basename "$0")" != "aiand-status.sh" ] && [ -f "$HOME/.codex/config.toml" ]; then
+    config="$HOME/.codex/config.toml"
+  fi
+  [ -n "$config" ] || return 0
+  awk -v begin="$codex_begin_marker" -v end="$codex_end_marker" '
+    $0 == begin { inblk = 1; next }
+    $0 == end   { inblk = 0; next }
+    !inblk { next }
+    match($0, /base_url[[:space:]]*=[[:space:]]*"[^"]*"/) {
+      v = substr($0, RSTART, RLENGTH)
+      sub(/^.*=[[:space:]]*"/, "", v); sub(/"$/, "", v)
+      url = v
+    }
+    match($0, /"X-Aiand-Router-Key"[[:space:]]*=[[:space:]]*"[^"]*"/) {
+      v = substr($0, RSTART, RLENGTH)
+      sub(/^.*=[[:space:]]*"/, "", v); sub(/"$/, "", v)
+      key = v
+    }
+    END { if (url != "" && key != "") printf "%s\n%s\n", url, key }
+  ' "$config" 2>/dev/null || true
+}
+
+# Kicks off a detached fetch of this session's committed cost. The result lands
+# in a cache the next turn reads; this turn renders whatever is already there.
+# Fire-and-forget on purpose — a slow or unreachable router must never stall a
+# Codex turn, and every failure simply leaves the previous cache in place.
+refresh_session_cost() {
+  local id="$1" file="$2"
+  [ "${AIAND_CODEX_STATUS_SAVINGS:-1}" = "0" ] && return 0
+  command -v curl >/dev/null 2>&1 || return 0
+
+  local endpoint base_url key
+  endpoint="$(read_codex_endpoint)" || return 0
+  base_url="$(printf '%s' "$endpoint" | sed -n 1p)"
+  key="$(printf '%s' "$endpoint" | sed -n 2p)"
+  [ -n "$base_url" ] && [ -n "$key" ] || return 0
+
+  mkdir -p "$state_root" 2>/dev/null || return 0
+  chmod 700 "$state_root" 2>/dev/null || true
+
+  (
+    exec </dev/null
+    # mkdir is the portable atomic test-and-set. A crashed holder would block
+    # refreshes forever, so a lock older than the fetch timeout is reclaimed.
+    lock="$file.lock"
+    if ! mkdir "$lock" 2>/dev/null; then
+      lock_mtime="$(stat -c %Y "$lock" 2>/dev/null || stat -f %m "$lock" 2>/dev/null)" || lock_mtime=0
+      lock_now="$(date +%s 2>/dev/null)" || lock_now=0
+      if [ "${lock_mtime:-0}" -le 0 ] || [ $(( lock_now - lock_mtime )) -le 30 ]; then
+        exit 0
+      fi
+      rm -rf "$lock" 2>/dev/null
+      mkdir "$lock" 2>/dev/null || exit 0
+    fi
+    trap 'rmdir "$lock" 2>/dev/null' EXIT
+
+    # A file:// base is the offline/test seam: curl reads it as the response
+    # body directly, so the endpoint path is meaningless for it.
+    url="${base_url%/}"
+    case "$url" in
+      file://*) ;;
+      *) url="${url%/v1}/v1/sessions/$id/cost" ;;
+    esac
+    body="$(curl -fsS --max-time 5 -H "X-Aiand-Router-Key: $key" "$url" 2>/dev/null)" || exit 0
+    # savings_usd is the router's own (requested - actual). A body without it
+    # (404, error envelope, older router) writes nothing and leaves the cache.
+    savings="$(printf '%s' "$body" | jq -r '.savings_usd // empty' 2>/dev/null)" || exit 0
+    case "$savings" in
+      ''|*[!0-9.eE+-]*) exit 0 ;;
+    esac
+    tmp="$file.tmp.$$"
+    mkdir -p "$(dirname "$file")" 2>/dev/null
+    if printf '%s' "$savings" >"$tmp" 2>/dev/null; then
+      chmod 600 "$tmp" 2>/dev/null
+      mv "$tmp" "$file" 2>/dev/null
+    fi
+    rm -f "$tmp" 2>/dev/null
+  ) >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+}
+
+# The cache holds the previous turn's fetch; the refresh below serves the next
+# one. Router telemetry is written asynchronously anyway, so a just-finished
+# turn would not be included even in a blocking read — reading first and
+# refreshing after costs a turn of freshness and buys never blocking Codex.
+savings_clause() {
+  local file="$1" raw
+  [ "${AIAND_CODEX_STATUS_SAVINGS:-1}" = "0" ] && return 0
+  [ -f "$file" ] || return 0
+  raw="$(cat "$file" 2>/dev/null)" || return 0
+  case "$raw" in
+    ''|*[!0-9.eE+-]*) return 0 ;;
+  esac
+  awk -v v="$raw" 'BEGIN{
+    v = v + 0
+    if (v < 0.005) { exit }
+    if (v < 0.01)  { printf " · saved <$0.01"; exit }
+    printf " · saved $%.2f", v
+  }' 2>/dev/null || true
 }
 
 set -e
@@ -3039,14 +3176,21 @@ if [ -n "$file" ]; then
   write_state "$file"
 fi
 
+savings=""
+cost_file=""
+if cost_file="$(cost_file_for "$session_id" 2>/dev/null)"; then
+  savings="$(savings_clause "$cost_file")"
+  refresh_session_cost "$(safe_session_id "$session_id")" "$cost_file"
+fi
+
 if [ -n "$routed_model" ] && [ -n "$requested_model" ] && [ "$routed_model" != "$requested_model" ]; then
-  title="Aiand Router · $routed_model ← $requested_model"
+  title="Aiand Router · $routed_model ← $requested_model$savings"
 elif [ -n "$routed_model" ]; then
-  title="Aiand Router · $routed_model"
+  title="Aiand Router · $routed_model$savings"
 elif [ -n "$requested_model" ]; then
-  title="Aiand Router · active ← $requested_model"
+  title="Aiand Router · active ← $requested_model$savings"
 else
-  title="Aiand Router · active"
+  title="Aiand Router · active$savings"
 fi
 emit_title "$title"
 if [ -n "$marker_model" ] || [ -n "$force_model" ]; then
@@ -3242,9 +3386,9 @@ cat > "$statusline_file" << 'STATUSLINE_EOF'
 # Renders:
 #   AIAND ROUTER — claude-sonnet-4-5 ← claude-opus-4-7 · saved $1.23 · 12.4k in / 3.1k out / 45.2k cached
 #
-# Pricing source of truth: router/eval/pricing.py. Keep these maps in lockstep
-# when prices change. Cache multipliers (1.25× / 0.1×) follow Anthropic's
-# published cache pricing and are stable across the Claude family.
+# Pricing source of truth: internal/router/catalog. Input/output prices and
+# cache-read multipliers are generated by cmd/genprices. Cache creation remains
+# at 1.25× input pending TTL-aware pricing.
 
 set -euo pipefail
 
@@ -3660,9 +3804,11 @@ normalize_model() {
   printf '%s' "$1" | sed -E 's/\[[^]]*\]$//; s/-[0-9]{8}$//'
 }
 
-# USD per 1k tokens. Generated from internal/observability/otel/pricing.go
-# (USD/1M there, ÷1000 here) by cmd/genprices. Do not hand-edit — run
-# `make generate` after updating pricing.go.
+# USD per 1k tokens. Pricing source of truth: internal/router/catalog.
+# Input/output prices and cache-read multipliers are generated by cmd/genprices
+# (USD/1M there, ÷1000 here). Do not hand-edit — run `make generate` after
+# updating the catalog. Cache creation remains at 1.25× input pending
+# TTL-aware pricing.
 # BEGIN_GENERATED_PRICES
 prices='{
   "input": {
@@ -3680,6 +3826,14 @@ prices='{
     "motif-technologies/motif-3":    0.002,
     "qwen/qwen3.8-27b":              0.003,
     "zai-org/glm-5.3":               0.004
+  },
+  "cache_read": {
+    "deepseek-ai/deepseek-v4-flash": 0.5333333333333333,
+    "moonshotai/kimi-k2.7":          0.26666666666666666,
+    "moonshotai/kimi-k3":            0.16666666666666666,
+    "motif-technologies/motif-3":    0.4,
+    "qwen/qwen3.8-27b":              0.5,
+    "zai-org/glm-5.3":               0.3
   }
 }'
 # END_GENERATED_PRICES
@@ -3764,12 +3918,9 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
   # Compute a session running total: savings across every assistant turn
   # whose marker reports a requested ≠ routed swap, plus cumulative token
   # counts across every assistant turn (rerouted or not — total work the
-  # session has done). cache_creation is priced at 1.25× input, cache_read
-  # at 0.1× — both ratios are stable across the Claude family and a no-op
-  # when the provider doesn't return those fields. Cache reads ARE included
-  # in the savings comparison: both costs apply the same 0.1× weight to
-  # cache_read_input_tokens, so the delta reflects the model-price
-  # difference on the cached portion as well.
+  # session has done). cache_creation is priced at 1.25× input; cache_read
+  # uses each model's generated catalog multiplier. Both are no-ops when the
+  # provider does not return those fields.
   #
   # The marker regex tolerates the optional "(<provider>)" segment and a
   # `[1m]` / `-YYYYMMDD` suffix on either model name so transcripts written
@@ -3802,14 +3953,17 @@ if [[ -n "$transcript_path" && -f "$transcript_path" ]]; then
       } as $t |
       (if $requested == "" or $requested == $rm then 0
        else
-         ($p.input[$rm] // null)        as $rin  | ($p.output[$rm] // null)        as $rout |
-         ($p.input[$requested] // null) as $sin  | ($p.output[$requested] // null) as $sout |
-         if ($rin == null or $rout == null or $sin == null or $sout == null) then 0
+         ($p.input[$rm] // null)             as $rin  | ($p.output[$rm] // null)             as $rout |
+         ($p.cache_read[$rm] // null)        as $rcr  |
+         ($p.input[$requested] // null)      as $sin  | ($p.output[$requested] // null) as $sout |
+         ($p.cache_read[$requested] // null) as $scr  |
+         if ($rin == null or $rout == null or $rcr == null or $sin == null or $sout == null or $scr == null) then 0
          else
-           (($t.in + 1.25 * $t.cwrt + 0.1 * $t.crd) / 1000) as $input_units |
-           ($t.out / 1000)                                  as $output_units |
-           ($input_units * $rin + $output_units * $rout)    as $routed_cost |
-           ($input_units * $sin + $output_units * $sout)    as $requested_cost |
+           (($t.in + 1.25 * $t.cwrt + $rcr * $t.crd) / 1000) as $routed_input_units |
+           (($t.in + 1.25 * $t.cwrt + $scr * $t.crd) / 1000) as $requested_input_units |
+           ($t.out / 1000)                                    as $output_units |
+           ($routed_input_units * $rin + $output_units * $rout)    as $routed_cost |
+           ($requested_input_units * $sin + $output_units * $sout) as $requested_cost |
            ($requested_cost - $routed_cost)
          end
        end) as $savings |

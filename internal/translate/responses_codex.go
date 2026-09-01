@@ -46,7 +46,7 @@ type portableCodexResponsesConverter struct {
 }
 
 func convertPortableCodexResponses(body []byte) (ResponsesConversion, error) {
-	if err := validateJSONObject(body); err != nil {
+	if err := validateResponsesRequest(body); err != nil {
 		return ResponsesConversion{}, err
 	}
 
@@ -65,7 +65,7 @@ func convertPortableCodexResponses(body []byte) (ResponsesConversion, error) {
 	}
 	converter.result.Requirements.Images = root.Get("input").Exists() && containsAnyKey(body, "image_url", "input_image")
 	converter.result.Requirements.Audio, converter.result.Requirements.Files = openAIMediaRequirements(body)
-	converter.result.Requirements.CitationsOrSearch = containsAnyKey(body, "web_search", "web_search_preview", "file_search", "computer_use")
+	converter.result.Requirements.CitationsOrSearch = len(nativeServerToolsFromBody(body, FormatOpenAI)) > 0
 	converter.result.Requirements.StructuredOutput = root.Get("text.format").Exists() || root.Get("response_format").Exists()
 
 	out := make(map[string]any)

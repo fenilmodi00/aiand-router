@@ -1575,6 +1575,22 @@ func (s *Service) MetricsSummary(ctx context.Context, installationID string, fro
 	return s.telemetry.GetTelemetrySummary(ctx, installationID, from, to)
 }
 
+// ErrSessionCostNotFound is returned for unknown, foreign, or not-yet-committed
+// sessions — deliberately indistinguishable so callers cannot probe foreign sessions.
+var ErrSessionCostNotFound = errors.New("no committed router telemetry for session")
+
+// SessionCost returns the committed router cost of one client session, scoped
+// to the calling installation.
+func (s *Service) SessionCost(ctx context.Context, installationID, sessionID string) (SessionCost, error) {
+	if s.telemetry == nil {
+		return SessionCost{}, ErrSessionCostNotFound
+	}
+	if sessionID == "" || len(sessionID) > MaxClientIdentifierLen {
+		return SessionCost{}, ErrSessionCostNotFound
+	}
+	return s.telemetry.GetSessionCost(ctx, installationID, sessionID)
+}
+
 // MetricsTimeseries returns per-bucket cost rows for the cost savings chart.
 func (s *Service) MetricsTimeseries(ctx context.Context, installationID string, from, to time.Time, granularity string) ([]TelemetryBucket, error) {
 	if s.telemetry == nil {
@@ -2569,6 +2585,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		PromptText:                   promptText,
 		ConversationMessages:         conversationMessagesForRouting(env),
 		AvailableTools:               availableToolsForRouting(env),
+		Tools:                        toolsForRouting(env),
 		HistoryTruncated:             compRes.Applied,
 		OrganizationID:               externalID,
 		// Keep this tied to client-visible history so a later feedback command
@@ -3712,9 +3729,8 @@ func (s *Service) reportPolicyOutcome(ctx context.Context, res turnLoopResult, d
 	}
 	if trainingAllowed && response != nil {
 		payload["response_body_truncated"] = response.Truncated
-		if len(response.Body) > 0 {
-			payload["response_body"] = string(response.Body)
-			payload["response_body_format"] = "client_anthropic"
+		if !response.Truncated {
+			payload["response_text"] = translate.AnthropicClientResponseText(response.Body)
 		}
 	}
 	if proxyErr != nil {
@@ -4444,6 +4460,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		PromptText:                   promptText,
 		ConversationMessages:         conversationMessagesForRouting(env),
 		AvailableTools:               availableToolsForRouting(env),
+		Tools:                        toolsForRouting(env),
 		HistoryTruncated:             compResOAI.Applied,
 		// Keep this tied to client-visible history so a later feedback command
 		// can correlate with the route even if local compaction rewrites env.

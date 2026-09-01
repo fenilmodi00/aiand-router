@@ -63,6 +63,9 @@ func (c *playgroundTelemetryCapture) GetTelemetryModelBreakdown(context.Context,
 func (c *playgroundTelemetryCapture) GetTelemetryModelBreakdownAll(context.Context, time.Time, time.Time, string) ([]proxy.TelemetryModelBucket, error) {
 	return nil, nil
 }
+func (c *playgroundTelemetryCapture) GetSessionCost(context.Context, string, string) (proxy.SessionCost, error) {
+	return proxy.SessionCost{}, proxy.ErrSessionCostNotFound
+}
 func (c *playgroundTelemetryCapture) GetTelemetryBySessionSequence(context.Context, uuid.UUID, []byte, string, int) (proxy.TelemetryTurnResult, error) {
 	return proxy.TelemetryTurnResult{}, nil
 }
