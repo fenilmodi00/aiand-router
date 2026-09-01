@@ -1,0 +1,1009 @@
+package proxy
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"aiand/router/internal/auth"
+	"aiand/router/internal/providers"
+	"aiand/router/internal/router"
+	"aiand/router/internal/router/catalog"
+)
+
+// fakeClient is a per-attempt scripted providers.Client; Proxy replays the
+// next outcome (write bytes and/or return err). Passthrough is unused.
+type fakeClient struct {
+	name     string
+	outcomes []fakeOutcome
+	calls    int
+}
+
+type fakeOutcome struct {
+	writeBytes []byte // bytes to write to w before returning
+	err        error  // nil = success
+}
+
+func (f *fakeClient) Proxy(ctx context.Context, _ router.Decision, _ providers.PreparedRequest, w http.ResponseWriter, _ *http.Request) error {
+	idx := f.calls
+	f.calls++
+	if idx >= len(f.outcomes) {
+		return fmt.Errorf("fakeClient %q: unexpected call %d", f.name, idx)
+	}
+	out := f.outcomes[idx]
+	if len(out.writeBytes) > 0 {
+		if _, werr := w.Write(out.writeBytes); werr != nil {
+			return werr
+		}
+	}
+	return out.err
+}
+
+func (f *fakeClient) Passthrough(context.Context, providers.PreparedRequest, http.ResponseWriter, *http.Request) error {
+	return providers.ErrNotImplemented
+}
+
+// newServiceWithProviders builds a minimal *Service; dispatchWithFallback
+// doesn't touch the other fields.
+func newServiceWithProviders(t *testing.T, providerMap map[string]providers.Client) *Service {
+	t.Helper()
+	s := &Service{providers: providerMap}
+	return s
+}
+
+func responseHeaderTimeoutErr(t *testing.T) error {
+	t.Helper()
+	release := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer upstream.Close()
+	defer close(release)
+
+	client := &http.Client{Transport: &http.Transport{ResponseHeaderTimeout: 10 * time.Millisecond}}
+	_, err := client.Get(upstream.URL)
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Contains(t, err.Error(), "timeout awaiting response headers")
+	return err
+}
+
+func TestDispatchWithFallback_PrimarySucceedsNoRetry(t *testing.T) {
+	primary := &fakeClient{name: "fireworks", outcomes: []fakeOutcome{{writeBytes: []byte("ok")}}}
+	fallback := &fakeClient{name: "openrouter"} // should never be called
+
+	s := newServiceWithProviders(t, map[string]providers.Client{
+		providers.ProviderAiand: primary,
+		"upstream-fallback":     fallback,
+	})
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "deepseek-ai/deepseek-v4-pro"},
+		bindings: []catalog.ProviderBinding{
+			{Provider: providers.ProviderAiand},
+			{Provider: "upstream-fallback"},
+		},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			// No Prelude phase in these tests, so Seal happens right before Proxy.
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, winnerIdx, "primary must win on success")
+	assert.Equal(t, 1, primary.calls, "primary called exactly once")
+	assert.Equal(t, 0, fallback.calls, "fallback must not be called when primary succeeds")
+	assert.Equal(t, "ok", rec.Body.String())
+}
+
+func TestDispatchWithFallback_RetriesOnRetryableBufferedError(t *testing.T) {
+	primary := &fakeClient{
+		name:     "fireworks",
+		outcomes: []fakeOutcome{{err: &providers.UpstreamErrorResponse{Status: 503, Body: []byte(`fireworks down`)}}},
+	}
+	fallback := &fakeClient{
+		name:     "openrouter",
+		outcomes: []fakeOutcome{{writeBytes: []byte("rescued")}},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{
+		providers.ProviderAiand: primary,
+		"upstream-fallback":     fallback,
+	})
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "deepseek-ai/deepseek-v4-pro"},
+		bindings: []catalog.ProviderBinding{
+			{Provider: providers.ProviderAiand},
+			{Provider: "upstream-fallback"},
+		},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			// No Prelude phase in these tests, so Seal happens right before Proxy.
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+	})
+
+	require.NoError(t, err, "fallback should succeed cleanly")
+	assert.Equal(t, 1, winnerIdx, "fallback (index 1) must win")
+	assert.Equal(t, 1, primary.calls)
+	assert.Equal(t, 1, fallback.calls)
+	assert.Equal(t, "rescued", rec.Body.String(), "client sees only the fallback's successful bytes")
+	assert.Equal(t, providers.ProviderAiand, rec.Header().Get(HeaderRouterFallbackFrom))
+}
+
+// TestDispatchWithFallback_SchemaRejectionDoesNotFailoverCrossBinding pins the
+// dispatch-loop boundary: a buffered 400 schema rejection stays non-failable in
+// dispatchWithFallback (a same-family binding compiles the identical grammar).
+// The cross-arm rescue for this class lives in the sibling/baseline gates, not
+// here — see service.go's IsUpstreamSchemaRejection clauses.
+func TestDispatchWithFallback_SchemaRejectionDoesNotFailoverCrossBinding(t *testing.T) {
+	primary := &fakeClient{
+		name: "fireworks",
+		outcomes: []fakeOutcome{{err: &providers.UpstreamErrorResponse{
+			Status: http.StatusBadRequest,
+			Body:   []byte(`{"error":{"message":"Conflict in schema definitions for key ‘description’"}}`),
+		}}},
+	}
+	fallback := &fakeClient{
+		name:     "openrouter",
+		outcomes: []fakeOutcome{{writeBytes: []byte("rescued")}},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{
+		providers.ProviderAiand: primary,
+		"upstream-fallback":     fallback,
+	})
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	_, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "moonshotai/kimi-k3"},
+		bindings: []catalog.ProviderBinding{
+			{Provider: providers.ProviderAiand},
+			{Provider: "upstream-fallback"},
+		},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+	})
+
+	require.Error(t, err, "the 400 surfaces; dispatchWithFallback does not rescue it")
+	assert.True(t, providers.IsUpstreamSchemaRejection(err), "the error is recognized as a schema rejection")
+	assert.Equal(t, 0, fallback.calls, "no cross-binding failover within the dispatch loop")
+}
+
+func TestDispatchWithFallback_RetriesOnTransportError(t *testing.T) {
+	primary := &fakeClient{
+		name:     "fireworks",
+		outcomes: []fakeOutcome{{err: errors.New("upstream call: dial tcp: i/o timeout")}},
+	}
+	fallback := &fakeClient{
+		name:     "openrouter",
+		outcomes: []fakeOutcome{{writeBytes: []byte("rescued")}},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{
+		providers.ProviderAiand: primary,
+		"upstream-fallback":     fallback,
+	})
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "deepseek-ai/deepseek-v4-pro"},
+		bindings: []catalog.ProviderBinding{
+			{Provider: providers.ProviderAiand},
+			{Provider: "upstream-fallback"},
+		},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			// No Prelude phase in these tests, so Seal happens right before Proxy.
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, winnerIdx)
+	assert.Equal(t, 1, primary.calls)
+	assert.Equal(t, 1, fallback.calls)
+}
+
+func TestDispatchWithFallback_RetriesOnResponseHeaderTimeout(t *testing.T) {
+	primary := &fakeClient{
+		name:     "makora",
+		outcomes: []fakeOutcome{{err: responseHeaderTimeoutErr(t)}},
+	}
+	fallback := &fakeClient{
+		name:     "openrouter",
+		outcomes: []fakeOutcome{{writeBytes: []byte("rescued")}},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{
+		providers.ProviderAiand: primary,
+		"upstream-fallback":     fallback,
+	})
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "deepseek-ai/deepseek-v4-flash"},
+		bindings: []catalog.ProviderBinding{
+			{Provider: providers.ProviderAiand},
+			{Provider: "upstream-fallback"},
+		},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, winnerIdx)
+	assert.Equal(t, 1, primary.calls)
+	assert.Equal(t, 1, fallback.calls)
+	assert.Equal(t, "rescued", rec.Body.String())
+	assert.Equal(t, providers.ProviderAiand, rec.Header().Get(HeaderRouterFallbackFrom))
+}
+
+// Covers the mid-stream stall watchdog (prod incident 2026-06-09: streams
+// went silent after headers). Adapter returns ErrUpstreamIdleTimeout having
+// written nothing, so dispatch must rescue via the next binding.
+func TestDispatchWithFallback_RetriesOnUpstreamIdleTimeout(t *testing.T) {
+	primary := &fakeClient{
+		name:     "openai",
+		outcomes: []fakeOutcome{{err: providers.ErrUpstreamIdleTimeout}},
+	}
+	fallback := &fakeClient{
+		name:     "openrouter",
+		outcomes: []fakeOutcome{{writeBytes: []byte("rescued")}},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{
+		providers.ProviderAiand: primary,
+		"upstream-fallback":     fallback,
+	})
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "openai/gpt-oss-120b"},
+		bindings: []catalog.ProviderBinding{
+			{Provider: providers.ProviderAiand},
+			{Provider: "upstream-fallback"},
+		},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, winnerIdx)
+	assert.Equal(t, 1, primary.calls)
+	assert.Equal(t, 1, fallback.calls)
+	assert.Equal(t, "rescued", rec.Body.String())
+	assert.Equal(t, providers.ProviderAiand, rec.Header().Get(HeaderRouterFallbackFrom))
+}
+
+func TestDispatchWithFallback_NoRetryOnNonRetryableStatus(t *testing.T) {
+	primary := &fakeClient{
+		name:     "fireworks",
+		outcomes: []fakeOutcome{{err: &providers.UpstreamErrorResponse{Status: 400, Body: []byte(`bad model`)}}},
+	}
+	fallback := &fakeClient{name: "openrouter"}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{
+		providers.ProviderAiand: primary,
+		"upstream-fallback":     fallback,
+	})
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "deepseek-ai/deepseek-v4-pro"},
+		bindings: []catalog.ProviderBinding{
+			{Provider: providers.ProviderAiand},
+			{Provider: "upstream-fallback"},
+		},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			// No Prelude phase in these tests, so Seal happens right before Proxy.
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+		flushErr: flushBufferedIfPresent,
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, 0, winnerIdx, "primary stays the winner — no retry on 400")
+	assert.Equal(t, 0, fallback.calls, "fallback must not be called on non-retryable error")
+	// 400's buffered body must reach the client since we won't retry.
+	assert.Equal(t, "bad model", rec.Body.String())
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestDispatchWithFallback_ModelNotFoundFailsOverToNextBinding(t *testing.T) {
+	// 404 means primary doesn't serve this model; not retryable in-place, but
+	// another binding may carry it, so dispatch fails over instead of hard-failing.
+	primary := &fakeClient{
+		name:     "bedrock",
+		outcomes: []fakeOutcome{{err: &providers.UpstreamErrorResponse{Status: 404, Body: []byte(`{"message":"model does not exist"}`)}}},
+	}
+	fallback := &fakeClient{
+		name:     "openrouter",
+		outcomes: []fakeOutcome{{writeBytes: []byte("rescued")}},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{
+		providers.ProviderAiand: primary,
+		"upstream-fallback":     fallback,
+	})
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "qwen/qwen3-next-80b-a3b-instruct"},
+		bindings: []catalog.ProviderBinding{
+			{Provider: providers.ProviderAiand},
+			{Provider: "upstream-fallback"},
+		},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+		flushErr: flushBufferedIfPresent,
+	})
+
+	require.NoError(t, err, "404 on primary must fail over to the next binding")
+	assert.Equal(t, 1, winnerIdx, "fallback (index 1) wins")
+	assert.Equal(t, 1, primary.calls, "primary tried once — a 404 must not trigger same-binding retry")
+	assert.Equal(t, 1, fallback.calls)
+	assert.Equal(t, "rescued", rec.Body.String())
+}
+
+func TestDispatchWithFallback_ModelNotFoundSingleBindingFlushes(t *testing.T) {
+	// 404 on the sole binding: nothing to fail over to, and 404 isn't retried in-place.
+	only := &fakeClient{
+		name:     "bedrock",
+		outcomes: []fakeOutcome{{err: &providers.UpstreamErrorResponse{Status: 404, Body: []byte(`nope`)}}},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{providers.ProviderAiand: only})
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	_, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "qwen/qwen3-next-80b-a3b-instruct"},
+		bindings:        []catalog.ProviderBinding{{Provider: providers.ProviderAiand}},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+		flushErr: flushBufferedIfPresent,
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, 1, only.calls, "404 must not same-binding-retry")
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestDispatchWithFallback_BillingBlockedFailsOverToNextBinding(t *testing.T) {
+	// Makora's V4-Pro EOL: 402 insufficient_credits on every turn while the
+	// other bindings still serve the model.
+	primary := &fakeClient{
+		name: "makora",
+		outcomes: []fakeOutcome{{err: &providers.UpstreamErrorResponse{
+			Status: 402,
+			Body:   []byte(`{"error":{"code":"insufficient_credits","message":"enable Pay as you go billing"}}`),
+		}}},
+	}
+	fallback := &fakeClient{
+		name:     "together",
+		outcomes: []fakeOutcome{{writeBytes: []byte("rescued")}},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{
+		providers.ProviderAiand: primary,
+		"upstream-fallback":     fallback,
+	})
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "deepseek-ai/deepseek-v4-pro"},
+		bindings: []catalog.ProviderBinding{
+			{Provider: providers.ProviderAiand},
+			{Provider: "upstream-fallback"},
+		},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+		flushErr: flushBufferedIfPresent,
+	})
+
+	require.NoError(t, err, "402 on primary must fail over to the next binding")
+	assert.Equal(t, 1, winnerIdx, "fallback (index 1) wins")
+	assert.Equal(t, 1, primary.calls, "402 must not trigger same-binding retry")
+	assert.Equal(t, 1, fallback.calls)
+	assert.Equal(t, "rescued", rec.Body.String())
+}
+
+func TestDispatchWithFallback_BillingBlockedSingleBindingFlushes(t *testing.T) {
+	// 402 on the sole binding: nothing to walk to, and re-hitting the same
+	// provider only re-bills the same rejection.
+	only := &fakeClient{
+		name:     "makora",
+		outcomes: []fakeOutcome{{err: &providers.UpstreamErrorResponse{Status: 402, Body: []byte(`no credits`)}}},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{providers.ProviderAiand: only})
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	_, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "deepseek-ai/deepseek-v4-pro"},
+		bindings:        []catalog.ProviderBinding{{Provider: providers.ProviderAiand}},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+		flushErr: flushBufferedIfPresent,
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, 1, only.calls, "402 must not same-binding-retry")
+	assert.Equal(t, http.StatusPaymentRequired, rec.Code)
+	assert.Equal(t, "no credits", rec.Body.String())
+}
+
+func TestDispatchWithFallback_NoRetryAfterBytesFlushed(t *testing.T) {
+	// Primary writes bytes then errors; even though retryable in isolation,
+	// partial SSE is already on the wire so the dispatcher can't retry.
+	primary := &fakeClient{
+		name: "fireworks",
+		outcomes: []fakeOutcome{{
+			writeBytes: []byte("event: message_start\n\n"),
+			err:        errors.New("connection reset mid-stream"),
+		}},
+	}
+	fallback := &fakeClient{name: "openrouter"}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{
+		providers.ProviderAiand: primary,
+		"upstream-fallback":     fallback,
+	})
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "deepseek-ai/deepseek-v4-pro"},
+		bindings: []catalog.ProviderBinding{
+			{Provider: providers.ProviderAiand},
+			{Provider: "upstream-fallback"},
+		},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			// No Prelude phase in these tests, so Seal happens right before Proxy.
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, 0, winnerIdx)
+	assert.Equal(t, 0, fallback.calls, "must not retry once bytes have been flushed to the client")
+}
+
+func TestDispatchWithFallback_BothFailFinalBodyFlushed(t *testing.T) {
+	primary := &fakeClient{
+		name:     "fireworks",
+		outcomes: []fakeOutcome{{err: &providers.UpstreamErrorResponse{Status: 503, Body: []byte(`primary down`)}}},
+	}
+	fallback := &fakeClient{
+		name:     "openrouter",
+		outcomes: []fakeOutcome{{err: &providers.UpstreamErrorResponse{Status: 502, Headers: http.Header{"Content-Type": {"application/json"}}, Body: []byte(`fallback also down`)}}},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{
+		providers.ProviderAiand: primary,
+		"upstream-fallback":     fallback,
+	})
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "deepseek-ai/deepseek-v4-pro"},
+		bindings: []catalog.ProviderBinding{
+			{Provider: providers.ProviderAiand},
+			{Provider: "upstream-fallback"},
+		},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			// No Prelude phase in these tests, so Seal happens right before Proxy.
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+		flushErr: flushBufferedIfPresent,
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, 1, winnerIdx, "last-attempted index returned even on failure")
+	// Client sees the FINAL upstream's error envelope, not the primary's.
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
+	assert.Equal(t, "fallback also down", rec.Body.String())
+	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+}
+
+// noopSleep is the injected backoff for retry tests — keeps them fast and
+// deterministic while still driving the same-binding retry loop.
+func noopSleep(context.Context, time.Duration) error { return nil }
+
+func TestDispatchWithFallback_SingleBindingExhaustsRetries(t *testing.T) {
+	// Single-binding models have nowhere to fail over, so a persistent
+	// retryable error retries in place up to maxSameBindingRetries before flushing.
+	only := &fakeClient{
+		name: "anthropic",
+		outcomes: []fakeOutcome{
+			{err: &providers.UpstreamErrorResponse{Status: 503, Body: []byte(`down`)}},
+			{err: &providers.UpstreamErrorResponse{Status: 503, Body: []byte(`down`)}},
+			{err: &providers.UpstreamErrorResponse{Status: 503, Body: []byte(`down`)}},
+		},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{providers.ProviderAiand: only})
+	s.retrySleep = noopSleep
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "moonshotai/kimi-k3"},
+		bindings:        []catalog.ProviderBinding{{Provider: providers.ProviderAiand}},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+		flushErr: flushBufferedIfPresent,
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, 0, winnerIdx)
+	assert.Equal(t, 1+maxSameBindingRetries, only.calls, "initial attempt + maxSameBindingRetries")
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "final upstream envelope still flushes on exhaustion")
+}
+
+// hungUpstreamErr simulates a half-open HTTP/2 stream that times out at the
+// response-header deadline — IsRetryable accepts it, so without a wall-clock
+// guard the count bound alone would allow all three attempts.
+func hungUpstreamErr() error {
+	return &url.Error{
+		Op:  "Post",
+		URL: "https://upstream.example/v1/messages",
+		Err: errors.New("http2: timeout awaiting response headers"),
+	}
+}
+
+func TestDispatchWithFallback_SlowAttemptsStopBeforeRetryCount(t *testing.T) {
+	// Each hung attempt costs a full ResponseHeaderTimeout; the wall-clock
+	// budget must cut off retries even when the count is not yet spent.
+	hung := &fakeClient{
+		name: "anthropic",
+		outcomes: []fakeOutcome{
+			{err: hungUpstreamErr()},
+			{err: hungUpstreamErr()},
+			{err: hungUpstreamErr()},
+		},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{providers.ProviderAiand: hung})
+	s.retrySleep = noopSleep
+	// Absolute, not a multiple of sameBindingRetryBudget — a multiple would
+	// trivially pass even if the budget check were removed.
+	const slowAttempt = 30 * time.Second
+	base := time.Now()
+	reads := 0
+	s.now = func() time.Time {
+		now := base.Add(time.Duration(reads) * slowAttempt)
+		reads++
+		return now
+	}
+	require.Greater(t, slowAttempt, sameBindingRetryBudget, "attempt must outrun the budget for this test to mean anything")
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	_, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "claude-opus-4-7"},
+		bindings:        []catalog.ProviderBinding{{Provider: providers.ProviderAiand}},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+		flushErr: flushBufferedIfPresent,
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, 1, hung.calls, "budget stops the retry after one over-budget attempt")
+	assert.Less(t, hung.calls, 1+maxSameBindingRetries, "count bound alone would have allowed more")
+}
+
+func TestDispatchWithFallback_SingleBindingRetrySucceeds(t *testing.T) {
+	// Transient blip on the sole provider clears on retry — the turn is
+	// rescued instead of dying with a 503.
+	only := &fakeClient{
+		name: "anthropic",
+		outcomes: []fakeOutcome{
+			{err: &providers.UpstreamErrorResponse{Status: 503, Body: []byte(`blip`)}},
+			{writeBytes: []byte("rescued")},
+		},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{providers.ProviderAiand: only})
+	s.retrySleep = noopSleep
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	winnerIdx, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "moonshotai/kimi-k3"},
+		bindings:        []catalog.ProviderBinding{{Provider: providers.ProviderAiand}},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+		flushErr: flushBufferedIfPresent,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, winnerIdx)
+	assert.Equal(t, 2, only.calls, "one failure + one successful retry")
+	assert.Equal(t, "rescued", rec.Body.String(), "client sees only the successful retry's bytes")
+}
+
+func TestDispatchWithFallback_SingleBindingNonRetryableNoRetry(t *testing.T) {
+	// A 4xx is the model/request's fault, not a transient blip — retrying
+	// the same binding would just burn latency. Fail fast.
+	only := &fakeClient{
+		name:     "anthropic",
+		outcomes: []fakeOutcome{{err: &providers.UpstreamErrorResponse{Status: 400, Body: []byte(`bad`)}}},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{providers.ProviderAiand: only})
+	s.retrySleep = noopSleep
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	_, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "moonshotai/kimi-k3"},
+		bindings:        []catalog.ProviderBinding{{Provider: providers.ProviderAiand}},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+		flushErr: flushBufferedIfPresent,
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, 1, only.calls, "non-retryable status must not retry")
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestDispatchWithFallback_SingleBindingBackoffAbortsOnCancel(t *testing.T) {
+	// If the client disconnects (ctx canceled) during backoff, the loop
+	// stops rather than burning the next attempt.
+	only := &fakeClient{
+		name: "anthropic",
+		outcomes: []fakeOutcome{
+			{err: &providers.UpstreamErrorResponse{Status: 503, Body: []byte(`down`)}},
+			{err: &providers.UpstreamErrorResponse{Status: 503, Body: []byte(`down`)}},
+		},
+	}
+
+	s := newServiceWithProviders(t, map[string]providers.Client{providers.ProviderAiand: only})
+	s.retrySleep = func(context.Context, time.Duration) error { return context.Canceled }
+
+	rec := httptest.NewRecorder()
+	buf := newPreludeBuffer(rec)
+	r := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	_, err := s.dispatchWithFallback(context.Background(), failoverInputs{
+		w:               rec,
+		buf:             buf,
+		initialDecision: router.Decision{Model: "moonshotai/kimi-k3"},
+		bindings:        []catalog.ProviderBinding{{Provider: providers.ProviderAiand}},
+		attempt: func(ctx context.Context, d router.Decision, p providers.Client) error {
+			buf.Seal()
+			return p.Proxy(ctx, d, providers.PreparedRequest{}, buf, r)
+		},
+		flushErr: flushBufferedIfPresent,
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, 1, only.calls, "backoff abort stops before the second attempt")
+}
+
+func TestSameBindingBackoff(t *testing.T) {
+	assert.Equal(t, 250*time.Millisecond, sameBindingBackoff(0))
+	assert.Equal(t, 500*time.Millisecond, sameBindingBackoff(1))
+}
+
+func TestSleepWithContext(t *testing.T) {
+	assert.NoError(t, sleepWithContext(context.Background(), time.Millisecond))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	assert.ErrorIs(t, sleepWithContext(ctx, time.Hour), context.Canceled)
+}
+
+func TestShouldFailover(t *testing.T) {
+	s := &Service{}
+	t.Run("clean context allows failover", func(t *testing.T) {
+		assert.True(t, s.shouldFailover(context.Background()))
+	})
+	t.Run("BYOK-only deployment skips failover", func(t *testing.T) {
+		s := &Service{byokOnly: true}
+		assert.False(t, s.shouldFailover(context.Background()))
+	})
+	t.Run("inbound credentials in context skip failover", func(t *testing.T) {
+		s := &Service{}
+		ctx := context.WithValue(context.Background(), CredentialsContextKey{}, &Credentials{APIKey: []byte("sk-byok"), Source: "byok"})
+		assert.False(t, s.shouldFailover(ctx))
+	})
+	t.Run("BYOK keys on context disable failover", func(t *testing.T) {
+		// resolveAndInject re-resolves credentials and would prefer a BYOK key for
+		// the fallback binding, spending the customer's account without intent.
+		s := &Service{}
+		ctx := context.WithValue(context.Background(), ExternalAPIKeysContextKey{},
+			[]*auth.ExternalAPIKey{
+				{Provider: providers.ProviderAiand, Plaintext: []byte("mk-byok")},
+			})
+		assert.False(t, s.shouldFailover(ctx))
+	})
+}
+
+// TestProvidersIsRetryable round-trips the dispatcher's classifier
+// against the inputs it'll actually see in production.
+func TestProvidersIsRetryable(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"buffered 503", &providers.UpstreamErrorResponse{Status: 503}, true},
+		{"buffered 502", &providers.UpstreamErrorResponse{Status: 502}, true},
+		{"buffered 429", &providers.UpstreamErrorResponse{Status: 429}, true},
+		{"buffered 408", &providers.UpstreamErrorResponse{Status: 408}, true},
+		{"buffered 400", &providers.UpstreamErrorResponse{Status: 400}, false},
+		{"buffered 401", &providers.UpstreamErrorResponse{Status: 401}, false},
+		{"buffered 404 not retryable (handled via failover, not retry)", &providers.UpstreamErrorResponse{Status: 404}, false},
+		{"flushed UpstreamStatusError 503", &providers.UpstreamStatusError{Status: 503}, false},
+		{"transport error", errors.New("dial tcp: connection refused"), true},
+		{"context.Canceled", context.Canceled, false},
+		{"context.DeadlineExceeded", context.DeadlineExceeded, false},
+		{"wrapped context.Canceled", fmt.Errorf("upstream call: %w", context.Canceled), false},
+		{"wrapped context.DeadlineExceeded", fmt.Errorf("upstream call: %w", context.DeadlineExceeded), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, providers.IsRetryable(c.err))
+		})
+	}
+}
+
+func TestProvidersIsUpstreamModelNotFound(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"buffered 404", &providers.UpstreamErrorResponse{Status: 404}, true},
+		{"buffered 503", &providers.UpstreamErrorResponse{Status: 503}, false},
+		{"buffered 400", &providers.UpstreamErrorResponse{Status: 400}, false},
+		{"flushed 404 (already on wire)", &providers.UpstreamStatusError{Status: 404}, false},
+		{"transport error", errors.New("dial tcp"), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, providers.IsUpstreamModelNotFound(c.err))
+		})
+	}
+}
+
+func TestProvidersIsUpstreamProviderBillingBlocked(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"buffered 402", &providers.UpstreamErrorResponse{Status: 402}, true},
+		{"buffered 404", &providers.UpstreamErrorResponse{Status: 404}, false},
+		{"buffered 403", &providers.UpstreamErrorResponse{Status: 403}, false},
+		{"flushed 402 (already on wire)", &providers.UpstreamStatusError{Status: 402}, false},
+		{"transport error", errors.New("dial tcp"), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, providers.IsUpstreamProviderBillingBlocked(c.err))
+			if c.want {
+				assert.False(t, providers.IsRetryable(c.err),
+					"402 must stay out of same-binding retry")
+			}
+		})
+	}
+}
+
+// Core preludeBuffer contract: pre-Seal writes are buffered; the first
+// post-Seal write commits, ordering buffered bytes ahead of upstream content.
+func TestPreludeBuffer_BuffersUntilSealedFirstWrite(t *testing.T) {
+	rec := httptest.NewRecorder()
+	rec.Header().Set("Content-Type", "application/json") // simulate middleware default
+	buf := newPreludeBuffer(rec)
+
+	// Simulate translator.Prelude phase: set SSE content type, write status,
+	// emit message_start.
+	buf.Header().Set("Content-Type", "text/event-stream")
+	buf.Header().Del("Content-Length")
+	buf.WriteHeader(http.StatusOK)
+	_, _ = buf.Write([]byte("event: message_start\n\n"))
+	assert.False(t, buf.Committed(), "pre-seal writes do not commit")
+	assert.Empty(t, rec.Body.String(), "inner writer untouched pre-seal")
+
+	// Seal + first upstream chunk write.
+	buf.Seal()
+	_, _ = buf.Write([]byte("event: content_block_start\n\n"))
+	assert.True(t, buf.Committed(), "post-seal write commits")
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "event: message_start\n\nevent: content_block_start\n\n", rec.Body.String(),
+		"buffered prelude flushed in order before the post-seal chunk")
+	assert.Equal(t, "text/event-stream", rec.Header().Get("Content-Type"),
+		"Prelude's Content-Type override flushed with the commit")
+}
+
+// Discard() drops buffered bytes and restores Header() to its
+// construction-time snapshot so a retry starts clean.
+func TestPreludeBuffer_DiscardResetsBufferAndHeaders(t *testing.T) {
+	rec := httptest.NewRecorder()
+	rec.Header().Set("Content-Type", "application/json")
+	rec.Header().Set("Content-Length", "0")
+	buf := newPreludeBuffer(rec)
+
+	// Attempt 1: Prelude writes + status + body.
+	buf.Header().Set("Content-Type", "text/event-stream")
+	buf.Header().Del("Content-Length")
+	buf.Header().Set(HeaderRouterFallbackFrom, "fireworks")
+	buf.WriteHeader(http.StatusOK)
+	_, _ = buf.Write([]byte("attempt-1-prelude"))
+
+	// Primary errored before any bytes flushed: Discard.
+	buf.Discard()
+
+	assert.False(t, buf.Committed(), "Discard does not commit")
+	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"),
+		"Content-Type restored to construction-time snapshot")
+	assert.Equal(t, "0", rec.Header().Get("Content-Length"),
+		"Content-Length deleted by Prelude restored")
+	assert.Empty(t, rec.Header().Get(HeaderRouterFallbackFrom),
+		"Prelude-added headers removed")
+
+	// Attempt 2: Prelude + success.
+	buf.Header().Set("Content-Type", "text/event-stream")
+	buf.WriteHeader(http.StatusOK)
+	_, _ = buf.Write([]byte("attempt-2-prelude"))
+	buf.Seal()
+	_, _ = buf.Write([]byte("first-upstream-byte"))
+
+	assert.Equal(t, "attempt-2-preludefirst-upstream-byte", rec.Body.String(),
+		"only attempt-2's bytes reach the client; attempt-1 was discarded")
+}
+
+// Flush() must not reach the inner writer until commit fires — a
+// translator's Flush() between Prelude writes and commit must not leak partial bytes.
+func TestPreludeBuffer_NoOpFlushPreCommit(t *testing.T) {
+	flushCount := 0
+	w := &fakeFlushTracker{ResponseRecorder: httptest.NewRecorder(), onFlush: func() { flushCount++ }}
+	buf := newPreludeBuffer(w)
+
+	buf.WriteHeader(http.StatusOK)
+	_, _ = buf.Write([]byte("prelude"))
+	buf.Flush()
+	assert.Equal(t, 0, flushCount, "pre-commit Flush is a no-op")
+
+	buf.Seal()
+	_, _ = buf.Write([]byte("chunk")) // triggers commit
+	assert.Equal(t, 1, flushCount, "commit flushes inner exactly once")
+
+	buf.Flush()
+	assert.Equal(t, 2, flushCount, "post-commit Flush passes through")
+}
+
+type fakeFlushTracker struct {
+	*httptest.ResponseRecorder
+	onFlush func()
+}
+
+func (f *fakeFlushTracker) Flush() { f.onFlush() }

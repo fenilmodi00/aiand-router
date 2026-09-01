@@ -1,0 +1,38 @@
+{
+  "name": "router",
+  "description": "aiand router — Smart AI model proxy that routes every request to the best model using a cluster scorer with ONNX embedders",
+  "version": "1.0.0",
+  "buildStack": "dockerfile",
+  "env": {
+    "DATABASE_URL": {
+      "description": "Postgres URI (Supabase session pooler :5432). Do not attach Schema To Go.",
+      "required": true
+    },
+    "AIAND_API_KEY": {
+      "description": "AI& API key for model routing",
+      "required": true
+    },
+    "EXTERNAL_KEY_ENCRYPTION_KEY": {
+      "description": "Tink AES-256-GCM keyset JSON for BYOK encryption",
+      "required": true
+    },
+    "ROUTER_CLUSTER_VERSION": {
+      "description": "Cluster artifact version to serve",
+      "default": "v0.76",
+      "required": false
+    },
+    "OTEL_EXPORTER_OTLP_ENDPOINT": {
+      "description": "OTel collector endpoint for traces",
+      "required": false
+    },
+    "ROUTER_FEEDBACK_LINK_SECRET": {
+      "description": "Secret for feedback link token signing",
+      "required": false
+    },
+    "ROUTER_FEEDBACK_BASE_URL": {
+      "description": "Public origin of feedback page",
+      "required": false
+    }
+  },
+  "addons": []
+}

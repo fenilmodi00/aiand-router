@@ -1,0 +1,82 @@
+// Install commands for pointing a coding harness at *this* router.
+//
+// Self-hosted deployments serve this dashboard from the router's own origin, so
+// the base URL is derived from the browser rather than hardcoded: an install
+// command that silently pointed at the hosted endpoint would route a
+// self-hoster's traffic off-box. `--base-url` is always passed explicitly for
+// the same reason — install.sh otherwise falls back to the hosted default.
+
+/** A harness the installer can configure, in the order the picker shows them. */
+export type HarnessID = "claude" | "codex" | "pi";
+
+/** Whether the installer writes machine-wide config or repo-local config. */
+export type InstallScope = "user" | "project";
+
+export interface HarnessInfo {
+  id: HarnessID;
+  label: string;
+  /** What the installer touches, shown under the label in the picker. */
+  detail: string;
+}
+
+export const HARNESSES: HarnessInfo[] = [
+  {
+    id: "claude",
+    label: "Claude Code",
+    detail: "Patches ~/.claude/settings.json.",
+  },
+  {
+    id: "codex",
+    label: "Codex",
+    detail: "Patches ~/.codex/config.toml.",
+  },
+  {
+    id: "pi",
+    label: "pi",
+    detail: "Merges an aiand provider into ~/.pi/agent/models.json.",
+  },
+];
+
+export function harness(id: HarnessID): HarnessInfo {
+  const found = HARNESSES.find(h => h.id === id);
+  if (found == null) throw new Error(`unknown harness: ${id}`);
+  return found;
+}
+
+/**
+ * Origin of the router serving this dashboard, with the /ui basePath stripped.
+ * Returns "" during SSR (static export prerender), which callers render as a
+ * disabled/placeholder state rather than a wrong command.
+ */
+export function routerOrigin(): string {
+  if (typeof window === "undefined") return "";
+  return window.location.origin;
+}
+
+/**
+ * The npx one-liner that configures `harnessID` against this router. The token
+ * rides in as AIAND_ROUTER_KEY env prefix, which install.sh reads to skip its
+ * interactive prompt.
+ *
+ * `--package … -- <bin>` rather than `npx -y aiand-router`: npm <= 6's
+ * bundled npx treats an undeclared flag as consuming the next token, so the
+ * short form drops the package name and resolves `aiand-router` from the
+ * registry instead — with the key already in its environment.
+ */
+export function installCommand(
+  harnessID: HarnessID,
+  scope: InstallScope,
+  token: string,
+  origin: string,
+): string {
+  const flags = [`--${harnessID}`, `--scope ${scope}`, `--base-url ${shellSingleQuote(origin)}`];
+  return `AIAND_ROUTER_KEY=${shellSingleQuote(token)} npx --package aiand-router -y -- aiand-router ${flags.join(" ")}`;
+}
+
+/**
+ * Wraps a value in single quotes for POSIX shell, closing/escaping/reopening
+ * any embedded quote via the standard '\'' idiom.
+ */
+function shellSingleQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}

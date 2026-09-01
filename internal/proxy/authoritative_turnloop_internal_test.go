@@ -1,0 +1,433 @@
+package proxy
+
+import (
+	"context"
+	"net/http"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"aiand/router/internal/providers"
+	"aiand/router/internal/router"
+	"aiand/router/internal/router/handover"
+	"aiand/router/internal/router/planner"
+	"aiand/router/internal/router/policy"
+	"aiand/router/internal/router/sessionpin"
+	"aiand/router/internal/translate"
+)
+
+type authoritativeTestRouter struct {
+	decision router.Decision
+	requests []router.Request
+}
+
+func (r *authoritativeTestRouter) Route(_ context.Context, req router.Request) (router.Decision, error) {
+	r.requests = append(r.requests, req)
+	return r.decision, nil
+}
+
+type authoritativeHandoverSummarizer struct {
+	calls int
+}
+
+func (s *authoritativeHandoverSummarizer) Summarize(
+	_ context.Context,
+	_ *translate.RequestEnvelope,
+) (string, handover.Usage, error) {
+	s.calls++
+	return "must not run", handover.Usage{}, nil
+}
+
+func (s *authoritativeHandoverSummarizer) Provider() string {
+	return providers.ProviderAiand
+}
+
+func TestAuthoritativePolicySelectsEveryEligibleTurn(t *testing.T) {
+	strategy := router.Strategy("authoritative-test")
+	tests := []struct {
+		name             string
+		body             []byte
+		pinFound         bool
+		pinExpires       time.Time
+		historyTruncated bool
+	}{
+		{
+			name:       "first turn routes once",
+			body:       []byte(`{"model":"moonshotai/kimi-k3","messages":[{"role":"user","content":"start"}]}`),
+			pinExpires: time.Now().Add(time.Hour),
+		},
+		{
+			name:       "main loop ignores planner stay",
+			body:       []byte(`{"model":"moonshotai/kimi-k3","messages":[{"role":"user","content":"fix the failing test"}]}`),
+			pinFound:   true,
+			pinExpires: time.Now().Add(time.Hour),
+		},
+		{
+			name: "tool result ignores sticky kill switch",
+			body: []byte(`{
+				"model":"moonshotai/kimi-k3",
+				"tools":[{"name":"Read","description":"read","input_schema":{"type":"object"}}],
+				"messages":[
+					{"role":"user","content":"inspect the repository"},
+					{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Read","input":{"path":"README.md"}}]},
+					{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"contents"}]}
+				]
+			}`),
+			pinFound:   true,
+			pinExpires: time.Now().Add(time.Hour),
+		},
+		{
+			name:       "expired pin does not reanchor",
+			body:       []byte(`{"model":"moonshotai/kimi-k3","messages":[{"role":"user","content":"continue"}]}`),
+			pinFound:   true,
+			pinExpires: time.Now().Add(-time.Minute),
+		},
+		{
+			name:             "deterministic compaction is visible",
+			body:             []byte(`{"model":"moonshotai/kimi-k3","messages":[{"role":"user","content":"continue after trim"}]}`),
+			pinFound:         true,
+			pinExpires:       time.Now().Add(time.Hour),
+			historyTruncated: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := newStubPinStore()
+			store.getFound = test.pinFound
+			store.getPin = sessionpin.Pin{
+				Provider:         providers.ProviderAiand,
+				Model:            "moonshotai/kimi-k3",
+				Reason:           "cluster:v0.2",
+				TurnCount:        7,
+				PinnedUntil:      test.pinExpires,
+				LastTurnEndedAt:  time.Now().Add(-time.Minute),
+				LastServedModel:  "moonshotai/kimi-k3",
+				LastOutputTokens: 321,
+				HasEverSwitched:  true,
+			}
+			policyRouter := &authoritativeTestRouter{decision: router.Decision{
+				Provider: providers.ProviderAiand,
+				Model:    "moonshotai/kimi-k3",
+				Reason:   "authoritative-test_policy",
+			}}
+			summarizer := &authoritativeHandoverSummarizer{}
+			svc := NewService(
+				nil,
+				nil,
+				nil,
+				false,
+				nil,
+				store,
+				false,
+				providers.ProviderAiand,
+				"deepseek-ai/deepseek-v4-flash",
+				nil,
+			).WithScoreToolResultTurns(false).
+				WithPlanner(planner.EVConfig{
+					ThresholdUSD:           1_000_000,
+					ExpectedRemainingTurns: 3,
+				}).
+				WithSummarizer(summarizer).
+				WithPolicyStrategy(policy.StrategySpec{
+					Strategy: strategy,
+					Router:   policyRouter,
+					Capabilities: policy.Capabilities{
+						SchemaVersion:                 policy.SchemaVersionV1,
+						AuthoritativePerTurnSelection: true,
+					},
+				})
+			env, err := translate.ParseAnthropic(test.body)
+			require.NoError(t, err)
+			features := env.RoutingFeatures(false)
+			ctx := router.WithStrategy(context.Background(), strategy)
+			req := router.Request{
+				RequestedModel:       features.Model,
+				EstimatedInputTokens: features.Tokens,
+				HasTools:             features.HasTools,
+				ConversationMessages: conversationMessagesForRouting(env),
+				HistoryTruncated:     test.historyTruncated,
+			}
+
+			result, err := svc.runTurnLoop(
+				ctx,
+				env,
+				features,
+				"api-key",
+				uuid.New(),
+				"",
+				http.Header{},
+				req,
+			)
+
+			require.NoError(t, err)
+			assert.True(t, result.AuthoritativePerTurn)
+			assert.Equal(t, "moonshotai/kimi-k3", result.Decision.Model)
+			assert.Equal(t, "authoritative_per_turn", result.PinTier)
+			assert.False(t, result.StickyHit)
+			assert.Empty(t, result.PlannerDecision.Outcome)
+			assert.False(t, result.Handover.Invoked)
+			assert.Equal(t, 0, summarizer.calls)
+			require.Len(t, policyRouter.requests, 1)
+			turnContext := policyRouter.requests[0].PolicyTurnContext
+			require.NotNil(t, turnContext)
+			assert.Equal(t, test.historyTruncated, turnContext.HistoryTruncated)
+			if test.pinFound {
+				assert.Equal(t, 7, turnContext.SessionTurnCount)
+				assert.Equal(t, "moonshotai/kimi-k3", turnContext.PreviousServedModel)
+				assert.Equal(t, providers.ProviderAiand, turnContext.PreviousProvider)
+				expectedCacheState := router.PolicyCacheStateWarm
+				if test.historyTruncated {
+					expectedCacheState = router.PolicyCacheStateCold
+				}
+				assert.Equal(t, expectedCacheState, turnContext.CacheState)
+				require.NotNil(t, turnContext.PriorOutputTokens)
+				assert.Equal(t, 321, *turnContext.PriorOutputTokens)
+				assert.True(t, turnContext.SessionEverSwitched)
+			} else {
+				assert.Zero(t, turnContext.SessionTurnCount)
+				assert.Empty(t, turnContext.PreviousServedModel)
+				assert.Empty(t, turnContext.PreviousProvider)
+				assert.Equal(t, router.PolicyCacheStateUnknown, turnContext.CacheState)
+				assert.Nil(t, turnContext.PriorOutputTokens)
+				assert.False(t, turnContext.SessionEverSwitched)
+			}
+			require.Len(t, store.upserts, 1)
+			assert.Equal(t, "moonshotai/kimi-k3", store.upserts[0].Model)
+		})
+	}
+}
+
+func TestAuthoritativePolicyDisablesSemanticCache(t *testing.T) {
+	strategy := router.Strategy("authoritative-test")
+	svc := (&Service{}).WithPolicyStrategy(policy.StrategySpec{
+		Strategy: strategy,
+		Router:   &authoritativeTestRouter{},
+		Capabilities: policy.Capabilities{
+			AuthoritativePerTurnSelection: true,
+		},
+	})
+
+	assert.False(t, svc.semanticCacheAllowed(router.WithStrategy(context.Background(), strategy)))
+	assert.True(t, svc.semanticCacheAllowed(context.Background()))
+}
+
+func TestAuthoritativePolicyPreservesExplicitForceModel(t *testing.T) {
+	strategy := router.Strategy("authoritative-force-test")
+	store := newStubPinStore()
+	store.getFound = true
+	store.getPin = sessionpin.Pin{
+		Provider:    providers.ProviderAiand,
+		Model:       "moonshotai/kimi-k3",
+		Reason:      translate.ReasonUserForceModel,
+		PinnedUntil: time.Now().Add(time.Hour),
+	}
+	policyRouter := &authoritativeTestRouter{decision: router.Decision{
+		Provider: providers.ProviderAiand,
+		Model:    "moonshotai/kimi-k3",
+	}}
+	svc := NewService(
+		nil,
+		nil,
+		nil,
+		false,
+		nil,
+		store,
+		false,
+		providers.ProviderAiand,
+		"deepseek-ai/deepseek-v4-flash",
+		nil,
+	).WithPolicyStrategy(policy.StrategySpec{
+		Strategy: strategy,
+		Router:   policyRouter,
+		Capabilities: policy.Capabilities{
+			AuthoritativePerTurnSelection: true,
+		},
+	})
+	env, err := translate.ParseAnthropic(
+		[]byte(`{"model":"moonshotai/kimi-k3","messages":[{"role":"user","content":"continue"}]}`),
+	)
+	require.NoError(t, err)
+	features := env.RoutingFeatures(false)
+
+	result, err := svc.runTurnLoop(
+		router.WithStrategy(context.Background(), strategy),
+		env,
+		features,
+		"api-key",
+		uuid.New(),
+		"",
+		http.Header{},
+		router.Request{
+			RequestedModel:       features.Model,
+			ConversationMessages: conversationMessagesForRouting(env),
+		},
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, "moonshotai/kimi-k3", result.Decision.Model)
+	assert.True(t, result.StickyHit)
+	assert.Empty(t, policyRouter.requests)
+}
+
+func TestAuthoritativeUpgradeConfidenceGate(t *testing.T) {
+	strategy := router.Strategy("authoritative-test")
+	body := []byte(`{"model":"moonshotai/kimi-k3","messages":[{"role":"user","content":"fix the failing test"}]}`)
+
+	tests := []struct {
+		name       string
+		gateOff    bool
+		pinFound   bool
+		pinModel   string
+		fresh      router.Decision
+		wantModel  string
+		wantSticky bool
+		wantTier   string
+	}{
+		{
+			name:     "low-confidence upgrade keeps cheaper pin",
+			pinFound: true,
+			pinModel: "deepseek-ai/deepseek-v4-flash",
+			fresh: router.Decision{
+				Provider: providers.ProviderAiand,
+				Model:    "moonshotai/kimi-k3",
+				Reason:   "hmm_policy(tool-result communication reroute: classifier 'maximum' (p=0.180))",
+				Metadata: &router.RoutingMetadata{ChosenScore: 0.18},
+			},
+			wantModel:  "deepseek-ai/deepseek-v4-flash",
+			wantSticky: true,
+			wantTier:   "authoritative_hmm_upgrade_confidence_low",
+		},
+		{
+			name:     "confident upgrade serves fresh",
+			pinFound: true,
+			pinModel: "deepseek-ai/deepseek-v4-flash",
+			fresh: router.Decision{
+				Provider: providers.ProviderAiand,
+				Model:    "moonshotai/kimi-k3",
+				Reason:   "hmm_policy(classifier 'maximum' (p=0.91))",
+				Metadata: &router.RoutingMetadata{ChosenScore: 0.91},
+			},
+			wantModel:  "moonshotai/kimi-k3",
+			wantSticky: false,
+			wantTier:   "authoritative_per_turn",
+		},
+		{
+			name:     "downgrade serves fresh despite low confidence",
+			pinFound: true,
+			pinModel: "moonshotai/kimi-k3",
+			fresh: router.Decision{
+				Provider: providers.ProviderAiand,
+				Model:    "deepseek-ai/deepseek-v4-flash",
+				Reason:   "hmm_policy(classifier 'fast' (p=0.20))",
+				Metadata: &router.RoutingMetadata{ChosenScore: 0.20},
+			},
+			wantModel:  "deepseek-ai/deepseek-v4-flash",
+			wantSticky: false,
+			wantTier:   "authoritative_per_turn",
+		},
+		{
+			name:     "unscored upgrade fails open",
+			pinFound: true,
+			pinModel: "deepseek-ai/deepseek-v4-flash",
+			fresh: router.Decision{
+				Provider: providers.ProviderAiand,
+				Model:    "moonshotai/kimi-k3",
+				Reason:   "authoritative-test_policy",
+			},
+			wantModel:  "moonshotai/kimi-k3",
+			wantSticky: false,
+			wantTier:   "authoritative_per_turn",
+		},
+		{
+			name:     "first turn without pin serves fresh",
+			pinFound: false,
+			fresh: router.Decision{
+				Provider: providers.ProviderAiand,
+				Model:    "moonshotai/kimi-k3",
+				Reason:   "hmm_policy(classifier 'maximum' (p=0.18))",
+				Metadata: &router.RoutingMetadata{ChosenScore: 0.18},
+			},
+			wantModel:  "moonshotai/kimi-k3",
+			wantSticky: false,
+			wantTier:   "authoritative_per_turn",
+		},
+		{
+			name:     "gate disabled serves fresh",
+			gateOff:  true,
+			pinFound: true,
+			pinModel: "deepseek-ai/deepseek-v4-flash",
+			fresh: router.Decision{
+				Provider: providers.ProviderAiand,
+				Model:    "moonshotai/kimi-k3",
+				Reason:   "hmm_policy(classifier 'maximum' (p=0.18))",
+				Metadata: &router.RoutingMetadata{ChosenScore: 0.18},
+			},
+			wantModel:  "moonshotai/kimi-k3",
+			wantSticky: false,
+			wantTier:   "authoritative_per_turn",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := newStubPinStore()
+			store.getFound = test.pinFound
+			store.getPin = sessionpin.Pin{
+				Provider:    providers.ProviderAiand,
+				Model:       test.pinModel,
+				Reason:      "hmm_policy(classifier 'fast' (p=0.60))",
+				PinnedUntil: time.Now().Add(time.Hour),
+			}
+			policyRouter := &authoritativeTestRouter{decision: test.fresh}
+			svc := NewService(
+				nil,
+				nil,
+				nil,
+				false,
+				nil,
+				store,
+				false,
+				providers.ProviderAiand,
+				"deepseek-ai/deepseek-v4-flash",
+				nil,
+			).WithPolicyStrategy(policy.StrategySpec{
+				Strategy: strategy,
+				Router:   policyRouter,
+				Capabilities: policy.Capabilities{
+					SchemaVersion:                 policy.SchemaVersionV1,
+					AuthoritativePerTurnSelection: true,
+				},
+			})
+			if test.gateOff {
+				svc = svc.WithAuthoritativeUpgradeGate(false)
+			}
+			env, err := translate.ParseAnthropic(body)
+			require.NoError(t, err)
+			features := env.RoutingFeatures(false)
+
+			result, err := svc.runTurnLoop(
+				router.WithStrategy(context.Background(), strategy),
+				env,
+				features,
+				"api-key",
+				uuid.New(),
+				"",
+				http.Header{},
+				router.Request{
+					RequestedModel:       features.Model,
+					ConversationMessages: conversationMessagesForRouting(env),
+				},
+			)
+
+			require.NoError(t, err)
+			assert.True(t, result.AuthoritativePerTurn)
+			assert.Equal(t, test.wantModel, result.Decision.Model)
+			assert.Equal(t, test.wantSticky, result.StickyHit)
+			assert.Equal(t, test.wantTier, result.PinTier)
+		})
+	}
+}

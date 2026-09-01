@@ -1,0 +1,353 @@
+const BASE = "/v1";
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...((init?.headers as Record<string, string>) ?? {}),
+  };
+  const res = await fetch(`${BASE}${path}`, {
+    ...init,
+    credentials: "include",
+    headers,
+  });
+  if (res.status === 401 && typeof window !== "undefined") {
+    // Session expired or never authenticated — bounce to login. The
+    // (app) layout's auth gate handles the same case on initial load,
+    // but in-flight calls (chart refreshes, mutations) need their own
+    // bounce so users don't sit on a broken page.
+    if (!window.location.pathname.startsWith("/ui/login")) {
+      // Strip the /ui basePath so Next's router.replace() doesn't re-prepend
+      // it after login (which would yield /ui/ui/...). Anything outside the
+      // basePath isn't an app path; default to /dashboard.
+      const path = window.location.pathname;
+      const internal = path.startsWith("/ui/") ? path.slice(3) : "/dashboard";
+      const next = encodeURIComponent(internal);
+      window.location.href = `/ui/login?next=${next}`;
+      throw new Error("401: redirecting to login");
+    }
+  }
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`${res.status}: ${body}`);
+  }
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
+}
+
+// Absolute-path variant of request() — used for /account/v1/* which lives
+// outside the /v1 BASE group. Shares the 401 bounce + error shape so
+// callers don't observe a difference in failure handling.
+async function requestRaw<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...((init?.headers as Record<string, string>) ?? {}),
+  };
+  const res = await fetch(path, { ...init, credentials: "include", headers });
+  if (res.status === 401 && typeof window !== "undefined") {
+    if (!window.location.pathname.startsWith("/ui/login")) {
+      const current = window.location.pathname;
+      const internal = current.startsWith("/ui/") ? current.slice(3) : "/dashboard";
+      const next = encodeURIComponent(internal);
+      window.location.href = `/ui/login?next=${next}`;
+      throw new Error("401: redirecting to login");
+    }
+  }
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`${res.status}: ${body}`);
+  }
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
+}
+
+export interface MetricsSummary {
+  request_count: number;
+  total_tokens: number;
+  total_requested_cost_usd: number;
+  total_actual_cost_usd: number;
+  total_savings_usd: number;
+  // Present once internal/api/admin/metrics.go emits them (additive backend
+  // change); absent on older routers, so consumers guard with `?? 0`.
+  cache_write_tokens?: number;
+  cache_read_tokens?: number;
+  semantic_cache_hits?: number;
+  cache_input_savings_usd?: number;
+}
+
+export interface TimeseriesBucket {
+  bucket: string;
+  requested_cost_usd: number;
+  actual_cost_usd: number;
+// Present once the backend emits per-bucket token/request sums (additive
+// change); absent on older routers, so consumers guard with `?? 0`. These
+// feed the dashboard's Tokens / Requests sparklines.
+  request_count?: number;
+  total_tokens?: number;
+}
+
+export interface PlaygroundRouteResponse {
+  model: string;
+  provider: string;
+  reason: string;
+  requested_cost_usd: number;
+  actual_cost_usd: number;
+  id: string;
+  cache_savings_usd?: number;
+}
+
+export type PlaygroundDecision = {
+  model: string;
+  provider: string;
+  reason: string;
+  requestedCostUsd: number;
+  actualCostUsd: number;
+  id: string;
+  cacheSavingsUsd: number;
+};
+
+export function mapPlaygroundRouteResponse(r: PlaygroundRouteResponse): PlaygroundDecision {
+  return {
+    model: r.model,
+    provider: r.provider,
+    reason: r.reason,
+    requestedCostUsd: r.requested_cost_usd,
+    actualCostUsd: r.actual_cost_usd,
+    id: r.id,
+    cacheSavingsUsd: r.cache_savings_usd ?? 0,
+  };
+}
+
+export interface MetricsTimeseries {
+  buckets: TimeseriesBucket[];
+}
+
+export interface ModelBreakdownBucket {
+  bucket: string;
+  decision_model: string;
+  request_count: number;
+  total_tokens: number;
+  actual_cost_usd: number;
+}
+
+export interface MetricsModelBreakdown {
+  buckets: ModelBreakdownBucket[];
+}
+
+export interface MetricsDetailRow {
+  timestamp: string;
+  request_id: string;
+  requested_model: string;
+  decision_model: string;
+  decision_provider: string;
+  decision_reason: string;
+  sticky_hit: boolean;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_tokens: number | null;
+  cache_read_tokens: number | null;
+  requested_cost_usd: number;
+  actual_cost_usd: number;
+  total_latency_ms: number;
+  upstream_status_code: number;
+  router_user_id: string;
+  client_app: string;
+  turn_type: string;
+  user_email: string;
+}
+
+export interface MetricsDetails {
+  rows: MetricsDetailRow[];
+}
+
+// "routing" keys (rk_) proxy inference; "analytics_read" keys (ra_) are
+// read-only export credentials that cannot route or spend.
+export type APIKeyScope = "routing" | "analytics_read";
+
+export interface APIKey {
+  id: string;
+  name: string | null;
+  key_prefix: string;
+  key_suffix: string;
+  scope: APIKeyScope;
+  last_used_at: string | null;
+  created_at: string;
+}
+
+export interface IssueAPIKeyResponse {
+  key: APIKey;
+  token: string;
+}
+
+export interface RouterConfig {
+  cluster_version: string;
+  embed_only_user_message: boolean;
+  sticky_decision_ttl_ms: string;
+  otel_enabled: boolean;
+  dev_mode: boolean;
+  semantic_cache_enabled: boolean;
+  env_provider_keys: string[];
+}
+
+// Whether this installation has ever served a routed request. Set once and
+// never cleared, so it survives key rotation — the dashboard gates first-run
+// onboarding on this rather than on a key's last_used_at.
+export interface OnboardingStatus {
+  first_request_served_at: string | null;
+}
+
+// Account (aiand key) login session probe. `authenticated:false` with a 200
+// means the caller is logged out — the login page shows the aiand-key form.
+export interface AccountMeResponse {
+  authenticated: boolean;
+  account_id?: string;
+  display_name?: string;
+}
+
+
+export interface DeployedModel {
+  model: string;
+  provider: string;
+}
+
+export interface ExcludedModelsResponse {
+  available: DeployedModel[];
+  excluded: string[];
+  env_override_active: boolean;
+}
+
+
+export interface RoutingPreferencesResponse {
+  quality: number;
+  price: number;
+  is_default: boolean;
+}
+
+// A live catalog row from ai&'s GET /v1/models, mirrored 1:1 from the
+// backend's AiandModelRow (internal/api/admin/aiand_catalog.go). Monetary
+// fields are strings in ai&'s wire format (per-1M USD, e.g. "0.15").
+export interface AiandModel {
+  id: string;
+  provider: string;
+  context_window: number;
+  capabilities: string[];
+  reasoning_efforts: string[];
+  reasoning_effort_default: string;
+  input_per_1m: string;
+  output_per_1m: string;
+  cached_input_per_1m: string;
+  currency: string;
+  // Upstream publication time (unix seconds). Part of ai&'s model object and
+  // forwarded verbatim by AiandCatalogHandler even though the Go row struct
+  // doesn't declare it; optional so older cached payloads still type-check.
+  created?: number;
+}
+
+export const api = {
+  auth: {
+    // Account (aiand key) login surface. Lives under /account/v1/*, outside
+    // BASE=/v1, so these route through requestRaw.
+    accountMe: () => requestRaw<AccountMeResponse>("/account/v1/me"),
+    loginWithKey: (key: string) =>
+      requestRaw<{ ok: boolean; expires_at: string }>("/account/v1/login", {
+        method: "POST",
+        body: JSON.stringify({ key }),
+      }),
+    accountLogout: () =>
+      requestRaw<{ ok: boolean }>("/account/v1/logout", { method: "POST" }),
+  },
+  metrics: {
+    summary: (from?: string, to?: string) => {
+      const params = new URLSearchParams();
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+      const qs = params.toString();
+      return request<MetricsSummary>(`/metrics/summary${qs ? `?${qs}` : ""}`);
+    },
+    timeseries: (granularity: "hour" | "day" | "week", from?: string, to?: string) => {
+      const params = new URLSearchParams({ granularity });
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+      return request<MetricsTimeseries>(`/metrics/timeseries?${params.toString()}`);
+    },
+    details: (from: string, to: string, limit: number = 100) => {
+      const params = new URLSearchParams({ from, to, limit: String(limit) });
+      return request<MetricsDetails>(`/metrics/details?${params.toString()}`);
+    },
+    modelBreakdown: (granularity: "hour" | "day" | "week", from?: string, to?: string) => {
+      const params = new URLSearchParams({ granularity });
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+      return request<MetricsModelBreakdown>(`/metrics/model-breakdown?${params.toString()}`);
+    },
+  },
+  aiandModels: {
+    list: () => request<{ data: AiandModel[] }>("/aiand/models"),
+  },
+  keys: {
+    list: () => request<{ keys: APIKey[] }>("/keys"),
+    issue: (name?: string, scope: APIKeyScope = "routing") =>
+      request<IssueAPIKeyResponse>("/keys", {
+        method: "POST",
+        body: JSON.stringify({ name: name ?? "", scope }),
+      }),
+    // Soft-deletes the named key and issues a replacement in one round-trip.
+    // The previous token stops working immediately. Carries forward the
+    // previous key's name server-side.
+    rotate: (id: string) =>
+      request<IssueAPIKeyResponse>(`/keys/${id}/rotate`, { method: "POST" }),
+    delete: (id: string) => request<void>(`/keys/${id}`, { method: "DELETE" }),
+  },
+  config: {
+    get: () => request<RouterConfig>("/config"),
+  },
+  onboarding: {
+    get: () => request<OnboardingStatus>("/onboarding"),
+  },
+  excludedModels: {
+    get: () => request<ExcludedModelsResponse>("/excluded-models"),
+    update: (excluded: string[]) =>
+      request<ExcludedModelsResponse>("/excluded-models", {
+        method: "PUT",
+        body: JSON.stringify({ excluded }),
+      }),
+  },
+  routingPreferences: {
+    get: () => request<RoutingPreferencesResponse>("/routing-preferences"),
+    update: (body: { quality: number; price: number }) =>
+      request<RoutingPreferencesResponse>("/routing-preferences", {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    reset: () =>
+      request<RoutingPreferencesResponse>("/routing-preferences", {
+        method: "PUT",
+        body: JSON.stringify({ reset: true }),
+      }),
+  },
+  playground: {
+    route: (body: unknown) => request<PlaygroundRouteResponse>("/playground/route", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+    chat: (
+      body: unknown,
+      opts?: { signal?: AbortSignal; forceModel?: string | null; sessionID?: string },
+    ) => {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (opts?.forceModel) {
+        headers["x-aiand-force-model"] = opts.forceModel;
+      }
+      if (opts?.sessionID) {
+        headers["X-Playground-Session"] = opts.sessionID;
+      }
+      headers["X-Aiand-Routing-Marker"] = "off";
+      return fetch(`${BASE}/playground/chat`, {
+        method: "POST",
+        credentials: "include",
+        headers,
+        body: JSON.stringify(body),
+        signal: opts?.signal,
+      });
+    },
+  },
+};

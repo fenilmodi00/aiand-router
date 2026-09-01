@@ -1,0 +1,409 @@
+<div align="center">
+<img width="7559" height="1200" alt="Group 1(1)" src="https://github.com/user-attachments/assets/139b6a47-f306-4553-a638-764549a1e76b" />
+<svg width="7559" height="1200" viewBox="0 0 7559 1200" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g clip-path="url(#clip0_15_12)">
+<path d="M0 60.0082C0 26.8711 26.8625 0 59.9996 0C416.586 0 773.663 0 1139.99 0C1173.13 0 1200 26.8625 1200 59.9996C1200 416.586 1200 773.663 1200 1139.99C1200 1173.13 1173.14 1200 1140 1200C783.414 1200 426.337 1200 60.0082 1200C26.8711 1200 0 1173.14 0 1140C0 783.414 0 426.337 0 60.0082Z" fill="#EC6341"/>
+<path d="M643 364C687.22 364 731.44 364 777 364C777 388.21 777 388.21 776.188 395.906C776.098 396.82 776.009 397.735 775.917 398.677C775.625 401.619 775.314 404.56 775 407.5C774.893 408.53 774.786 409.559 774.675 410.62C772.868 427.87 770.568 445.036 768 462.188C767.758 463.821 767.758 463.821 767.512 465.487C765.566 478.525 763.183 491.358 760.118 504.181C759.029 508.762 758.146 513.366 757.312 518C752.878 541.244 746.262 564.49 739 587C738.601 588.248 738.202 589.496 737.792 590.782C721.256 642.383 700.303 692.675 672 739C671.478 739.857 670.956 740.713 670.418 741.596C663.399 753.057 655.906 764.133 648 775C647.242 776.044 646.484 777.088 645.703 778.164C636.891 790.096 627.532 801.572 617.406 812.41C615.421 814.547 613.511 816.714 611.625 818.938C604.113 827.59 595.76 835.627 587 843C586.083 843.806 585.167 844.611 584.223 845.441C567.404 860.14 549.49 871.892 528.375 879.375C527.47 879.697 526.565 880.019 525.632 880.351C512.415 884.812 499.791 886.502 485.939 886.391C483.568 886.375 481.198 886.391 478.826 886.41C442.364 886.462 409.239 870.717 383 846C382.348 845.412 381.695 844.824 381.023 844.219C371.827 835.59 364.619 824.702 357.75 814.188C357.367 813.607 356.984 813.027 356.59 812.429C354.855 809.707 354 808.297 354 805C355.203 804.634 356.405 804.268 357.645 803.891C380.184 796.818 401.693 787.06 422 775C423.198 774.289 423.198 774.289 424.419 773.563C436.23 766.476 447.241 758.589 458 750C459.543 748.778 459.543 748.778 461.117 747.531C466.755 742.995 472.139 738.222 477.461 733.32C479.545 731.416 481.659 729.574 483.812 727.75C492.093 720.547 500.048 712.594 507.129 704.207C508.654 702.408 510.205 700.644 511.777 698.887C520.822 688.72 528.989 677.993 537 667C537.535 666.27 538.07 665.54 538.622 664.789C551.106 647.708 562.016 629.641 572 611C572.468 610.132 572.935 609.264 573.417 608.369C590.987 575.638 604.965 541.464 616 506C616.296 505.051 616.591 504.102 616.896 503.125C621.991 486.595 626.113 469.849 630 453C630.323 451.648 630.646 450.297 630.969 448.945C633.655 437.514 635.521 426.018 637.183 414.398C637.622 411.332 638.076 408.269 638.531 405.205C638.826 403.175 639.121 401.144 639.414 399.113C639.544 398.239 639.675 397.364 639.809 396.462C641.332 385.66 642.051 374.916 643 364Z" fill="#FDF1E9"/>
+<path d="M818 364C864.86 364 911.72 364 960 364C960 397.947 960 397.947 959.25 409.875C959.207 410.583 959.164 411.291 959.12 412.021C956.219 459.422 949.533 506.5 940 553C939.707 554.441 939.414 555.883 939.122 557.324C932.8 588.29 924.765 618.942 915 649C914.555 650.382 914.11 651.764 913.665 653.146C897.958 701.835 878.777 749.837 851 793C850.532 793.733 850.064 794.465 849.583 795.22C822.424 837.589 786.14 869.913 736.312 881.938C702.256 889.345 668.216 882.202 638.77 864.149C634.583 861.431 630.739 858.299 627 855C630.883 850.23 635.069 845.882 639.438 841.562C643.464 837.571 647.417 833.582 651.086 829.254C652.654 827.407 654.244 825.589 655.852 823.777C664.033 814.52 671.645 804.925 679 795C679.547 794.263 680.094 793.527 680.657 792.768C727.355 729.631 757.834 657.541 781 583C781.307 582.014 781.307 582.014 781.62 581.008C787.81 561.033 792.481 540.722 797.031 520.325C797.836 516.72 798.664 513.121 799.504 509.523C803.036 494.197 805.409 478.698 807.684 463.146C807.999 461.007 808.319 458.868 808.641 456.729C811.326 438.842 813.532 420.944 815.25 402.938C815.333 402.075 815.416 401.212 815.501 400.324C815.741 397.809 815.974 395.293 816.203 392.777C816.27 392.071 816.336 391.365 816.404 390.637C817.189 381.765 817.531 372.909 818 364Z" fill="#FDF1E9"/>
+<path d="M241 364C287.86 364 334.72 364 383 364C383.33 370.93 383.66 377.86 384 385C384.279 388.574 384.572 392.125 384.938 395.688C385.61 402.614 386.201 409.539 386.701 416.48C388.247 437.848 390.819 458.93 394.497 480.033C394.993 482.961 395.453 485.892 395.898 488.828C400.396 518.413 405.985 548.218 414.789 576.848C415.767 580.088 416.59 583.352 417.391 586.641C419.06 593.401 421.054 600.041 423.125 606.688C423.32 607.314 423.515 607.94 423.716 608.585C434.15 641.986 447.422 674.225 462 706C457.356 711.63 452.459 716.172 446.7 720.671C445.516 721.597 444.336 722.527 443.159 723.462C418.533 743.002 391.445 758.837 362 770C361.126 770.331 360.253 770.663 359.353 771.004C356.637 772.022 353.915 773.017 351.188 774C350.357 774.303 349.526 774.607 348.67 774.92C344.296 776.447 340.704 777.364 336 777C311.182 730.296 288.764 680.528 276 629C275.447 626.995 274.878 624.995 274.308 622.995C268.211 601.548 263.105 579.912 259 558C258.786 556.86 258.572 555.721 258.352 554.547C257.261 548.724 256.184 542.898 255.121 537.07C254.498 533.662 253.862 530.26 253.16 526.867C250.217 512.39 248.68 497.667 247 483C246.912 482.23 246.823 481.46 246.732 480.667C242.28 441.624 241 403.567 241 364Z" fill="#FDF1E9"/>
+<path d="M422 364C466.55 364 511.1 364 557 364C558.98 388.75 558.98 388.75 561 414C562.098 423.348 563.221 432.617 564.674 441.905C565.036 444.233 565.391 446.561 565.746 448.89C568.874 469.34 572.234 489.686 576.954 509.837C577.238 511.082 577.521 512.327 577.812 513.609C578.066 514.682 578.32 515.754 578.582 516.858C579.334 522.511 578.092 527.346 575.988 532.57C575.568 533.616 575.147 534.662 574.714 535.74C574.251 536.857 573.789 537.974 573.312 539.125C572.582 540.897 572.582 540.897 571.837 542.705C559.616 572.058 544.888 600.694 527 627C526.1 628.341 525.2 629.682 524.301 631.023C518.296 639.915 511.972 648.542 505.465 657.072C503.996 659.005 502.542 660.949 501.09 662.895C500.185 664.097 499.28 665.298 498.375 666.5C497.961 667.058 497.547 667.617 497.121 668.192C496.128 669.499 495.07 670.755 494 672C493.34 672 492.68 672 492 672C476.284 634.029 461.894 595.643 451.562 555.812C451.189 554.381 450.815 552.95 450.441 551.52C450.122 550.285 450.122 550.285 449.797 549.025C449.182 546.691 448.55 544.364 447.906 542.037C444.567 529.838 441.949 517.547 439.515 505.138C438.874 501.871 438.225 498.605 437.574 495.34C432.566 470.119 428.509 444.921 425.692 419.355C425.482 417.466 425.267 415.576 425.047 413.688C423.107 397.063 422.58 380.822 422 364Z" fill="#FDF1E9"/>
+</g>
+<path d="M1672.31 914L1487.58 259.455H1615.1L1733.03 740.456H1739.11L1865.03 259.455H1981.04L2107.29 740.776H2113.04L2230.97 259.455H2358.49L2173.76 914H2056.79L1925.75 454.732H1920.64L1789.28 914H1672.31ZM2602.83 923.588C2553.61 923.588 2511.1 913.361 2475.31 892.906C2439.73 872.239 2412.35 843.048 2393.17 805.335C2374 767.409 2364.41 722.771 2364.41 671.422C2364.41 620.925 2374 576.607 2393.17 538.467C2412.56 500.115 2439.62 470.285 2474.35 448.979C2509.08 427.459 2549.88 416.699 2596.76 416.699C2627.01 416.699 2655.56 421.599 2682.41 431.401C2709.47 440.989 2733.33 455.903 2754 476.145C2774.88 496.386 2791.29 522.168 2803.22 553.489C2815.15 584.597 2821.12 621.67 2821.12 664.71V700.186H2418.74V622.203H2710.22C2710 600.044 2705.21 580.335 2695.83 563.077C2686.46 545.605 2673.36 531.862 2656.52 521.848C2639.9 511.834 2620.51 506.827 2598.36 506.827C2574.71 506.827 2553.93 512.58 2536.03 524.085C2518.14 535.378 2504.18 550.293 2494.17 568.83C2484.36 587.153 2479.36 607.288 2479.14 629.234V697.31C2479.14 725.861 2484.36 750.364 2494.8 770.818C2505.25 791.06 2519.84 806.614 2538.59 817.48C2557.34 828.134 2579.29 833.46 2604.43 833.46C2621.26 833.46 2636.5 831.116 2650.13 826.429C2663.77 821.528 2675.59 814.391 2685.61 805.016C2695.62 795.641 2703.19 784.028 2708.3 770.179L2816.32 782.324C2809.51 810.875 2796.51 835.804 2777.33 857.111C2758.37 878.205 2734.08 894.611 2704.46 906.33C2674.85 917.835 2640.97 923.588 2602.83 923.588ZM3060.26 923.908C3029.15 923.908 3001.13 918.368 2976.21 907.288C2951.49 895.996 2931.89 879.376 2917.4 857.43C2903.12 835.484 2895.99 808.425 2895.99 776.251C2895.99 748.553 2901.1 725.648 2911.33 707.537C2921.55 689.426 2935.51 674.938 2953.19 664.071C2970.88 653.205 2990.8 645.001 3012.96 639.462C3035.33 633.709 3058.45 629.554 3082.31 626.997C3111.08 624.014 3134.41 621.351 3152.31 619.007C3170.2 616.45 3183.2 612.615 3191.3 607.501C3199.61 602.175 3203.76 593.972 3203.76 582.892V580.974C3203.76 556.898 3196.62 538.254 3182.35 525.044C3168.07 511.834 3147.51 505.229 3120.67 505.229C3092.33 505.229 3069.85 511.408 3053.23 523.766C3036.82 536.124 3025.74 550.719 3019.99 567.551L2911.97 552.21C2920.49 522.381 2934.55 497.452 2954.15 477.423C2973.76 457.182 2997.73 442.054 3026.06 432.04C3054.4 421.812 3085.72 416.699 3120.03 416.699C3143.68 416.699 3167.22 419.469 3190.66 425.009C3214.1 430.548 3235.51 439.71 3254.9 452.494C3274.29 465.065 3289.84 482.217 3301.56 503.95C3313.49 525.683 3319.46 552.849 3319.46 585.449V914H3208.24V846.564H3204.4C3197.37 860.2 3187.46 872.984 3174.68 884.916C3162.11 896.635 3146.23 906.116 3127.06 913.361C3108.09 920.392 3085.83 923.908 3060.26 923.908ZM3090.3 838.893C3113.53 838.893 3133.66 834.312 3150.71 825.151C3167.75 815.776 3180.86 803.418 3190.02 788.077C3199.39 772.736 3204.08 756.01 3204.08 737.899V680.051C3200.46 683.034 3194.28 685.804 3185.55 688.361C3177.02 690.918 3167.43 693.155 3156.78 695.072C3146.13 696.99 3135.58 698.695 3125.14 700.186C3114.7 701.678 3105.64 702.956 3097.97 704.021C3080.72 706.365 3065.27 710.2 3051.63 715.527C3038 720.854 3027.24 728.311 3019.35 737.899C3011.47 747.274 3007.53 759.419 3007.53 774.334C3007.53 795.641 3015.3 811.727 3030.86 822.594C3046.41 833.46 3066.23 838.893 3090.3 838.893ZM3856.71 423.091L3681.89 914H3554.05L3379.22 423.091H3502.59L3615.41 787.757H3620.52L3733.66 423.091H3856.71ZM4137.4 923.588C4088.18 923.588 4045.67 913.361 4009.88 892.906C3974.3 872.239 3946.92 843.048 3927.74 805.335C3908.57 767.409 3898.98 722.771 3898.98 671.422C3898.98 620.925 3908.57 576.607 3927.74 538.467C3947.13 500.115 3974.19 470.285 4008.92 448.979C4043.65 427.459 4084.45 416.699 4131.33 416.699C4161.58 416.699 4190.13 421.599 4216.98 431.401C4244.04 440.989 4267.9 455.903 4288.57 476.145C4309.45 496.386 4325.86 522.168 4337.79 553.489C4349.72 584.597 4355.69 621.67 4355.69 664.71V700.186H3953.31V622.203H4244.79C4244.57 600.044 4239.78 580.335 4230.4 563.077C4221.03 545.605 4207.93 531.862 4191.09 521.848C4174.47 511.834 4155.09 506.827 4132.93 506.827C4109.28 506.827 4088.5 512.58 4070.6 524.085C4052.71 535.378 4038.75 550.293 4028.74 568.83C4018.93 587.153 4013.93 607.288 4013.71 629.234V697.31C4013.71 725.861 4018.93 750.364 4029.38 770.818C4039.82 791.06 4054.41 806.614 4073.16 817.48C4091.91 828.134 4113.86 833.46 4139 833.46C4155.83 833.46 4171.07 831.116 4184.7 826.429C4198.34 821.528 4210.16 814.391 4220.18 805.016C4230.19 795.641 4237.76 784.028 4242.87 770.179L4350.89 782.324C4344.08 810.875 4331.08 835.804 4311.9 857.111C4292.94 878.205 4268.65 894.611 4239.03 906.33C4209.42 917.835 4175.54 923.588 4137.4 923.588ZM4681.92 914V259.455H4927.38C4977.66 259.455 5019.85 268.19 5053.94 285.662C5088.24 303.133 5114.13 327.636 5131.6 359.17C5149.29 390.491 5158.13 427.033 5158.13 468.794C5158.13 510.768 5149.18 547.203 5131.28 578.098C5113.6 608.78 5087.5 632.537 5052.98 649.369C5018.46 665.989 4976.06 674.298 4925.78 674.298H4750.96V575.861H4909.8C4939.2 575.861 4963.28 571.812 4982.03 563.716C5000.78 555.406 5014.63 543.368 5023.58 527.601C5032.74 511.621 5037.32 492.018 5037.32 468.794C5037.32 445.57 5032.74 425.754 5023.58 409.348C5014.42 392.729 5000.46 380.158 4981.71 371.635C4962.96 362.899 4938.78 358.531 4909.16 358.531H4800.5V914H4681.92ZM5020.06 617.409L5182.1 914H5049.79L4890.62 617.409H5020.06ZM5469.26 923.588C5421.32 923.588 5379.77 913.041 5344.62 891.947C5309.46 870.854 5282.19 841.344 5262.8 803.418C5243.62 765.491 5234.04 721.173 5234.04 670.463C5234.04 619.753 5243.62 575.328 5262.8 537.189C5282.19 499.05 5309.46 469.433 5344.62 448.339C5379.77 427.246 5421.32 416.699 5469.26 416.699C5517.2 416.699 5558.75 427.246 5593.91 448.339C5629.06 469.433 5656.23 499.05 5675.41 537.189C5694.8 575.328 5704.49 619.753 5704.49 670.463C5704.49 721.173 5694.8 765.491 5675.41 803.418C5656.23 841.344 5629.06 870.854 5593.91 891.947C5558.75 913.041 5517.2 923.588 5469.26 923.588ZM5469.9 830.903C5495.9 830.903 5517.63 823.766 5535.1 809.49C5552.57 795.001 5565.57 775.612 5574.09 751.322C5582.83 727.033 5587.2 699.973 5587.2 670.143C5587.2 640.101 5582.83 612.935 5574.09 588.645C5565.57 564.142 5552.57 544.646 5535.1 530.158C5517.63 515.669 5495.9 508.425 5469.9 508.425C5443.27 508.425 5421.11 515.669 5403.43 530.158C5385.95 544.646 5372.85 564.142 5364.11 588.645C5355.59 612.935 5351.33 640.101 5351.33 670.143C5351.33 699.973 5355.59 727.033 5364.11 751.322C5372.85 775.612 5385.95 795.001 5403.43 809.49C5421.11 823.766 5443.27 830.903 5469.9 830.903ZM6115.58 707.537V423.091H6231.27V914H6119.09V826.749H6113.98C6102.9 854.234 6084.68 876.713 6059.33 894.185C6034.19 911.656 6003.19 920.392 5966.32 920.392C5934.15 920.392 5905.71 913.254 5880.99 898.979C5856.49 884.49 5837.31 863.503 5823.46 836.017C5809.61 808.318 5802.69 774.866 5802.69 735.662V423.091H5918.38V717.764C5918.38 748.872 5926.91 773.588 5943.95 791.912C5961 810.236 5983.37 819.398 6011.07 819.398C6028.11 819.398 6044.63 815.243 6060.61 806.933C6076.59 798.624 6089.69 786.266 6099.92 769.859C6110.36 753.24 6115.58 732.466 6115.58 707.537ZM6595.38 423.091V512.58H6313.17V423.091H6595.38ZM6382.85 305.477H6498.54V766.344C6498.54 781.898 6500.89 793.83 6505.57 802.139C6510.47 810.236 6516.87 815.776 6524.75 818.759C6532.63 821.741 6541.37 823.233 6550.96 823.233C6558.2 823.233 6564.81 822.7 6570.77 821.635C6576.95 820.57 6581.64 819.611 6584.83 818.759L6604.33 909.206C6598.15 911.337 6589.31 913.68 6577.8 916.237C6566.51 918.794 6552.66 920.286 6536.26 920.712C6507.28 921.564 6481.18 917.196 6457.95 907.608C6434.73 897.807 6416.3 882.679 6402.66 862.224C6389.24 841.77 6382.63 816.202 6382.85 785.52V305.477ZM6904.2 923.588C6854.98 923.588 6812.47 913.361 6776.68 892.906C6741.09 872.239 6713.71 843.048 6694.54 805.335C6675.36 767.409 6665.77 722.771 6665.77 671.422C6665.77 620.925 6675.36 576.607 6694.54 538.467C6713.93 500.115 6740.99 470.285 6775.72 448.979C6810.45 427.459 6851.25 416.699 6898.12 416.699C6928.38 416.699 6956.93 421.599 6983.78 431.401C7010.84 440.989 7034.7 455.903 7055.37 476.145C7076.25 496.386 7092.66 522.168 7104.59 553.489C7116.52 584.597 7122.49 621.67 7122.49 664.71V700.186H6720.11V622.203H7011.58C7011.37 600.044 7006.58 580.335 6997.2 563.077C6987.83 545.605 6974.72 531.862 6957.89 521.848C6941.27 511.834 6921.88 506.827 6899.72 506.827C6876.07 506.827 6855.3 512.58 6837.4 524.085C6819.5 535.378 6805.55 550.293 6795.53 568.83C6785.73 587.153 6780.72 607.288 6780.51 629.234V697.31C6780.51 725.861 6785.73 750.364 6796.17 770.818C6806.61 791.06 6821.21 806.614 6839.96 817.48C6858.71 828.134 6880.65 833.46 6905.8 833.46C6922.63 833.46 6937.86 831.116 6951.5 826.429C6965.13 821.528 6976.96 814.391 6986.97 805.016C6996.99 795.641 7004.55 784.028 7009.67 770.179L7117.69 782.324C7110.87 810.875 7097.88 835.804 7078.7 857.111C7059.74 878.205 7035.45 894.611 7005.83 906.33C6976.21 917.835 6942.34 923.588 6904.2 923.588ZM7220.36 914V423.091H7332.54V504.909H7337.66C7346.61 476.571 7361.95 454.732 7383.68 439.391C7405.63 423.837 7430.66 416.06 7458.79 416.06C7465.18 416.06 7472.32 416.379 7480.2 417.018C7488.3 417.445 7495.01 418.19 7500.34 419.256V525.683C7495.44 523.979 7487.66 522.487 7477 521.209C7466.56 519.717 7456.44 518.972 7446.64 518.972C7425.55 518.972 7406.59 523.553 7389.75 532.714C7373.13 541.663 7360.03 554.128 7350.44 570.108C7340.85 586.088 7336.06 604.518 7336.06 625.399V914H7220.36Z" fill="#EC6341"/>
+<defs>
+<clipPath id="clip0_15_12">
+<rect width="1200" height="1200" rx="120" fill="white"/>
+</clipPath>
+</defs>
+</svg>
+
+
+
+**One endpoint. Every open-weight model. Always the right one.**
+
+An OpenAI-compatible router built **exclusively for [ai&](https://aiand.com)**
+(aiand.com): it picks the best open-weight model for every request — per
+*action*, not per turn — using a tiny on-box embedder, not a vibes-based
+prompt. `POST /v1/chat/completions` is the product lead; `POST /v1/messages`
+(Anthropic wire) and `POST /v1/responses` (OpenAI Responses, for Codex CLI)
+are translated ingresses on the same catalog.
+
+[![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go)](go.mod)
+[![Tests](https://github.com/fenilmodi00/aiand-router/actions/workflows/test.yml/badge.svg)](https://github.com/fenilmodi00/aiand-router/actions/workflows/test.yml)
+[![License: ELv2](https://img.shields.io/badge/License-ELv2-00BFB3.svg)](https://www.elastic.co/licensing/elastic-license)
+
+*ai&-exclusive OpenAI-compatible router, published as `aiand-router` on npm
+(Go module `aiand/router`); HTTP override headers use the `x-aiand-*` prefix.*
+
+</div>
+
+## What it does
+
+Point Codex, Cursor, opencode, pi, or your own app at the router. Built
+exclusively around the ai& inference API, it:
+
+- 🎯 **Routes per action.** A cluster scorer derived from
+  [Avengers-Pro](https://arxiv.org/abs/2508.12631) [^1] runs a tiny in-process
+  ONNX embedder over each action and picks the right open-weight model from
+  the ai& catalog. Routes per **action**, not per turn — see
+  [docs/SEMANTICS.md](docs/SEMANTICS.md) for the canonical terminology.
+- 🧠 **ai&-only catalog.** DeepSeek, Kimi, GLM, Qwen, Motif, gpt-oss — via
+  `AIAND_API_KEY` at `api.aiand.com/v1`, Japan-resident
+  OpenAI-compatible inference. One provider, one key, six catalog rows.
+- 🔌 **Three ingress wires, one turn loop.** `POST /v1/chat/completions`
+  (lead, native), `POST /v1/messages` (Anthropic wire → translated), and
+  `POST /v1/responses` (OpenAI Responses → translated; the surface Codex CLI
+  requires). All three route on the same catalog and share the session-pin
+  and failover machinery.
+- 📌 **Session pinning with cache-aware economics.** Every session pins to a
+  model; an expected-value planner compares staying (warm prompt cache) vs
+  switching (fresh scorer pick) each turn using live cache-read multipliers
+  and the pin's measured cache-hit share, switching only when the math says
+  it pays. User-forced pins never expire.
+- 🔒 **BYOK by default, encrypted at rest.** Per-installation ai& keys ride
+  the router encrypted with Tink AES-256-GCM; the deployment key is optional
+  where each signed-in user's own key bills their usage.
+- 🛡️ **Agentic failure handling.** Classifies upstream errors, retries with
+  sibling-binding failover, detects output-cap runaways and cyclic loops
+  (with escalation to a stronger tier), breaks text-repetition spirals, and
+  two-strike-evicts a failing pinned model.
+- 💾 **Semantic response cache.** Repeat/identical requests served from an
+  in-process semantic cache, configurable TTL and bucket size.
+- 📊 **Observable.** OTLP traces and per-decision span export out of the
+  box — see them in your own collector (Honeycomb, Datadog, Grafana) or
+  query the raw decision log via `/v1/analytics/*` with a read-only `ra_`
+  key. `/router-feedback` in chat lets users rate routing decisions, which
+  feeds routing telemetry.
+- 🖥️ **Dashboard.** Metrics, per-model breakdown, usage/savings, model
+  selection (excluded/allowed lists), playground for previewing routing
+  decisions, live ai& catalog view, and BYOK provider-key management.
+  Login is your ai& `sk-` key (`POST /account/v1/login`).
+
+## How routing works
+
+One request travels this path:
+
+1. **Ingress.** A `POST /v1/chat/completions` (or translated
+   `/v1/messages` / `/v1/responses`) lands with an `rk_` bearer token. Auth
+   resolves the installation, its excluded/allowed models, BYOK keys, and
+   spend caps.
+2. **Force check.** Routing intent is read from the `model` field (or
+   `/force-model` command, or `x-aiand-force-model` header — in that
+   precedence). A catalog ID/alias forces that model with a user pin that
+   never expires; `auto` routes normally.
+3. **Pin check.** The session key (derived from installation + session
+   identity) is looked up in the pin store. A live pin on the same strategy
+   rehydrates its decision without re-scoring.
+4. **Score.** On a fresh turn, the cluster scorer embeds the action text
+   with the in-process ONNX embedder, scores it against the frozen
+   Avengers-Pro–derived model registry (clustered by task type, with tier,
+   tool-use quality, agentic-use, image-input, and pricing axes), and
+   produces a ranked recommendation filtered by the installation's
+   model-selection rules.
+5. **Plan.** The EV planner compares the pin vs the fresh pick:
+   `switch when expected savings (warm-cache price delta × tokens) −
+   eviction cost > threshold`, gated by the pin's measured cache-hit share
+   and a tier-upgrade guard. A cold pin is priced uncached so a phantom
+   cache can't glue a session to a stale model.
+6. **Dispatch.** The chosen binding is called on ai& (deployment key or
+   installation BYOK key). Upstream errors are classified; retryable ones
+   retry in-place (single-binding catalog) or via sibling-model failover;
+   two consecutive non-retryable failures may evict the pin and re-route.
+7. **Protect.** Output-cap runaways, cyclic tool loops (escalating to a
+   stronger tier), and text-repetition spirals are detected and broken;
+   handover summarization can bound SWITCH cost; stale thinking-block
+   signatures are stripped on cross-model switch.
+8. **Record.** The decision, usage, and cost go to Postgres (metrics,
+   analytics export) and OTel spans; the semantic cache may serve
+   the next identical non-streaming request; usage updates the pin's cache
+   telemetry for the next planner run.
+
+Routing strategy is pluggable behind one interface: the default in-process
+**cluster** scorer, an optional frozen **HMM** policy sidecar, an opt-in
+**RL/DPO** sidecar, and a **bandit** posterior router — selectable per
+request via headers, per session via the `/beta` toggle, or left at the
+deployment default.
+
+## 30-second quickstart
+
+The fastest way: point Codex, opencode, or pi at a hosted router with one
+command. No clone, no Docker, no Postgres.
+
+```bash
+npx aiand-router
+```
+
+That's it. The installer asks which tool (Codex, opencode, pi, or optionally
+Claude Code), walks you through scope (user vs. project), grabs a router key,
+and wires the right config file. Other flavors:
+
+```bash
+npx aiand-router --codex               # skip the picker, OpenAI Codex CLI
+npx aiand-router --opencode            # skip the picker, opencode
+npx aiand-router --pi                  # skip the picker, pi + Loom UI
+npx aiand-router --claude              # optional: Claude Code harness
+npx aiand-router --scope project       # per-repo, commits settings.json (or .codex/ / opencode.json)
+npx aiand-router --local               # self-hosted localhost:8080
+npx aiand-router --base-url https://router.acme.internal
+npx aiand-router@0.1.0                 # pin a version
+```
+
+Requires Node ≥ 18 (opencode, pi, and Claude Code paths also need `jq`). Full
+flag reference: [install/npm/README.md](install/npm/README.md).
+
+### Or: self-host the whole stack
+
+If you want the router (and dashboard) running on your own box:
+
+```bash
+# 1. Drop the ai& key in. AIAND_API_KEY is the deploy baseline.
+echo "AIAND_API_KEY=sk-..." >> .env.local
+
+# 2. Boot Postgres + router on :8080 and seed an rk_ key.
+make full-setup
+```
+
+The router is up at <http://localhost:8080>, the dashboard at
+<http://localhost:8080/ui/> (log in with your ai& `sk-` key), and your
+`rk_...` key prints in the logs. Open **Playground** at
+<http://localhost:8080/ui/playground> to preview routing decisions and send
+test chat turns.
+
+```bash
+# Lead surface: OpenAI Chat Completions (catalog IDs)
+# model="auto" routes normally (scorer picks per action)...
+curl -sS http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer rk_..." \
+  -d '{"model":"auto",
+       "messages":[{"role":"user","content":"hi"}]}'
+
+# ...and a catalog ID or alias in `model` forces exactly that model,
+# same user-forced pin as /force-model / x-aiand-force-model.
+curl -sS http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer rk_..." \
+  -d '{"model":"moonshotai/kimi-k2.7",
+       "messages":[{"role":"user","content":"hi"}]}'
+
+# Optional :level effort suffix rides along (kimi-k3:high).
+curl -sS http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer rk_..." \
+  -d '{"model":"moonshotai/kimi-k3:high",
+       "messages":[{"role":"user","content":"hi"}]}'
+
+# Secondary: Anthropic Messages ingress (same catalog after translate)
+curl -sS http://localhost:8080/v1/messages \
+  -H "Authorization: Bearer rk_..." \
+  -d '{"model":"moonshotai/kimi-k2.7","max_tokens":256,
+       "messages":[{"role":"user","content":"hi"}]}'
+
+# Peek at the routing decision without proxying
+curl -sS http://localhost:8080/v1/route -H "Authorization: Bearer rk_..." -d '...'
+
+# Dashboard playground: preview a routing decision (account cookie, not rk_;
+# /account/v1/login takes your ai& sk- key)
+curl -sS -c jar -X POST http://localhost:8080/account/v1/login \
+  -H 'content-type: application/json' -d '{"key":"sk-..."}'
+curl -sS -b jar -X POST http://localhost:8080/v1/playground/route \
+  -H 'content-type: application/json' \
+  -d '{"model":"auto","messages":[{"role":"user","content":"hi"}]}'
+```
+
+The `model` field is routing intent: `model="auto"` (the default) routes
+normally, while a catalog ID or retired catalog alias forces that model —
+exactly equivalent to `/force-model` or `x-aiand-force-model` (same session
+pin, same-turn serving, same HTTP 400 on unknown values). Precedence is
+`/force-model` command > `model` field > `x-aiand-force-model` header; `auto`
+never clears an existing pin. Claude-era short names are not remapped — see
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md#client-model-strings--catalog-ids)
+and the [routing-intent section](docs/CONFIGURATION.md#routing-intent-via-the-model-field).
+
+### What that stack looks like
+
+Only the grey boxes are off your machine. The router, the scorer, Postgres, and
+your provider keys all stay local; prompts go from the router straight to ai&,
+never anywhere else.
+
+```mermaid
+flowchart LR
+    client["Codex, Cursor, opencode,<br/>pi, your own app"]
+    router["Router :8080<br/>/v1/chat/completions · /v1/messages · /v1/responses<br/>/v1/route"]
+    scorer["Cluster scorer<br/>in-process ONNX embedder"]
+    hmm["HMM policy sidecar :8093<br/>optional, make up-hmm"]
+    pg[("Postgres<br/>installations, rk_ keys,<br/>encrypted BYOK keys, usage")]
+    ui["Dashboard /ui<br/>ai& key login"]
+    providers["ai& (aiand.com)<br/>OpenAI-compatible open-weight"]
+    otel["Your OTLP collector<br/>Honeycomb, Datadog, Grafana"]
+
+    client -->|"rk_… bearer token,<br/>streamed response back"| router
+    router -->|"embed and score the action"| scorer
+    router -.->|"ROUTER_DEFAULT_STRATEGY=hmm"| hmm
+    router -->|"auth, config, usage"| pg
+    pg --> ui
+    router -->|"AIAND_API_KEY from env or BYOK"| providers
+    router -.->|"spans and usage logs"| otel
+
+    classDef external fill:#f4f4f5,stroke:#a1a1aa,color:#3f3f46
+    class providers,otel external
+```
+
+### Optional: self-host the frozen HMM policy
+
+The default stack uses the in-process cluster scorer. To run the frozen HMM
+policy as a companion container, add a Google API key and use the opt-in target:
+
+```bash
+echo 'GOOGLE_API_KEY=...' >> .env.local
+make up-hmm
+```
+
+This does not change the default strategy. See
+[`sidecars/hmm/README.md`](sidecars/hmm/README.md) for artifact verification,
+embedding compatibility, and explicit HMM selection.
+
+## Wire it into your tools
+
+**Codex** (OpenAI CLI). `npx aiand-router --codex` patches
+`~/.codex/config.toml` (or `<repo>/.codex/config.toml` with `--scope project`)
+with a managed `[model_providers.aiand]` block and sets `model_provider = "aiand"`.
+The provider preserves Codex's existing ChatGPT OAuth login while the router
+key rides in an `X-Aiand-Router-Key` HTTP header. `--codex --local` and custom
+self-hosted URLs keep their router's configured default strategy (HMM sidecar
+is optional). Routed open-weight models go to **ai&** via the router's
+`AIAND_API_KEY` or installation BYOK. Codex does not load third-party
+slash-command files; send router directives with one leading space (for
+example, ` /force-model moonshotai/kimi-k2.7`). Re-install and
+`--uninstall --codex` rewrite/remove only the managed block, leaving the
+rest of your Codex config untouched. Invoke `$disable-routing` to switch the
+next Codex session back to its normal provider, or run
+`npx aiand-router disable-routing` in a shell; a literal
+`/disable-routing` is not a third-party extension point in Codex.
+
+**opencode.** `npx aiand-router --opencode` merges a `provider.aiand`
+entry into `~/.config/opencode/opencode.json` (or `<repo>/opencode.json`
+with `--scope project`). It uses opencode's bundled Anthropic SDK provider
+pointed at the router's `/v1` endpoint — the secondary `/v1/messages` ingress
+accepts that wire and translates to OpenAI-compat for aiand. The router
+key and identity headers ride alongside the provider config; re-install
+rewrites only the managed block and `--uninstall --opencode` strips it.
+
+**pi.** `npx aiand-router --pi` keeps stock pi as the runtime and installs
+the router's pi extension. It adds the Loom header, Wooly's animated terminal
+mascot, a persistent `AIAND ROUTER` route/savings line, `/fm` + `/ufm`
+model-pin commands with a `[forced]` status, and context-isolated subagents
+without shipping or maintaining a forked pi binary.
+
+**Cursor** *(early beta, performance may not be the best).* Settings →
+Models → *Override OpenAI Base URL* → `http://localhost:8080/v1`, paste
+`rk_...` as the API key.
+
+**Claude Code** *(optional harness).* `make install-cc` wires Claude Code at
+the local self-hosted router (also invoked at the end of `make full-setup`).
+For a hosted router, `npx aiand-router --claude`. Pin with catalog IDs
+(Claude-era short names are not remapped — see
+[CONFIGURATION](docs/CONFIGURATION.md#client-model-strings--catalog-ids)).
+
+**Switching on/off.** After installing, `npx aiand-router off --codex`
+(or `--opencode` / `--claude`) routes that client straight to its provider
+again without discarding the router config; `on` flips it back, and `status`
+reports which way it's pointing. See [install/README.md](install/README.md#switching-on-and-off).
+
+**Choosing which models the router may pick.** `npx aiand-router models
+--codex` lists every deployed model with its on/off state, and `models enable`
+/ `models disable` change it — the same setting as the dashboard's settings
+page, edited from the terminal. Requires a router that serves the
+model-selection API; against a hosted router the list still prints and
+points you at the dashboard, where selection is an organization-wide setting.
+See [install/README.md](install/README.md#choosing-which-models-the-router-may-pick).
+
+> Two keys, don't mix them up:
+> - `AIAND_API_KEY` (`sk-…`) = your **upstream** ai& key. Lives in `.env.local`.
+> - `rk_...` = your **router** key. Clients send this as a Bearer token.
+
+## Endpoints
+
+| Endpoint                       | Format                                   |
+| ------------------------------ | ---------------------------------------- |
+| `POST /v1/chat/completions`    | OpenAI Chat Completions, routed (lead)   |
+| `POST /v1/responses`           | OpenAI Responses ingress (Codex CLI), translated to chat internally |
+| `POST /v1/messages`            | Anthropic Messages ingress, routed (peripheral) |
+| `POST /v1/route`               | Returns the decision, no upstream call   |
+| `GET /v1/models` &nbsp;·&nbsp; `POST /v1/messages/count_tokens` | Passthrough helpers |
+| `GET /v1/router/policies` &nbsp;·&nbsp; `GET /v1/router/models` &nbsp;·&nbsp; `GET /v1/router/routing-distribution` | Unauthed strategy catalog, model list, dial projection |
+| `GET /v1/router/hmm-roster`   | HMM sidecar roster, when wired          |
+| `GET /health` &nbsp;·&nbsp; `GET /readyz` &nbsp;·&nbsp; `GET /validate` &nbsp;·&nbsp; `GET /v1/version` | liveness + dependency readiness + key check + build info |
+| `GET /v1/analytics/routing-decisions` | Raw routing decisions as cursor-paginated NDJSON, `ra_` key ([docs](docs/ANALYTICS_EXPORT.md)) |
+| `GET /v1/analytics/schema` &nbsp;·&nbsp; `GET /v1/analytics/models` | Export field dictionary + price book |
+
+Ingress auth is the `rk_` router key (Bearer). Analytics export uses a
+separate read-only `ra_` key that can never reach an inference route. Dashboard
+data plane is cookie-authed via ai& key login (`POST /account/v1/login`).
+
+Keep liveness probes on `/health`. Point startup or readiness probes at
+`/readyz` when configured policy sidecars must be ready before traffic arrives.
+
+## The ai& catalog
+
+Six open-weight models are bound to ai& (single source of truth:
+[`internal/router/catalog`](internal/router/catalog/catalog.go); the
+dashboard's Models page also shows the live per-org list from
+`GET /v1/models` on ai&):
+
+| Catalog ID | Tier | Context | Efforts | In/Out $/1M |
+|---|---|---|---|---|
+| `deepseek-ai/deepseek-v4-flash` | low | 1M | none/high/max | $0.15 / $0.25 |
+| `qwen/qwen3.8-27b` | low | 262K | none/low/medium/xhigh | $0.40 / $3.00 |
+| `motif-technologies/motif-3` | mid | 262K | low/medium/high | $0.50 / $2.00 |
+| `moonshotai/kimi-k2.7` | high | 262K | high | $0.75 / $3.50 |
+| `zai-org/glm-5.3` | high | 1M | none/low/xhigh/max | $1.00 / $4.00 |
+| `moonshotai/kimi-k3` | high | 1M | low/high/max | $3.00 / $12.50 |
+
+Retired IDs (`glm-5.2`, `qwen3.6-27b`, …) stay resolvable through
+`catalog.aliases` so old pins and client integrations keep landing on the
+right row. Claude-era short names (`opus`, `sonnet`, `haiku`, …) are **not**
+remapped — pin a catalog ID instead (see
+[CONFIGURATION](docs/CONFIGURATION.md#client-model-strings--catalog-ids)).
+
+## Deployment
+
+Single "hosted" mode: the dashboard is mounted at `/ui/*` and its data plane
+at `/v1/*`. Login is your ai& `sk-` key (`POST /account/v1/login`). Upstream
+credential is `AIAND_API_KEY` from env or per-installation/per-user BYOK keys.
+
+## Give routing feedback
+
+`/router-feedback <up|down> [note]` in any wired chat client rates the last
+routing decision; the verdict persists (`router.router_feedback`), short-circuits
+routing, and emits a `router.feedback.command` span. The HTTP feedback pages
+were removed — `ROUTER_FEEDBACK_*` env vars are ignored.
+
+## Deeper docs
+
+- 📐 [**Configuration reference**](docs/CONFIGURATION.md): every env var,
+  BYOK encryption, OTel knobs, cluster routing, dashboard auth.
+- 🧭 [**Semantics and terminology**](docs/SEMANTICS.md): canonical definitions
+  for session, round, turn, action, and step.
+- 🧩 [**Adding models (six-model roster)**](docs/adding-glm-5-3.md): catalog +
+  cluster overlay pattern for ai& rows.
+- 📊 [**Analytics export**](docs/ANALYTICS_EXPORT.md): pulling raw routing
+  decisions into your own warehouse with a read-only key.
+- [**Policy router harness**](docs/POLICY_ROUTER_HARNESS.md): contract and
+  rollout checklist for adding an out-of-process policy model.
+- 🛠️ [**Contributing**](CONTRIBUTING.md): layering rules, hot-reload dev,
+  schema changes, tests, the whole engineering loop.
+- 🏗️ [**Architecture**](AGENTS.md): package layout, import contracts,
+  recipes for adding endpoints / models / strategies. Glossary: [CONTEXT.md](CONTEXT.md).
+
+## Star history
+
+<a href="https://star-history.dera.page/#fenilmodi00/aiand-router&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=fenilmodi00/aiand-router&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=fenilmodi00/aiand-router&type=Date" />
+    <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=fenilmodi00/aiand-router&type=Date" />
+  </picture>
+</a>
+
+---
+
+[^1]: Zhang, Y. et al. *Beyond GPT-5: Making LLMs Cheaper and Better via
+    Performance–Efficiency Optimized Routing* (Avengers-Pro).
+    arXiv:2508.12631, 2025. <https://arxiv.org/abs/2508.12631>

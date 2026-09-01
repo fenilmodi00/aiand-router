@@ -1,0 +1,235 @@
+# Prerequisites:
+#   - Go 1.25+
+#   - sqlc (go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0)
+#   - golang-migrate (brew install golang-migrate) for migrate-* targets
+#   - CompileDaemon for `make dev` (go install github.com/githubnemo/CompileDaemon@latest)
+#   - bun for `make frontend-dev` (https://bun.sh)
+#
+# Database:
+#   Targets that touch the database read DATABASE_URL from .env.development
+#   (and .env.local if present).
+#   Host / Build.io parity: point DATABASE_URL at Supabase session pooler
+#   (:5432), then `make setup` / `make dev`.
+#   Do not run `make db` or `make full-setup` on that path — see
+#   docs/HOST_WSL_SUPABASE.md.
+#   Local disposable Postgres: `make db` (Compose on 5433) or any other
+#   Postgres URL you already have running.
+
+.PHONY: generate generate-statusline build test test-verbose test-statusline test-install smoke smoke-host initdb migrate-up migrate-down migrate-create seed setup full-setup db dev frontend-dev check fmt vet precommit install-hooks help install-cc uninstall-cc up up-hmm down down-hmm logs
+
+# Load DATABASE_URL from .env files (matches docker-compose defaults).
+-include .env.development
+-include .env.local
+export
+
+help: ## Show available targets
+	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
+
+generate: generate-statusline ## Regenerate all generated files (SQLC + statusline prices)
+	cd db && sqlc generate
+
+generate-statusline: ## Sync cc-statusline.sh prices block from pricing.go
+	go run ./cmd/genprices
+
+build: ## Typecheck the entire module
+	go build -o /dev/null ./...
+
+test: ## Run all tests
+	go test ./...
+
+test-verbose: ## Run all tests with verbose output
+	go test -v ./...
+
+test-statusline: ## Run the cc-statusline.sh regression tests (offline)
+	@bash install/tests/cc-statusline_test.sh
+
+test-install: ## Run offline installer regression tests
+	@bash install/tests/codex_install_test.sh
+	@bash install/tests/codex-status_test.sh
+	@bash install/tests/key_reuse_test.sh
+	@bash install/tests/models_test.sh
+
+smoke: ## Pre-merge smoke suite (compose+MITM in CI; use smoke-host for local Supabase)
+	./scripts/smoke/run.sh
+smoke-host: ## Smoke against host make setup/dev + Supabase (no compose)
+	SMOKE_HOST=1 ./scripts/smoke/run.sh
+
+initdb: ## Create the database and apply canonical schema if empty (fresh install)
+	@go run ./cmd/initdb
+
+# Incremental golang-migrate. DATABASE_URL must already include a query
+# string (e.g. ?sslmode=disable) so search_path can be appended with &.
+# Fresh install uses initdb/compose (canonical dump), not this target.
+# After initdb/compose, stamp version 1 before the first incremental up:
+#   migrate -path db/migrations -database "$(DATABASE_URL)&search_path=router" force 1
+migrate-up: ## Apply pending migrations (empty DB: 0001_init; else 0002+)
+	migrate -path db/migrations \
+		-database "$(DATABASE_URL)&search_path=router" up
+
+migrate-down: ## Roll back the last migration
+	migrate -path db/migrations \
+		-database "$(DATABASE_URL)&search_path=router" down 1
+
+migrate-create: ## Create a new migration (usage: make migrate-create NAME=add-foo)
+	@if [ -z "$(NAME)" ]; then echo "Usage: make migrate-create NAME=add-foo"; exit 1; fi
+	migrate create -ext sql -dir db/migrations -seq -digits 4 $(NAME)
+
+seed: ## Create a local dev installation + API key and print usage instructions
+	go run ./cmd/seed
+
+# initdb = fresh install (canonical schema). migrate-up = incremental after
+# the 0001_init baseline. setup stays on initdb; do not chain migrate-up
+# (0001 would collide with tables initdb already created).
+setup: initdb seed ## Bootstrap (host DB): init DB + schema, seed an API key
+
+full-setup: generate-statusline ## Bootstrap router: docker compose + seed + interactively wire Claude Code
+	@if [ -n "$(KEY)" ] && [ -n "$(BASE_URL)" ]; then \
+		INSTALL_CMD='AIAND_ROUTER_KEY="$(KEY)" ./install/install.sh --claude --base-url "$(BASE_URL)"'; \
+		[ -n "$(SCOPE)" ] && INSTALL_CMD="$$INSTALL_CMD --scope $(SCOPE)"; \
+		[ -n "$(DIR)" ] && INSTALL_CMD="$$INSTALL_CMD --dir $(DIR)"; \
+		[ "$(NON_INTERACTIVE)" = "1" ] && INSTALL_CMD="$$INSTALL_CMD --non-interactive"; \
+		echo "==> Wiring Claude Code → $(BASE_URL)..."; \
+		eval "$$INSTALL_CMD"; \
+	else \
+		if [ -n "$(KEY)" ] || [ -n "$(BASE_URL)" ]; then \
+			echo "error: KEY and BASE_URL must both be provided together."; \
+			exit 1; \
+		fi; \
+		./install/spin "Building docker compose stack (postgres, server)" \
+			docker compose up --build -d || exit 1; \
+		./install/spin "Waiting for router /health" bash -c '\
+			for i in $$(seq 1 60); do \
+				curl -fsS --max-time 2 http://localhost:8080/health >/dev/null 2>&1 && exit 0; \
+				sleep 1; \
+			done; \
+			echo "router did not become healthy within 60s. Tail with: make logs" >&2; \
+			exit 1' || exit 1; \
+		SEED_CAPTURE="$$(mktemp -t full-setup-seed.XXXXXX.log)"; \
+		AIAND_SPIN_CAPTURE="$$SEED_CAPTURE" ./install/spin "Seeding Aiand Router API key" \
+			docker compose run --rm seed || { rm -f "$$SEED_CAPTURE"; exit 1; }; \
+		AIAND_KEY=$$(grep -oE "^  rk_[a-zA-Z0-9_-]+$$" "$$SEED_CAPTURE" | head -1 | xargs); \
+		rm -f "$$SEED_CAPTURE"; \
+		if [ -z "$$AIAND_KEY" ]; then \
+			echo "error: failed to extract router key from seed output."; \
+			exit 1; \
+		fi; \
+		echo "    key: $$AIAND_KEY"; \
+		echo ""; \
+		AIAND_ROUTER_KEY="$$AIAND_KEY" ./install/install.sh --claude --base-url http://localhost:8080; \
+		echo ""; \
+		echo "Done. Router on http://localhost:8080. Share with teammates: make full-setup KEY=$$AIAND_KEY BASE_URL=<reachable-url>"; \
+	fi
+
+db: ## Start the compose Postgres only (port 5433)
+	docker compose up -d postgres
+	@echo ""
+	@echo "Postgres is running on localhost:5433."
+	@echo "Add this to .env.local if not already set:"
+	@echo '  DATABASE_URL=postgresql://router:router@localhost:5433/router?sslmode=disable'
+
+# `make dev` runs both processes with hot-reload:
+#   - Go router via CompileDaemon on :8080
+#   - Next.js dashboard via `bun run dev` on :3000 (rewrites /v1 and /account → :8080)
+#
+# `-tags ORT` is required for hugot v0.7+ to enable the ONNX Runtime
+# backend. Without it, cluster.NewEmbedder fails at boot and the
+# router falls open to the heuristic (Anthropic-only) — which silently
+# breaks any eval that expects v0.X-cluster routing. The Dockerfile
+# already builds with this tag; do not drop it from any production-
+# bound build either. See router/CLAUDE.md "Cluster routing (P0)".
+#
+# CGO_LDFLAGS (libtokenizers) and ROUTER_ONNX_LIBRARY_DIR
+# (libonnxruntime) come from .env.local on macOS — see the comments
+# there for setup. On Linux the brew/.local paths don't apply; the
+# Dockerfile is the production path.
+#
+# PORT is exported from .env.local for the Go router. Next.js also
+# reads PORT, so without an override it binds :8080 first, Go fails
+# with "address already in use", and /v1 rewrites loop to Next
+# (ECONNRESET). Force the UI onto 3000 regardless of .env.local.
+dev: ## Run Go router (:8080) + Next.js UI (:3000) with hot-reload
+	@set -e; \
+	trap 'kill 0' EXIT INT TERM; \
+	(cd frontend && PORT=3000 bun run dev) & \
+	CompileDaemon \
+		-build="go build -tags ORT -o ./bin/server ./cmd/router" \
+		-command="./bin/server" \
+		-exclude-dir="vendor" \
+		-exclude-dir=".vscode" \
+		-exclude-dir="bin" \
+		-exclude-dir=".venv" \
+		-exclude-dir="__pycache__" \
+		-exclude-dir=".pytest_cache" \
+		-exclude-dir=".mypy_cache" \
+		-exclude-dir=".ruff_cache" \
+		-exclude-dir=".bench-cache" \
+		-exclude-dir=".embedding-cache" \
+		-exclude-dir="node_modules" \
+		-exclude-dir="frontend" \
+		-exclude-dir="results" \
+		-exclude-dir="logs" \
+		-exclude-dir="assets" \
+		-exclude-dir=".git" \
+		-exclude-dir="eval" \
+		-exclude-dir="scripts" \
+		-exclude-dir="docs" \
+		-exclude-dir=".local" \
+		-exclude-dir="install" \
+		-pattern="(.+\.go|.+\.sql)$$" \
+		-graceful-kill=true \
+		-log-prefix=false
+
+frontend-dev: ## Run Next.js dashboard alone with hot-reload (bun run dev → :3000)
+	cd frontend && bun run dev
+
+up: ## Start the compose stack in the background (no install.sh wiring)
+	docker compose up --build -d
+
+up-hmm: ## Start the stack with the opt-in frozen HMM policy sidecar
+	docker compose -f docker-compose.yml -f sidecars/hmm/docker-compose.yml \
+		--profile hmm up --build -d
+
+down: ## Stop the compose stack, including the optional HMM sidecar (keeps the postgres volume)
+	docker compose --profile hmm down
+
+down-hmm: ## Stop the compose stack including the optional HMM sidecar
+	docker compose -f docker-compose.yml -f sidecars/hmm/docker-compose.yml \
+		--profile hmm down
+
+logs: ## Tail the server logs
+	docker compose logs -f server
+
+install-cc: generate-statusline ## Wire only Claude Code at the local docker-compose router (assumes it's already running)
+	./install/install.sh --claude --local
+
+uninstall-cc: ## Remove the local Claude Code → router config
+	./install/uninstall.sh
+
+fmt: ## Check gofmt (fails on unformatted files)
+	@UNFORMATTED=$$(gofmt -l .); \
+	if [ -n "$$UNFORMATTED" ]; then \
+		echo "error: Go files are not formatted. Run 'gofmt -w .'"; \
+		echo "$$UNFORMATTED"; \
+		exit 1; \
+	fi
+
+vet: ## Run go vet
+	go vet ./...
+
+precommit: fmt vet build test test-statusline test-install ## Fast pre-commit check (no codegen, no DB)
+
+install-hooks: ## Install git pre-commit hook
+	@HOOK_DIR=$$(git rev-parse --git-common-dir)/hooks; \
+	mkdir -p "$$HOOK_DIR"; \
+	cp scripts/pre-commit "$$HOOK_DIR/pre-commit"; \
+	chmod +x "$$HOOK_DIR/pre-commit"; \
+	echo "Pre-commit hook installed at $$HOOK_DIR/pre-commit"
+
+check: generate fmt vet build test test-statusline test-install ## Full CI-equivalent check
+	@if ! git diff --quiet internal/sqlc/; then \
+		echo "error: sqlc generation produced uncommitted changes"; \
+		git diff internal/sqlc/; \
+		exit 1; \
+	fi
+	@echo "All checks passed."

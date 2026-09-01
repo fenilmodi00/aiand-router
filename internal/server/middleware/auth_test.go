@@ -1,0 +1,360 @@
+package middleware_test
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"testing"
+	"time"
+
+	"aiand/router/internal/auth"
+	"aiand/router/internal/flags"
+	"aiand/router/internal/proxy"
+	"aiand/router/internal/router"
+	"aiand/router/internal/server/middleware"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+type fakeExternalAPIKeyRepository struct {
+	byInstallationID map[string][]*auth.ExternalAPIKey
+}
+
+func (f *fakeExternalAPIKeyRepository) Create(context.Context, auth.CreateExternalAPIKeyParams) (*auth.ExternalAPIKey, error) {
+	return nil, errors.New("not used")
+}
+
+func (f *fakeExternalAPIKeyRepository) GetForInstallation(_ context.Context, installationID string) ([]*auth.ExternalAPIKey, error) {
+	return f.byInstallationID[installationID], nil
+}
+
+func (f *fakeExternalAPIKeyRepository) SoftDeleteByProvider(context.Context, string, string) error {
+	return errors.New("not used")
+}
+
+func (f *fakeExternalAPIKeyRepository) SoftDelete(context.Context, string, string) error {
+	return errors.New("not used")
+}
+
+func (f *fakeExternalAPIKeyRepository) UpdateModelAliases(context.Context, string, string, map[string]string) (*auth.ExternalAPIKey, error) {
+	return nil, errors.New("not used")
+}
+
+func (f *fakeExternalAPIKeyRepository) MarkUsed(context.Context, string) error {
+	return nil
+}
+
+type fakeAPIKeyRepository struct {
+	byHash map[string]fakeKeyRow
+	// lookupErr stands in for an infra failure (pool exhausted, DB unreachable,
+	// deadline elapsed) as opposed to a key that simply isn't there.
+	lookupErr error
+	mu        sync.Mutex
+	used      []string
+}
+
+type fakeKeyRow struct {
+	apiKey       *auth.APIKey
+	installation *auth.Installation
+}
+
+func (f *fakeAPIKeyRepository) Create(ctx context.Context, params auth.CreateAPIKeyParams) (*auth.APIKey, error) {
+	return nil, errors.New("not used")
+}
+
+func (f *fakeAPIKeyRepository) GetActiveByHashWithInstallation(ctx context.Context, keyHash string) (*auth.APIKey, *auth.Installation, error) {
+	if f.lookupErr != nil {
+		return nil, nil, f.lookupErr
+	}
+	row, ok := f.byHash[keyHash]
+	if !ok {
+		return nil, nil, sql.ErrNoRows
+	}
+	return row.apiKey, row.installation, nil
+}
+
+func (f *fakeAPIKeyRepository) ListForInstallation(ctx context.Context, installationID string) ([]*auth.APIKey, error) {
+	return nil, errors.New("not used")
+}
+
+func (f *fakeAPIKeyRepository) MarkUsed(ctx context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.used = append(f.used, id)
+	return nil
+}
+
+func (f *fakeAPIKeyRepository) SoftDelete(ctx context.Context, installationID, id string) (int64, error) {
+	return 0, errors.New("not used")
+}
+
+type fakeInstallationRepository struct{}
+
+func (fakeInstallationRepository) Create(ctx context.Context, params auth.CreateInstallationParams) (*auth.Installation, error) {
+	return nil, errors.New("not used")
+}
+
+func (fakeInstallationRepository) Get(ctx context.Context, externalID, id string) (*auth.Installation, error) {
+	return nil, errors.New("not used")
+}
+
+func (fakeInstallationRepository) ListForExternalID(ctx context.Context, externalID string) ([]*auth.Installation, error) {
+	return nil, errors.New("not used")
+}
+
+func (fakeInstallationRepository) SoftDelete(ctx context.Context, externalID, id string) error {
+	return errors.New("not used")
+}
+
+func (fakeInstallationRepository) MarkFirstRequestServed(ctx context.Context, id string) error {
+	return nil
+}
+
+func (fakeInstallationRepository) UpdateExcludedModels(ctx context.Context, externalID, id string, models []string) error {
+	return errors.New("not used")
+}
+
+func (fakeInstallationRepository) UpdateAllowedModels(ctx context.Context, externalID, id string, models []string) error {
+	return errors.New("not used")
+}
+
+func (fakeInstallationRepository) UpdateRoutingPreference(ctx context.Context, externalID, id string, qualityWeight *float64) error {
+	return errors.New("not used")
+}
+
+func (fakeInstallationRepository) UpdateUsageBypass(ctx context.Context, externalID, id string, enabled bool, threshold *float64) error {
+	return errors.New("not used")
+}
+func (fakeInstallationRepository) UpdateSubscriptionRoutingDisabled(ctx context.Context, externalID, id string, disabled bool) error {
+	return errors.New("not used")
+}
+func (fakeInstallationRepository) UpdateContentCaptureMode(ctx context.Context, externalID, id string, mode *string) error {
+	return errors.New("not used")
+}
+func (fakeInstallationRepository) UpdateHideTerminalSurfaces(ctx context.Context, externalID, id string, hide bool) error {
+	return errors.New("not used")
+}
+
+func (fakeInstallationRepository) UpdateFlagOverrides(ctx context.Context, externalID, id string, overrides flags.Overrides) error {
+	return errors.New("not used")
+}
+
+func TestWithAuthPrefersRouterKeyHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const routerToken = "rk_router"
+	hash, prefix, suffix := auth.APITokenFingerprint(routerToken)
+	apiKey := &auth.APIKey{ID: "key-1", KeyHash: hash, KeyPrefix: prefix, KeySuffix: suffix}
+	installation := &auth.Installation{
+		ID: "inst-1", ExternalID: "ext-1", RoutingRolloutID: "rollout-1",
+		PolicyShadowStrategy: "future-policy", PolicyDebugEnabled: true,
+		PolicyRoutingIntent: "high", AITrainingAllowed: true,
+	}
+	repo := &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{
+		hash: {apiKey: apiKey, installation: installation},
+	}}
+	svc := auth.NewService(fakeInstallationRepository{}, repo, nil, nil, auth.NoOpAPIKeyCache{}, nil, func() time.Time {
+		return time.Date(2026, 5, 5, 0, 0, 0, 0, time.UTC)
+	})
+
+	engine := gin.New()
+	engine.Use(middleware.WithAuth(svc))
+	engine.GET("/probe", func(c *gin.Context) {
+		assert.Equal(t, installation, middleware.InstallationFrom(c))
+		assert.Equal(t, apiKey, middleware.APIKeyFrom(c))
+		ctx := c.Request.Context()
+		assert.Equal(t, "rollout-1", ctx.Value(proxy.PolicyRolloutIDContextKey{}))
+		assert.Equal(t, router.Strategy("future-policy"), ctx.Value(proxy.PolicyShadowStrategyContextKey{}))
+		assert.Equal(t, true, ctx.Value(proxy.PolicyDebugEnabledContextKey{}))
+		assert.Equal(t, "high", ctx.Value(proxy.PolicyRoutingIntentContextKey{}))
+		assert.Equal(t, true, ctx.Value(proxy.PolicyTrainingAllowedContextKey{}))
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	req.Header.Set(middleware.RouterKeyHeader, routerToken)
+	req.Header.Set("Authorization", "Bearer anthropic-oauth-token")
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestWithAuthPropagatesContentCaptureOverride(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const routerToken = "rk_capture"
+	hash, prefix, suffix := auth.APITokenFingerprint(routerToken)
+	apiKey := &auth.APIKey{ID: "key-capture", KeyHash: hash, KeyPrefix: prefix, KeySuffix: suffix}
+	mode := "off"
+	installation := &auth.Installation{ID: "inst-capture", ExternalID: "ext-capture", ContentCaptureMode: &mode}
+	repo := &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{
+		hash: {apiKey: apiKey, installation: installation},
+	}}
+	svc := auth.NewService(fakeInstallationRepository{}, repo, nil, nil, auth.NoOpAPIKeyCache{}, nil, func() time.Time { return time.Now() })
+
+	engine := gin.New()
+	engine.Use(middleware.WithAuth(svc))
+	engine.GET("/probe", func(c *gin.Context) {
+		// Without this the proxy only ever sees the deployment-wide mode, and
+		// an installation that asked for no retention still gets captured.
+		assert.Equal(t, proxy.CaptureOff, c.Request.Context().Value(proxy.InstallationCaptureModeContextKey{}))
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	req.Header.Set(middleware.RouterKeyHeader, routerToken)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestWithAuthOmitsContentCaptureOverrideWhenUnset(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const routerToken = "rk_nocapture"
+	hash, prefix, suffix := auth.APITokenFingerprint(routerToken)
+	apiKey := &auth.APIKey{ID: "key-nocapture", KeyHash: hash, KeyPrefix: prefix, KeySuffix: suffix}
+	installation := &auth.Installation{ID: "inst-nocapture", ExternalID: "ext-nocapture"}
+	repo := &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{
+		hash: {apiKey: apiKey, installation: installation},
+	}}
+	svc := auth.NewService(fakeInstallationRepository{}, repo, nil, nil, auth.NoOpAPIKeyCache{}, nil, func() time.Time { return time.Now() })
+
+	engine := gin.New()
+	engine.Use(middleware.WithAuth(svc))
+	engine.GET("/probe", func(c *gin.Context) {
+		assert.Nil(t, c.Request.Context().Value(proxy.InstallationCaptureModeContextKey{}),
+			"no stored override must leave the deployment mode in charge, not pin it to off")
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	req.Header.Set(middleware.RouterKeyHeader, routerToken)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestWithAuthKeepsBYOKInContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const routerToken = "rk_byok"
+	hash, prefix, suffix := auth.APITokenFingerprint(routerToken)
+	apiKey := &auth.APIKey{ID: "key-byok", InstallationID: "inst-byok", KeyHash: hash, KeyPrefix: prefix, KeySuffix: suffix}
+	installation := &auth.Installation{ID: "inst-byok", ExternalID: "ext-byok"}
+	repo := &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{
+		hash: {apiKey: apiKey, installation: installation},
+	}}
+	externalRepo := &fakeExternalAPIKeyRepository{byInstallationID: map[string][]*auth.ExternalAPIKey{
+		installation.ID: {{
+			ID: "ext-byok", InstallationID: installation.ID, Provider: "anthropic",
+			Plaintext: []byte("sk-ant-byok"),
+		}},
+	}}
+	svc := auth.NewService(fakeInstallationRepository{}, repo, externalRepo, nil, auth.NoOpAPIKeyCache{}, nil, func() time.Time { return time.Now() })
+
+	engine := gin.New()
+	engine.Use(middleware.WithAuth(svc))
+	engine.GET("/probe", func(c *gin.Context) {
+		v, ok := c.Request.Context().Value(proxy.ExternalAPIKeysContextKey{}).([]*auth.ExternalAPIKey)
+		require.True(t, ok, "BYOK rows must propagate to the proxy ctx")
+		require.Len(t, v, 1)
+		assert.Equal(t, "anthropic", v[0].Provider)
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	req.Header.Set(middleware.RouterKeyHeader, routerToken)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+}
+func TestWithAuthKeepsLegacyBearerFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const routerToken = "rk_router"
+	hash, prefix, suffix := auth.APITokenFingerprint(routerToken)
+	apiKey := &auth.APIKey{ID: "key-1", KeyHash: hash, KeyPrefix: prefix, KeySuffix: suffix}
+	installation := &auth.Installation{ID: "inst-1", ExternalID: "ext-1"}
+	repo := &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{
+		hash: {apiKey: apiKey, installation: installation},
+	}}
+	svc := auth.NewService(fakeInstallationRepository{}, repo, nil, nil, auth.NoOpAPIKeyCache{}, nil, func() time.Time { return time.Now() })
+
+	engine := gin.New()
+	engine.Use(middleware.WithAuth(svc))
+	engine.GET("/probe", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	req := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	req.Header.Set("Authorization", "Bearer "+routerToken)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestWithAuthInfraFailureIsRetryable503NotInvalidKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const routerToken = "rk_valid_but_db_is_down"
+	hash, _, _ := auth.APITokenFingerprint(routerToken)
+	repo := &fakeAPIKeyRepository{
+		byHash:    map[string]fakeKeyRow{hash: {apiKey: &auth.APIKey{ID: "key-1"}, installation: &auth.Installation{ID: "inst-1"}}},
+		lookupErr: context.DeadlineExceeded,
+	}
+	svc := auth.NewService(fakeInstallationRepository{}, repo, nil, nil, auth.NoOpAPIKeyCache{}, nil, func() time.Time { return time.Now() })
+
+	engine := gin.New()
+	engine.Use(middleware.WithAuth(svc))
+	engine.GET("/probe", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	req := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	req.Header.Set(middleware.RouterKeyHeader, routerToken)
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, rr.Code,
+		"an infra failure reported as 401 makes a transient outage indistinguishable from a wrong key")
+	assert.Equal(t, "1", rr.Header().Get("Retry-After"))
+	assert.NotContains(t, rr.Body.String(), "invalid_key")
+}
+
+func TestWithAuthUnknownKeyStays401(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{}}
+	svc := auth.NewService(fakeInstallationRepository{}, repo, nil, nil, auth.NoOpAPIKeyCache{}, nil, func() time.Time { return time.Now() })
+
+	engine := gin.New()
+	engine.Use(middleware.WithAuth(svc))
+	engine.GET("/probe", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	req := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	req.Header.Set(middleware.RouterKeyHeader, "rk_no_such_key")
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusUnauthorized, rr.Code)
+	assert.Contains(t, rr.Body.String(), "invalid_key")
+	assert.Empty(t, rr.Header().Get("Retry-After"))
+}
+
+func TestWithAuthMalformedPrefixStays401(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &fakeAPIKeyRepository{byHash: map[string]fakeKeyRow{}}
+	svc := auth.NewService(fakeInstallationRepository{}, repo, nil, nil, auth.NoOpAPIKeyCache{}, nil, func() time.Time { return time.Now() })
+
+	engine := gin.New()
+	engine.Use(middleware.WithAuth(svc))
+	engine.GET("/probe", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	req := httptest.NewRequest(http.MethodGet, "/probe", nil)
+	req.Header.Set("Authorization", "Bearer sk-ant-oat-not-a-router-key")
+	rr := httptest.NewRecorder()
+	engine.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusUnauthorized, rr.Code)
+	assert.Contains(t, rr.Body.String(), "invalid_key")
+}
