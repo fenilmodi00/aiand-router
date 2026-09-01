@@ -38,7 +38,7 @@ have their own target-specific integrations.
 Version-pin for reproducible setups:
 
 ```bash
-npx aiand-router@0.1.0 --claude --scope project
+npx aiand-router@0.3.0 --claude --scope project
 ```
 
 Switch on/off without uninstalling (keeps your config so switching back is
