@@ -521,6 +521,7 @@ CREATE TABLE router.model_router_request_telemetry (
     spiral_steps_since_progress integer,
     spiral_edit_attempted boolean,
     spiral_reasons character varying[],
+    requested_allowed_models character varying[],
     CONSTRAINT model_router_request_telemetry_turn_signals_privacy_check CHECK (
         (
             num_nonnulls(

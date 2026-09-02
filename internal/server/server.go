@@ -147,6 +147,7 @@ func Register(engine *gin.Engine, s Services) {
 		middleware.WithClusterVersionOverride(),
 		middleware.WithRouterStrategyDefault(defaultStrategy, registeredStrategies...),
 		middleware.WithPolicyDebugOverride(),
+		middleware.WithAllowedModelsOverride(s.Proxy),
 		middleware.WithRoutingKnobsOverride(),
 		middleware.WithForceEffortOverride(),
 	)
@@ -163,6 +164,7 @@ func Register(engine *gin.Engine, s Services) {
 		middleware.WithClusterVersionOverride(),
 		middleware.WithRouterStrategyDefault(defaultStrategy, registeredStrategies...),
 		middleware.WithPolicyDebugOverride(),
+		middleware.WithAllowedModelsOverride(s.Proxy),
 		middleware.WithRoutingKnobsOverride(),
 		middleware.WithForceEffortOverride(),
 	)
@@ -196,6 +198,7 @@ func Register(engine *gin.Engine, s Services) {
 		middleware.WithClusterVersionOverride(),
 		middleware.WithRouterStrategyDefault(defaultStrategy, registeredStrategies...),
 		middleware.WithPolicyDebugOverride(),
+		middleware.WithAllowedModelsOverride(s.Proxy),
 		middleware.WithRoutingKnobsOverride(),
 		middleware.WithForceEffortOverride(),
 	)
@@ -209,6 +212,7 @@ func Register(engine *gin.Engine, s Services) {
 		middleware.WithEmbedOnlyUserMessageOverride(),
 		middleware.WithRouterStrategyDefault(defaultStrategy, registeredStrategies...),
 		middleware.WithPolicyDebugOverride(),
+		middleware.WithAllowedModelsOverride(s.Proxy),
 		middleware.WithRoutingKnobsOverride(),
 	)
 	previewGroup.POST("/v1/route/preview", anthropicapi.PreviewRouteHandler(s.Proxy))
