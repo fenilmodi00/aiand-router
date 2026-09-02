@@ -70,3 +70,4 @@ Deleted in our fork → skip unless the bug class clearly applies elsewhere.
 - Commit/PR text: describe the **behavior fix** only. Never mention upstream, workweave, cherry-pick, or foreign PR numbers.
 - Skipped commits: omit from PR body entirely (no "ignored commits" list).
 - Schema ports: always `make migrate-up` against Supabase after adding migrations; see SKILL.md § Database / Supabase.
+- Before push/PR: `gofmt -w .` then `make check` must pass (see SKILL.md § CI gate).

@@ -311,10 +311,28 @@ func previewForceModelFromRequest(headers http.Header, env *translate.RequestEnv
 	return canonicalModel, nil
 }
 
+// isClientPassthroughModel names an inbound wire-model the client sent for
+// provider API compatibility, not a router catalog routing intent.
+func isClientPassthroughModel(model string, format translate.Format) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	switch format {
+	case translate.FormatAnthropic:
+		return strings.HasPrefix(model, "claude-") || strings.HasPrefix(model, "gemini-")
+	case translate.FormatOpenAI:
+		return strings.HasPrefix(model, "gpt-") ||
+			strings.HasPrefix(model, "o") ||
+			strings.HasPrefix(model, "claude-") ||
+			strings.HasPrefix(model, "gemini-")
+	default:
+		return false
+	}
+}
+
 // rawForceModelFromHeaders picks the raw force-model string from the inbound
 // model field and x-aiand-force-model header. A catalog-resolvable, non-auto
-// model field wins over a conflicting header; model=auto, empty, or unknown
-// defers to the header.
+// model field wins over a conflicting header; model=auto, empty, client
+// passthrough, or unknown vendor/id slugs defer to the header; bare unknown
+// names are explicit routing intent and fail when not in the catalog.
 func rawForceModelFromHeaders(headers http.Header, env *translate.RequestEnvelope) string {
 	bodyModel, _ := translate.CanonicalModel(env.Model())
 	bodyModel = strings.TrimSpace(bodyModel)
@@ -322,6 +340,10 @@ func rawForceModelFromHeaders(headers http.Header, env *translate.RequestEnvelop
 		if _, _, known, _ := resolveForceModelWithEffort(bodyModel); known {
 			return bodyModel
 		}
+		if isClientPassthroughModel(bodyModel, env.SourceFormat()) || strings.Contains(bodyModel, "/") {
+			return ""
+		}
+		return bodyModel
 	}
 	if headers == nil {
 		return ""

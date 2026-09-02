@@ -1,6 +1,6 @@
 ---
 name: upstream-sync
-description: Fetches incremental commits from workweave/router upstream into a temp clone, triages them for aiand-only fork relevance, ports applicable changes on a new git branch (one commit per change for manual PR review), applies Supabase migrations when schema changes, and never mentions upstream in commit or PR text. Use when syncing upstream or asking what changed since last sync.
+description: Fetches incremental commits from workweave/router upstream into a temp clone, triages them for aiand-only fork relevance, ports applicable changes on a new git branch (one commit per change for manual PR review), runs make check before push, applies Supabase migrations when schema changes, and never mentions upstream in commit or PR text. Use when syncing upstream or asking what changed since last sync.
 ---
 
 # Upstream Sync (workweave/router → aiand-router)
@@ -54,8 +54,9 @@ PR title/body describe **what changed and why for aiand-router** only — same h
 
 ### Push and PR
 
-- Do **not** push or open a PR unless the user asks.
-- When they do: one PR per branch; user reviews before merge.
+- Do **not** push or open a PR until **CI gate passes** (see below).
+- When the user asks to push: run the CI gate, fix failures, amend or add commits with fixes, then push.
+- One PR per branch; user reviews before merge.
 
 ## Quick workflow (~2 min fetch + triage)
 
@@ -67,7 +68,7 @@ Task Progress:
 - [ ] 3. Triage each commit (relevant / skip / partial)
 - [ ] 4. Port relevant changes file-by-file (one git commit per logical change)
 - [ ] 5. If db/ touched → migration + make generate + apply on Supabase
-- [ ] 6. Run checks (`go test ./...` on touched packages)
+- [ ] 6. CI gate — gofmt + `make check` (mandatory before push/PR)
 - [ ] 7. Update last-upstream-commit.txt (internal file only)
 ```
 
@@ -147,15 +148,32 @@ If the port touches `db/migrations/`, `db/init/`, or `db/queries/`:
 
 If migrate fails (permissions on shared Supabase), document the exact SQL needed and stop — do not claim the DB is updated.
 
-### 6. Verify
+**Migration PR rules** (CI `Check Migrations` workflow): exactly **one** new migration number per PR; `NNNN_name.up.sql` + `.down.sql` pair; wrapped in `BEGIN;` / `COMMIT;`. Split schema ports across PRs if needed.
 
-Minimum on touched packages:
+### 6. CI gate (mandatory before push or PR)
+
+GitHub **Test** job runs: sqlc drift check, `gofmt -l .`, `go vet`, `go build`, `go test ./...`, plus statusline/install tests. Local equivalent:
 
 ```bash
-go test ./internal/proxy/... ./internal/translate/...   # adjust paths
+# After porting Go files — format first (common upstream-sync failure)
+gofmt -w .
+
+# Full CI-equivalent gate (required before push)
+make check
 ```
 
-Run broader `go test ./...` before marking sync complete if changes span layers.
+Or use the bundled helper (formats then runs `make check`):
+
+```bash
+.agents/skills/upstream-sync/scripts/ci-check.sh
+```
+
+**Rules:**
+
+- Run after **every** port commit, and again before push — fix failures before telling the user the branch is ready.
+- If `gofmt -w` changed files, stage and commit (or amend the port commit): `fix: gofmt`.
+- If `make generate` changed `internal/sqlc/`, commit regenerated files with the migration/query change.
+- Do **not** push with red CI. `make precommit` is a faster subset (no codegen/sqlc drift) for mid-port iteration only — **push requires `make check`**.
 
 ### 7. Record progress (internal)
 
@@ -179,6 +197,7 @@ Edit `last-upstream-commit.txt` — set SHA to upstream HEAD (or last reviewed c
 | [`scripts/list-commits.sh`](scripts/list-commits.sh) | Commits since last-upstream-commit |
 | [`scripts/show-commit.sh`](scripts/show-commit.sh) | Stat or patch for one commit |
 | [`scripts/diff-file.sh`](scripts/diff-file.sh) | Upstream main vs local for one path |
+| [`scripts/ci-check.sh`](scripts/ci-check.sh) | `gofmt -w` + `make check` before push |
 
 ## Additional resources
 

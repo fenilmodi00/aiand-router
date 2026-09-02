@@ -266,14 +266,14 @@ func TestResolveRequestedModel_PrecedenceAndPin(t *testing.T) {
 			bodyModel: kimiK3,
 		},
 		{
-			name:   "unknown alias routes without forcing",
-			body:   `{"model":"fable","messages":[{"role":"user","content":"hi"}]}`,
-			wantID: "",
+			name:    "unknown alias fails the request",
+			body:    `{"model":"fable","messages":[{"role":"user","content":"hi"}]}`,
+			wantErr: ErrForcedModelUnknown,
 		},
 		{
-			name:   "unknown bare tail routes without forcing",
-			body:   `{"model":"kimi-k3","messages":[{"role":"user","content":"hi"}]}`,
-			wantID: "",
+			name:    "unknown bare tail fails the request",
+			body:    `{"model":"kimi-k3","messages":[{"role":"user","content":"hi"}]}`,
+			wantErr: ErrForcedModelUnknown,
 		},
 		{
 			name:      "model field beats conflicting header",
@@ -293,9 +293,9 @@ func TestResolveRequestedModel_PrecedenceAndPin(t *testing.T) {
 			wantID: "",
 		},
 		{
-			name:   "unknown model field routes without forcing",
-			body:   `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`,
-			wantID: "",
+			name:    "unknown model field fails the request",
+			body:    `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`,
+			wantErr: ErrForcedModelUnknown,
 		},
 		{
 			name:    "unknown header fails the request",

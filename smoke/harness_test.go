@@ -37,7 +37,7 @@ type Config struct {
 	// (default deepseek-ai/deepseek-v4-flash).
 	PinModel string
 	// OpenAIPinModel is the model forced for OpenAI-path scenarios
-	// (default openai/gpt-oss-120b — served via aiand).
+	// (default deepseek-ai/deepseek-v4-flash — served via aiand).
 	OpenAIPinModel string
 	// OpenAIEnabled gates smoke/openai_test.go scenarios. Set SMOKE_OPENAI_ENABLED=0
 	// to skip when recording without an OPENAI_API_KEY. Defaults to true.
@@ -76,7 +76,7 @@ func TestMain(m *testing.M) {
 		BaseURL:        envOr("SMOKE_BASE_URL", "http://localhost:8080"),
 		RouterKey:      os.Getenv("SMOKE_ROUTER_KEY"),
 		PinModel:       envOr("SMOKE_PIN_MODEL", "deepseek-ai/deepseek-v4-flash"),
-		OpenAIPinModel: envOr("SMOKE_OPENAI_PIN_MODEL", "openai/gpt-oss-120b"),
+		OpenAIPinModel: envOr("SMOKE_OPENAI_PIN_MODEL", "deepseek-ai/deepseek-v4-flash"),
 		OpenAIEnabled:  envOr("SMOKE_OPENAI_ENABLED", "1") != "0",
 		HostMode:       envOr("SMOKE_HOST", "0") == "1",
 	}
