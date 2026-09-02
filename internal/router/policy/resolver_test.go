@@ -233,6 +233,43 @@ func TestResolverReportsNotAllowlistedSeparatelyFromRequestedExclusion(t *testin
 	}, "an allowlisted model excluded explicitly stays a requested exclusion")
 }
 
+func TestResolverDropsAutomaticallyDisabledModels(t *testing.T) {
+	resolver := policy.NewResolver(
+		set(modelKimi3, modelFlash),
+		set(providers.ProviderAiand),
+		catalogRosterID,
+		policy.ManagedProviderPolicy(),
+	)
+
+	resolved := resolver.Resolve(router.Request{
+		AutomaticExcludedModels: map[string]struct{}{modelKimi3: {}},
+	})
+
+	assert.Equal(t, []string{modelFlash}, resolved.CandidateModels())
+	assert.Contains(t, resolved.Diagnostics, policy.Diagnostic{
+		CatalogID: modelKimi3,
+		RosterID:  modelKimi3,
+		Reason:    policy.ExclusionAutomaticDisabled,
+	})
+}
+
+// Soft filter: disabling every candidate leaves the pool intact rather than
+// failing the turn, because the models remain reachable through a user pin.
+func TestResolverKeepsPoolWhenAutomaticDisablesWouldEmptyIt(t *testing.T) {
+	resolver := policy.NewResolver(
+		set(modelKimi3),
+		set(providers.ProviderAiand),
+		catalogRosterID,
+		policy.ManagedProviderPolicy(),
+	)
+
+	resolved := resolver.Resolve(router.Request{
+		AutomaticExcludedModels: map[string]struct{}{modelKimi3: {}},
+	})
+
+	assert.Equal(t, []string{modelKimi3}, resolved.CandidateModels())
+}
+
 // Without an allowlist configured, exclusion diagnostics must be unchanged.
 func TestResolverKeepsRequestedExclusionWhenNoAllowlist(t *testing.T) {
 	resolver := policy.NewResolver(

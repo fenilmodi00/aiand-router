@@ -127,6 +127,55 @@ CREATE TABLE router.flag_definitions (
 );
 
 
+
+--
+-- Name: global_automatic_routing_exclusions; Type: TABLE; Schema: router; Owner: -
+--
+
+CREATE TABLE router.global_automatic_routing_exclusions (
+    model text NOT NULL,
+    reason text,
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    created_by text
+);
+
+
+--
+-- Name: TABLE global_automatic_routing_exclusions; Type: COMMENT; Schema: router; Owner: -
+--
+
+COMMENT ON TABLE router.global_automatic_routing_exclusions IS 'Deployment-wide models removed from automatic routing (scorer/policy selection, utility hard pins, and automatic session stickies). Soft: an explicit user /force-model pin may still serve these models. Read on the request path through a short-TTL in-process cache.';
+
+
+--
+-- Name: COLUMN global_automatic_routing_exclusions.model; Type: COMMENT; Schema: router; Owner: -
+--
+
+COMMENT ON COLUMN router.global_automatic_routing_exclusions.model IS 'Catalog model ID, validated against the deployed catalog by the writer.';
+
+
+--
+-- Name: COLUMN global_automatic_routing_exclusions.reason; Type: COMMENT; Schema: router; Owner: -
+--
+
+COMMENT ON COLUMN router.global_automatic_routing_exclusions.reason IS 'Operator note shown in the internal admin UI and in force-model diagnostics; NULL when none was given.';
+
+
+--
+-- Name: COLUMN global_automatic_routing_exclusions.created_by; Type: COMMENT; Schema: router; Owner: -
+--
+
+COMMENT ON COLUMN router.global_automatic_routing_exclusions.created_by IS 'Opaque external identifier of the aiand account that disabled the model.';
+
+
+--
+-- Name: global_automatic_routing_exclusions_pkey; Type: CONSTRAINT; Schema: router; Owner: -
+--
+
+ALTER TABLE ONLY router.global_automatic_routing_exclusions
+    ADD CONSTRAINT global_automatic_routing_exclusions_pkey PRIMARY KEY (model);
+
+
 --
 -- Name: TABLE flag_definitions; Type: COMMENT; Schema: router; Owner: -
 --

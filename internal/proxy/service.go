@@ -285,6 +285,10 @@ type Service struct {
 	// excludedModelsOverride, when non-nil, replaces the per-installation
 	// exclusion list on every request. Set from ROUTER_EXCLUDED_MODELS at boot.
 	excludedModelsOverride map[string]struct{}
+	// globalAutomaticExclusions caches the deployment-wide models the control
+	// plane withdrew from automatic routing. Nil leaves automatic routing
+	// unrestricted.
+	globalAutomaticExclusions *globalAutomaticExclusionCache
 	// authoritativeUpgradeGate applies the upgrade-confidence threshold to
 	// authoritative-per-turn decisions too: a scored fresh decision that is
 	// pricier than the session pin only escalates at confidence >=
@@ -1532,6 +1536,18 @@ func (s *Service) HasExcludedModelsOverride() bool {
 	return s.excludedModelsOverride != nil
 }
 
+// WithGlobalAutomaticExclusions wires the deployment-wide soft exclusion list
+// the control plane maintains. A nil store leaves automatic routing
+// unrestricted.
+func (s *Service) WithGlobalAutomaticExclusions(store GlobalAutomaticExclusionStore) *Service {
+	if store == nil {
+		s.globalAutomaticExclusions = nil
+		return s
+	}
+	s.globalAutomaticExclusions = newGlobalAutomaticExclusionCache(store)
+	return s
+}
+
 // RoutableModels returns a copy of the set of models this deployment can
 // route, so the admin guard and request-time desugaring share one definition
 // and cannot drift.
@@ -2009,6 +2025,10 @@ func (s *Service) routeWithStrategy(ctx context.Context, strategy router.Strateg
 }
 
 func (s *Service) withPolicyRequestContext(ctx context.Context, req router.Request) router.Request {
+	// Set here rather than at each ingress so every routed and previewed turn
+	// sees the same deployment-wide soft exclusions, including callers that
+	// bypass the turn loop.
+	req.AutomaticExcludedModels = s.globalAutomaticExcludedModels(ctx)
 	req.OrganizationID, _ = ctx.Value(ExternalIDContextKey{}).(string)
 	req.InstallationID = ""
 	if installationID := installationIDFromContext(ctx); installationID != uuid.Nil {
@@ -3843,8 +3863,10 @@ func pinDecision(p sessionpin.Pin) router.Decision {
 
 // policyDeadlineDefaultDecision resolves ROUTER_POLICY_DEADLINE_DEFAULT_MODEL to a
 // dispatchable Decision, honouring this turn's eligibility (enabled providers and
-// excluded models). Reports false when unset, excluded, or without a live binding —
-// callers must fail closed (503), not serve an ineligible decision.
+// excluded models). Reports false when unset, hard-excluded, or without a live
+// binding. A deployment-wide automatic exclusion deliberately does not apply: this
+// is the last-resort response after policy already failed, and a soft exclusion
+// may not turn that degraded path into a 503.
 func (s *Service) policyDeadlineDefaultDecision(req router.Request) (router.Decision, bool) {
 	if s.policyDeadlineDefaultModel == "" {
 		return router.Decision{}, false
@@ -3919,6 +3941,11 @@ func (s *Service) bandSwapServed(ctx context.Context, turnType turntype.TurnType
 		// The paired model may no longer fit this turn even when the anchor
 		// does — serving it would trade a safe anchor for a context error.
 		if _, excluded := excludedModels[served.Model]; excluded {
+			return anchor
+		}
+		// Swapping to the paired member is an automatic choice, so a
+		// deployment-wide disable rules it out even though the anchor stands.
+		if _, disabled := s.globalAutomaticExcludedModels(ctx)[served.Model]; disabled {
 			return anchor
 		}
 		// nil enabledProviders means "no restriction" (boot behavior), matching
