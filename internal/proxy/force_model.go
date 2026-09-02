@@ -322,7 +322,7 @@ func previewForceModelFromRequest(headers http.Header, env *translate.RequestEnv
 // rawForceModelFromHeaders). The old `HasPrefix(model, "o")` matched every
 // o-word (opus, offline, …) and silently rerouted them; that broad match is
 // gone.
-func isWireCompatPassthroughModel(model string, format translate.Format) bool {
+func isWireCompatPassthroughModel(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
 	return strings.HasPrefix(model, "claude-") || strings.HasPrefix(model, "gemini-")
 }
@@ -340,7 +340,7 @@ func rawForceModelFromHeaders(headers http.Header, env *translate.RequestEnvelop
 		if _, _, known, _ := resolveForceModelWithEffort(bodyModel); known {
 			return bodyModel
 		}
-		if isWireCompatPassthroughModel(bodyModel, env.SourceFormat()) || strings.Contains(bodyModel, "/") {
+		if isWireCompatPassthroughModel(bodyModel) || strings.Contains(bodyModel, "/") {
 			return ""
 		}
 		return bodyModel

@@ -5,6 +5,8 @@ bin/
 *.dll
 *.so
 *.dylib
+.scratch
+.scratch/
 
 # Go build/test artifacts
 *.test
