@@ -442,33 +442,50 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 	text := TailTruncate(req.PromptText, s.cfg.MaxPromptChars)
 	truncated := len(req.PromptText) > s.cfg.MaxPromptChars
 
-	embedCtx, cancel := context.WithTimeout(ctx, s.cfg.EmbedTimeout)
-	defer cancel()
-
+	// EmbedTimeout budgets one attempt. A cold ONNX session (fresh deploy,
+	// idle container) routinely spends the first attempt on lazy graph
+	// optimization and misses the budget while warming the session — observed
+	// 2026-09-02 on the beta: every auto request 503'd at exactly EmbedTimeout
+	// while the embedder reached 20-80ms steady-state right after. One retry
+	// on a timeout converts that cold-start 503 into a slower first request;
+	// a persistently-slow embedder still fails closed below.
 	embedStart := time.Now()
-	// Race Embed against EmbedTimeout since hugot can't be canceled.
-	type embedResult struct {
-		vec []float32
-		err error
-	}
-	resCh := make(chan embedResult, 1)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Error("Cluster scorer: embed panic; returning ErrClusterUnavailable", "panic", fmt.Sprint(r))
-				resCh <- embedResult{err: fmt.Errorf("embed panic: %v", r)}
-			}
+	// Race Embed against EmbedTimeout since hugot can't be canceled. Fresh
+	// channel per attempt: the abandoned first attempt still writes its late
+	// result, which must never be mistaken for the retry's result.
+	embedOnce := func() ([]float32, error) {
+		embedCtx, cancel := context.WithTimeout(ctx, s.cfg.EmbedTimeout)
+		defer cancel()
+		type embedResult struct {
+			vec []float32
+			err error
+		}
+		resCh := make(chan embedResult, 1)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error("Cluster scorer: embed panic; returning ErrClusterUnavailable", "panic", fmt.Sprint(r))
+					resCh <- embedResult{err: fmt.Errorf("embed panic: %v", r)}
+				}
+			}()
+			v, e := s.embed.Embed(embedCtx, text)
+			resCh <- embedResult{vec: v, err: e}
 		}()
-		v, e := s.embed.Embed(embedCtx, text)
-		resCh <- embedResult{vec: v, err: e}
-	}()
-	var vec []float32
-	var err error
-	select {
-	case r := <-resCh:
-		vec, err = r.vec, r.err
-	case <-embedCtx.Done():
-		err = embedCtx.Err()
+		select {
+		case r := <-resCh:
+			return r.vec, r.err
+		case <-embedCtx.Done():
+			return nil, embedCtx.Err()
+		}
+	}
+	vec, err := embedOnce()
+	if errors.Is(err, context.DeadlineExceeded) {
+		log.Warn("Cluster scorer: embed timed out on first attempt; retrying once",
+			"embed_ms", time.Since(embedStart).Milliseconds(),
+			"timeout_ms", s.cfg.EmbedTimeout.Milliseconds(),
+			"requested_model", req.RequestedModel,
+		)
+		vec, err = embedOnce()
 	}
 	embedMs := time.Since(embedStart).Milliseconds()
 	if err != nil {

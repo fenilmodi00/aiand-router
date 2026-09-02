@@ -837,6 +837,50 @@ func TestScorer_DefaultEmbedTimeoutAccommodatesSlowEmbed(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// coldThenWarmEmbedder simulates a cold ONNX embedder: the first call
+// exceeds the embed budget (lazy graph-optimization / arena alloc), the
+// second completes fast because the first burned the warmup cost.
+type coldThenWarmEmbedder struct {
+	vec     []float32
+	coldFor time.Duration
+	calls   int
+}
+
+func (c *coldThenWarmEmbedder) Embed(ctx context.Context, _ string) ([]float32, error) {
+	c.calls++
+	if c.calls == 1 {
+		select {
+		case <-time.After(c.coldFor):
+			return c.vec, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return c.vec, nil
+}
+
+// Regression (2026-09-02 beta incident): a freshly-deployed router 503s
+// every auto request because the first embed exceeds EmbedTimeout on a
+// cold ONNX session, and the timeout surfaced as ErrClusterUnavailable
+// with no second attempt. The first attempt warms the session (observed
+// 3000ms timeout -> 1375ms retry -> 20-80ms steady-state), so the scorer
+// must retry once within a fresh budget instead of failing the request.
+func TestScorer_RetriesEmbedOnceOnTimeout(t *testing.T) {
+	cold := &coldThenWarmEmbedder{vec: makeOpusVec(), coldFor: 10 * time.Second}
+	cfg := cfgForTest()
+	cfg.EmbedTimeout = 50 * time.Millisecond
+	s := newScorerForTest(t, cold, cfg)
+
+	decision, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
+	require.NoError(t, err, "the cold first embed must be retried, not surfaced as 503")
+	assert.Equal(t, "claude-opus-4-7", decision.Model)
+	assert.Equal(t, 2, cold.calls, "exactly one retry: a persistently-cold embedder must still fail closed")
+}
+
+func (c *coldThenWarmEmbedder) ID() string { return EmbedderJinaV2 }
+
+func (c *coldThenWarmEmbedder) Dim() int { return EmbedDim }
+
 type slowEmbedder struct {
 	vec   []float32
 	delay time.Duration
