@@ -19,8 +19,10 @@ import (
 // Eligibility: semantic cache enabled + non-nil, not streaming, decision has
 // routing metadata, externalID present, not eval/override traffic, no compaction
 // handover on the same turn (Anthropic) / not responses passthrough (OpenAI),
-// not subscription-only, and subsidy factors empty (the cache key doesn't
-// capture headroom-dependent model choice).
+// not subscription-only, subsidy factors empty (the cache key doesn't capture
+// headroom-dependent model choice), and no x-aiand-allowed-models subset (the
+// subset is not part of the cache key, so a hit could serve a body produced by
+// a model outside it).
 //
 // On hit: writes the cached response (no feedback link — replaying would attribute
 // a new client's rating to the wrong request_id), fires semantic-cache-hit
@@ -52,7 +54,7 @@ func (s *Service) tryServeSemanticCacheHit(
 	requestID := requestIDFor(ctx)
 
 	cacheMeta := cacheMetadataFor(decision, routeRes)
-	cacheEligible := s.semanticCacheAllowed(ctx) && s.semanticCache != nil && !usageBypassEngaged && !stream && cacheMeta != nil && externalID != "" && !bypassEval && !extraExclusion
+	cacheEligible := s.semanticCacheAllowed(ctx) && s.semanticCache != nil && !usageBypassEngaged && !stream && cacheMeta != nil && externalID != "" && !bypassEval && !extraExclusion && !requestAllowedModelsPresent(ctx)
 
 	if !cacheEligible {
 		return false

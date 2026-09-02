@@ -100,6 +100,13 @@ func (s *Service) ResolveOpenAIResponsesBroad(ctx context.Context) bool {
 	return flags.BoolOr(ctx, flags.KeyOpenAIResponsesBroad, s.openAIResponsesBroad)
 }
 
+// ResolveAllowedModelsHeader reports the ROUTER_ALLOWED_MODELS_HEADER flag:
+// whether x-aiand-allowed-models is honored for an installation that is not
+// authorized for policy headers.
+func (s *Service) ResolveAllowedModelsHeader(ctx context.Context) bool {
+	return flags.BoolOr(ctx, flags.KeyAllowedModelsHeader, s.allowedModelsHeader)
+}
+
 // ResolveEffortEscalation reports whether policy-requested reasoning-effort
 // escalation is applied.
 func (s *Service) ResolveEffortEscalation(ctx context.Context) bool {

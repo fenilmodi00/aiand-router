@@ -555,6 +555,7 @@ func (s *Service) runTurnLoop(
 			return res, &ForcedModelExcludedError{Model: forceModelPin.Model, Reason: reason}
 		}
 		forceModelPin.Provider = binding
+		req.ExcludedModels = s.readmitForcedModel(ctx, req, env, feats, forceModelPin)
 	}
 	sessionForceControlFound := forceModelFound
 
@@ -569,6 +570,7 @@ func (s *Service) runTurnLoop(
 				return res, &ForcedModelExcludedError{Model: legacyPin.Model, Reason: reason}
 			}
 			legacyPin.Provider = binding
+			req.ExcludedModels = s.readmitForcedModel(ctx, req, env, feats, legacyPin)
 			forceModelPin, forceModelFound = legacyPin, true
 		}
 	}
@@ -721,7 +723,7 @@ func (s *Service) runTurnLoop(
 			return res, &ForcedModelExcludedError{Model: pin.Model, Reason: reason}
 		}
 		pin.Provider = binding
-		forceModelPin, forceModelFound = pin, true
+		req.ExcludedModels = s.readmitForcedModel(ctx, req, env, feats, pin)
 	}
 	if forceModelCleared && pinFound && isUserForcedReason(pin.Reason) {
 		pinFound = false
@@ -1012,6 +1014,17 @@ func (s *Service) runTurnLoop(
 				)
 			}
 		}
+	}
+
+	// A request-level allowlist narrows the pool for this turn only; a pin
+	// outside it reroutes inside the subset instead of serving through.
+	if pinFound && !modelInRequestSubset(ctx, pin.Model) {
+		log.Info("Session pin outside request allowed-models subset; falling through to scorer",
+			"pin_model", pin.Model,
+			"pin_provider", pin.Provider,
+		)
+		pinFound = false
+		pin = sessionpin.Pin{}
 	}
 
 	// If the pinned provider is no longer in this request's enabled set

@@ -131,6 +131,9 @@ type Service struct {
 	// openAIResponsesBroad is the deployment default for
 	// ROUTER_OPENAI_RESPONSES_BROAD; see ResolveOpenAIResponsesBroad.
 	openAIResponsesBroad bool
+	// allowedModelsHeader is the deployment default for
+	// ROUTER_ALLOWED_MODELS_HEADER; see ResolveAllowedModelsHeader.
+	allowedModelsHeader bool
 	// sseKeepalive is the client-silence budget before a ping is injected
 	// (ROUTER_SSE_KEEPALIVE_INTERVAL_SECONDS; 0 disables). See sse.KeepaliveWriter.
 	sseKeepalive time.Duration
@@ -647,9 +650,30 @@ func installationAllowedModelsFromContext(ctx context.Context) []string {
 	return out
 }
 
-// allowedModelsForRequest returns the org's positive model allowlist as a set,
-// or nil when empty (no restriction).
+// allowedModelsForRequest returns the effective positive model allowlist as a
+// set: the installation policy allowlist further narrowed by a request-level
+// AllowedModelsHeader subset when one is present. Nil = no policy.
 func allowedModelsForRequest(ctx context.Context) map[string]struct{} {
+	policy := installationAllowedModelSet(ctx)
+	subset := requestAllowedModelSet(ctx)
+	if subset == nil {
+		return policy
+	}
+	if policy == nil {
+		return subset
+	}
+	out := make(map[string]struct{}, len(subset))
+	for m := range subset {
+		if _, ok := policy[m]; ok {
+			out[m] = struct{}{}
+		}
+	}
+	return out
+}
+
+// installationAllowedModelSet returns the org's positive model allowlist as
+// a set, or nil when empty (no restriction).
+func installationAllowedModelSet(ctx context.Context) map[string]struct{} {
 	allowed := installationAllowedModelsFromContext(ctx)
 	if len(allowed) == 0 {
 		return nil
@@ -666,27 +690,12 @@ func allowedModelsForRequest(ctx context.Context) map[string]struct{} {
 // passthrough-only models (no Tier) never enter the desugared exclusion set.
 // Empty allowlist = no restriction.
 func modelPermittedByAllowlist(ctx context.Context, model string) bool {
-	allowed := allowedModelsForRequest(ctx)
+	allowed := installationAllowedModelSet(ctx)
 	if len(allowed) == 0 {
 		return true
 	}
 	_, ok := allowed[model]
 	return ok
-}
-
-// routableUniverse is every model this deployment can serve: the configured
-// availableModels set, or the whole catalog when it is nil. Extracted so the
-// allowlist desugaring and restrictToTier share one universe definition and
-// cannot drift.
-func (s *Service) routableUniverse() map[string]struct{} {
-	if s.availableModels != nil {
-		return s.availableModels
-	}
-	out := make(map[string]struct{}, len(catalog.Models))
-	for _, m := range catalog.Models {
-		out[m.ID] = struct{}{}
-	}
-	return out
 }
 
 // hideTerminalSurfacesForRequest reports whether terminal surfaces are hidden for this request.
@@ -724,11 +733,37 @@ func (s *Service) safetyExcludedModels(env *translate.RequestEnvelope, outputRes
 	return out
 }
 
+// routableUniverse is every model this deployment can serve: the configured
+// availableModels set, or the whole catalog when it is nil. Extracted so the
+// allowlist desugaring and restrictToTier share one universe definition and
+// cannot drift.
+func (s *Service) routableUniverse() map[string]struct{} {
+	if s.availableModels != nil {
+		return s.availableModels
+	}
+	out := make(map[string]struct{}, len(catalog.Models))
+	for _, m := range catalog.Models {
+		out[m.ID] = struct{}{}
+	}
+	return out
+}
+
 // excludedModelsForRequest returns the request's model exclusion set.
-// Env override wins (intentional escape hatch, not an oversight).
-// Otherwise desugars the positive allowlist into the exclusion set:
-// every routable model absent from a non-empty allowlist is excluded.
+// Otherwise desugars the positive allowlist — installation policy narrowed by
+// any request-level AllowedModelsHeader subset — into the exclusion set:
+// every routable model absent from the effective allowlist is excluded.
 func (s *Service) excludedModelsForRequest(ctx context.Context) map[string]struct{} {
+	return s.excludedModelsFor(ctx, allowedModelsForRequest(ctx))
+}
+
+// policyExcludedModels is excludedModelsForRequest without the request-level
+// AllowedModelsHeader subset: installation policy only. A user force is
+// validated against this set because the strict pin outranks the header.
+func (s *Service) policyExcludedModels(ctx context.Context) map[string]struct{} {
+	return s.excludedModelsFor(ctx, installationAllowedModelSet(ctx))
+}
+
+func (s *Service) excludedModelsFor(ctx context.Context, allowed map[string]struct{}) map[string]struct{} {
 	if s.excludedModelsOverride != nil {
 		return s.excludedModelsOverride
 	}
@@ -737,7 +772,7 @@ func (s *Service) excludedModelsForRequest(ctx context.Context) map[string]struc
 	for _, m := range excluded {
 		out[m] = struct{}{}
 	}
-	if allowed := allowedModelsForRequest(ctx); len(allowed) > 0 {
+	if allowed != nil {
 		for model := range s.routableUniverse() {
 			if _, ok := allowed[model]; !ok {
 				out[model] = struct{}{}
@@ -1112,6 +1147,13 @@ func (s *Service) WithSiblingFailover(enabled bool) *Service {
 // routing (ROUTER_OPENAI_RESPONSES_BROAD).
 func (s *Service) WithOpenAIResponsesBroad(enabled bool) *Service {
 	s.openAIResponsesBroad = enabled
+	return s
+}
+
+// WithAllowedModelsHeader sets the deployment default for honoring the
+// x-aiand-allowed-models header (ROUTER_ALLOWED_MODELS_HEADER).
+func (s *Service) WithAllowedModelsHeader(enabled bool) *Service {
+	s.allowedModelsHeader = enabled
 	return s
 }
 
@@ -2742,7 +2784,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	}
 
 	cacheMeta := cacheMetadataFor(decision, routeRes)
-	cacheEligible := s.semanticCacheAllowed(ctx) && s.semanticCache != nil && !env.Stream() && cacheMeta != nil && externalID != "" && !bypassEval && !compactionHandoverRan
+	cacheEligible := s.semanticCacheAllowed(ctx) && s.semanticCache != nil && !env.Stream() && cacheMeta != nil && externalID != "" && !bypassEval && !compactionHandoverRan && !requestAllowedModelsPresent(ctx)
 
 	w.Header().Set(HeaderRouterDecision, decision.Reason)
 	w.Header().Set(HeaderRouterProvider, decision.Provider)
@@ -3246,7 +3288,8 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			RequestedModel:         feats.Model,
 			DecisionModel:          decision.Model,
 			DecisionProvider:       decision.Provider,
-			DecisionReason:         decision.Reason,
+			DecisionReason:         telemetryDecisionReason(ctx, decision.Reason),
+			RequestedAllowedModels: requestedAllowedModelsForTelemetry(ctx),
 			EstimatedInputTokens:   int32(feats.Tokens),
 			StickyHit:              stickyHit,
 			PinTier:                routeRes.PinTier,
@@ -4533,7 +4576,7 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	}
 
 	cacheMeta := cacheMetadataFor(decision, routeRes)
-	cacheEligible := s.semanticCacheAllowed(ctx) && s.semanticCache != nil && !env.Stream() && cacheMeta != nil && externalID != "" && !bypassEval && !responsesPassthrough
+	cacheEligible := s.semanticCacheAllowed(ctx) && s.semanticCache != nil && !env.Stream() && cacheMeta != nil && externalID != "" && !bypassEval && !responsesPassthrough && !requestAllowedModelsPresent(ctx)
 
 	if _, err := s.provider(decision.Provider); err != nil {
 		return err
@@ -5041,7 +5084,8 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 			RequestedModel:         feats.Model,
 			DecisionModel:          decision.Model,
 			DecisionProvider:       decision.Provider,
-			DecisionReason:         decision.Reason,
+			DecisionReason:         telemetryDecisionReason(ctx, decision.Reason),
+			RequestedAllowedModels: requestedAllowedModelsForTelemetry(ctx),
 			EstimatedInputTokens:   int32(feats.Tokens),
 			StickyHit:              stickyHit,
 			PinTier:                routeRes.PinTier,

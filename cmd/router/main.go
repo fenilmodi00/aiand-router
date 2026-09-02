@@ -333,6 +333,7 @@ func main() {
 	// model's bindings are all exhausted by a transient upstream fault.
 	siblingFailover := config.GetOr("ROUTER_SIBLING_FAILOVER", "true") == "true"
 	openAIResponsesBroad := config.GetOr("ROUTER_OPENAI_RESPONSES_BROAD", "true") == "true"
+	allowedModelsHeader := config.GetOr("ROUTER_ALLOWED_MODELS_HEADER", "false") == "true"
 	sseKeepalive := sseKeepaliveInterval()
 	ccOrchToolsCrossVendor := config.GetOr("ROUTER_CC_ORCH_TOOLS_CROSSVENDOR", "true") == "true"
 	// Per-turn large-vs-small action-classifier swap. Off by default until the
@@ -689,6 +690,7 @@ func main() {
 		flags.KeySiblingFailover:           boolDefault(siblingFailover),
 		flags.KeyEffortEscalation:          boolDefault(effortEscalation),
 		flags.KeyOpenAIResponsesBroad:      boolDefault(openAIResponsesBroad),
+		flags.KeyAllowedModelsHeader:       boolDefault(allowedModelsHeader),
 		flags.KeyCyberRefusalRepin:         boolDefault(cyberRefusalRepin),
 		flags.KeyCyberRefusalFallback:      cyberRefusalFallbackModel,
 		flags.KeyEmbedOnlyUserMessage:      boolDefault(embedOnlyUser),
@@ -731,6 +733,7 @@ func main() {
 		WithSSEKeepalive(sseKeepalive).
 		WithPrefixTrimFreeSwitch(prefixTrimFreeSwitch).
 		WithHMMUpgradeConfidenceThreshold(hmmUpgradeConfidence).
+		WithAllowedModelsHeader(allowedModelsHeader).
 		WithHMMSameTierPin(hmmSameTierPin).
 		WithAuthoritativeUpgradeGate(authoritativeUpgradeGate).
 		WithAuthorityCacheShadow(authorityCacheShadow).
