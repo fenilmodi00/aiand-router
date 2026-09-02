@@ -571,6 +571,7 @@ func (s *Service) runTurnLoop(
 			}
 			legacyPin.Provider = binding
 			req.ExcludedModels = s.readmitForcedModel(ctx, req, env, feats, legacyPin)
+			forceModelPin, forceModelFound = legacyPin, true
 		}
 	}
 	if forceModelFound && hardPinnedTurn {
