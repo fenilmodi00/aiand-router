@@ -249,6 +249,12 @@ func TestProxyMessages_SingleBindingPreservesEagerPrelude(t *testing.T) {
 // for missing tool_use. This is the v0.58 SWE-bench bake-off regression
 // fix.
 func TestProxyMessages_SingleBindingStreamingPreCommitError(t *testing.T) {
+	// Keep chat/completions so AnthropicSSETranslator + preludeBuffer stay on
+	// the surface this regression covers (Responses promotion would rebuild).
+	ctx := flags.WithOverrides(context.Background(), flags.Overrides{
+		Bools: map[flags.Key]bool{flags.KeyOpenAIResponsesBroad: false},
+	})
+
 	// Stub upstream OpenAI-compat provider that 503s on every request.
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -257,11 +263,11 @@ func TestProxyMessages_SingleBindingStreamingPreCommitError(t *testing.T) {
 	}))
 	defer stub.Close()
 
-	// gpt-5 is single-binding to openai in catalog; route there from an
-	// inbound Anthropic Messages request so the cross-format
-	// AnthropicSSETranslator + Prelude path runs.
+	// Catalog model on Anthropic ingress (bare gpt-* is force-rejected here;
+	// claude-* would passthrough). Route to aiand OpenAI-compat so the
+	// cross-format AnthropicSSETranslator + Prelude path runs.
 	svc := proxy.NewService(
-		&fakeRouter{decision: router.Decision{Provider: providers.ProviderAiand, Model: "gpt-5"}},
+		&fakeRouter{decision: router.Decision{Provider: providers.ProviderAiand, Model: "deepseek-ai/deepseek-v4-flash"}},
 		map[string]providers.Client{
 			providers.ProviderAiand: openaicompat.NewClient("test-key", stub.URL),
 		},
@@ -270,9 +276,9 @@ func TestProxyMessages_SingleBindingStreamingPreCommitError(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
-	body := []byte(`{"model":"gpt-5","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	body := []byte(`{"model":"auto","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
 
-	_ = svc.ProxyMessages(context.Background(), body, rec, req)
+	_ = svc.ProxyMessages(ctx, body, rec, req)
 
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code,
 		"pre-commit upstream error surfaces upstream's status, not a stranded HTTP 200")
