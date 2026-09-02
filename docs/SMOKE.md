@@ -63,7 +63,7 @@ AIAND_API_KEY=… SMOKE_PROXY_MODE=record make smoke  # refresh aiand cassettes
 Defaults:
 
 - `SMOKE_PIN_MODEL=deepseek-ai/deepseek-v4-flash` (Claude Code `/v1/messages` path)
-- `SMOKE_OPENAI_PIN_MODEL=openai/gpt-oss-120b` (OpenAI-ingress path → still `provider=aiand`)
+- `SMOKE_OPENAI_PIN_MODEL=deepseek-ai/deepseek-v4-flash` (OpenAI-ingress path → still `provider=aiand`)
 
 That runs `scripts/smoke/run.sh`, which:
 

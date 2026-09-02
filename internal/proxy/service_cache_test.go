@@ -48,7 +48,7 @@ func anthropicBody(prompt string, stream bool) []byte {
 		streamLit = "true"
 	}
 	return []byte(`{
-		"model":"moonshotai/kimi-k3",
+		"model":"auto",
 		"max_tokens":256,
 		"stream":` + streamLit + `,
 		"tools":[{"name":"noop","description":"placeholder","input_schema":{"type":"object"}}],

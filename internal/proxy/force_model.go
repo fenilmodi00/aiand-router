@@ -116,43 +116,182 @@ func looksLikeEffortAlias(tail string) bool {
 	}
 }
 
-// setForceModelPin upserts an immutable user-forced session pin. It preserves
-// the prior pin's LastServedModel so the next turn can detect a mid-session
-// model switch and strip stale Anthropic thinking-block signatures. No-op if
-// the pin store is unconfigured or installationID is nil.
-func (s *Service) setForceModelPin(
+const (
+	forceModelSessionRole       = "force_model"
+	forceModelHistoryRoleSuffix = "_force_hist"
+	forceModelHistoryReason     = "force_model_history"
+	userUnforcedReason          = "user_unforced"
+)
+
+func forceModelHistoryRole(role string) string {
+	if role == "" {
+		role = sessionpin.DefaultRole
+	}
+	return role + forceModelHistoryRoleSuffix
+}
+
+func (s *Service) preserveForceModelControlHistory(
 	ctx context.Context,
 	sessionKey [sessionpin.SessionKeyLen]byte,
-	role string,
+	nextModel string,
+) error {
+	existing, found, err := s.pinStore.Get(ctx, sessionKey, forceModelSessionRole)
+	if err != nil {
+		return err
+	}
+	if !found || !isUserForcedReason(existing.Reason) || existing.Model == "" || existing.Model == nextModel {
+		return nil
+	}
+	return s.pinStore.UpdateUsage(context.Background(), sessionKey, forceModelSessionRole, sessionpin.Usage{
+		Strategy:            existing.Strategy,
+		EndedAt:             time.Now(),
+		ServedModel:         existing.Model,
+		ServedProvider:      existing.Provider,
+		PriorServedModel:    existing.LastServedModel,
+		SessionEverSwitched: existing.HasEverSwitched,
+	})
+}
+
+func (s *Service) setForceModelSessionPin(
+	ctx context.Context,
+	sessionKey [sessionpin.SessionKeyLen]byte,
 	installationID uuid.UUID,
 	canonicalModel, provider string,
 ) error {
 	if s.pinStore == nil || installationID == uuid.Nil {
 		return nil
 	}
-	log := observability.FromContext(ctx)
-	var lastServedModel string
-	existing, found, err := s.pinStore.Get(ctx, sessionKey, role)
-	if err != nil {
-		log.Error("force-model: prior pin lookup failed", "err", err)
-	} else if found && pinMatchesEffectiveStrategy(ctx, existing) {
-		lastServedModel = existing.LastServedModel
+	if err := s.preserveForceModelControlHistory(ctx, sessionKey, canonicalModel); err != nil {
+		return fmt.Errorf("preserve force-model control history: %w", err)
 	}
 	forced := sessionpin.Pin{
-		SessionKey:      sessionKey,
-		Role:            role,
-		InstallationID:  installationID,
-		Provider:        provider,
-		Model:           canonicalModel,
-		Reason:          translate.ReasonUserForceModel,
-		Strategy:        router.StrategyFromContext(ctx),
-		TurnCount:       1,
-		PinnedUntil:     pinNeverExpires,
-		LastServedModel: lastServedModel,
+		SessionKey:     sessionKey,
+		Role:           forceModelSessionRole,
+		InstallationID: installationID,
+		Provider:       provider,
+		Model:          canonicalModel,
+		Reason:         translate.ReasonUserForceModel,
+		TurnCount:      1,
+		PinnedUntil:    pinNeverExpires,
 	}
-	// context.Background(): ctx may already be canceled here (response written,
-	// client disconnected); a canceled ctx would leave the prior pin stuck.
 	return s.pinStore.Upsert(context.Background(), forced)
+}
+
+func (s *Service) loadForceModelSessionPin(
+	ctx context.Context,
+	sessionKey [sessionpin.SessionKeyLen]byte,
+) (sessionpin.Pin, bool, bool) {
+	if s.pinStore == nil {
+		return sessionpin.Pin{}, false, false
+	}
+	pin, found, err := s.pinStore.Get(ctx, sessionKey, forceModelSessionRole)
+	if err != nil {
+		observability.FromContext(ctx).Error("force-model session pin lookup failed", "err", err)
+		return sessionpin.Pin{}, false, false
+	}
+	if found && pin.Reason == userUnforcedReason {
+		return pin, false, true
+	}
+	if !found || !pin.PinnedUntil.After(time.Now()) || !isUserForcedReason(pin.Reason) || pin.Model == "" || pin.Provider == "" {
+		return sessionpin.Pin{}, false, false
+	}
+	return pin, true, false
+}
+
+func (s *Service) loadForceModelHistory(
+	ctx context.Context,
+	sessionKey [sessionpin.SessionKeyLen]byte,
+	role string,
+) sessionpin.Pin {
+	if s.pinStore == nil {
+		return sessionpin.Pin{}
+	}
+	pin, found, err := s.pinStore.Get(ctx, sessionKey, forceModelHistoryRole(role))
+	if err != nil {
+		observability.FromContext(ctx).Error("force-model history lookup failed", "err", err)
+		return sessionpin.Pin{}
+	}
+	if !found || !pin.PinnedUntil.After(time.Now()) {
+		return sessionpin.Pin{}
+	}
+	return pin
+}
+
+func (s *Service) anchorForceModelHistory(
+	ctx context.Context,
+	installationID uuid.UUID,
+	sessionKey [sessionpin.SessionKeyLen]byte,
+	role string,
+	forcedPin sessionpin.Pin,
+) {
+	if s.pinStore == nil || installationID == uuid.Nil {
+		return
+	}
+	s.upsertPin(ctx, sessionpin.Pin{
+		SessionKey:     sessionKey,
+		Role:           forceModelHistoryRole(role),
+		InstallationID: installationID,
+		Provider:       forcedPin.Provider,
+		Model:          forcedPin.Model,
+		Reason:         forceModelHistoryReason,
+		Strategy:       router.StrategyFromContext(ctx),
+		TurnCount:      1,
+		PinnedUntil:    pinNeverExpires,
+	})
+}
+
+func forceModelClearRoles() []string {
+	return []string{
+		roleForTier(catalog.TierUnknown),
+		roleForTier(catalog.TierLow),
+		roleForTier(catalog.TierMid),
+		roleForTier(catalog.TierHigh),
+	}
+}
+
+func (s *Service) clearLegacyForceModelPins(
+	ctx context.Context,
+	installationID uuid.UUID,
+	sessionKey [sessionpin.SessionKeyLen]byte,
+) error {
+	if s.pinStore == nil || installationID == uuid.Nil {
+		return nil
+	}
+	for _, role := range forceModelClearRoles() {
+		pin, found, err := s.pinStore.Get(ctx, sessionKey, role)
+		if err != nil {
+			return fmt.Errorf("load legacy force-model pin for role %q: %w", role, err)
+		}
+		if !found || !isUserForcedReason(pin.Reason) {
+			continue
+		}
+		if err := s.expireSessionPin(ctx, installationID, sessionKey, role, userUnforcedReason); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) clearForceModelSessionPin(
+	ctx context.Context,
+	installationID uuid.UUID,
+	sessionKey [sessionpin.SessionKeyLen]byte,
+) error {
+	if s.pinStore == nil || installationID == uuid.Nil {
+		return nil
+	}
+	if err := s.preserveForceModelControlHistory(ctx, sessionKey, ""); err != nil {
+		return fmt.Errorf("preserve force-model control history before clear: %w", err)
+	}
+	cleared := sessionpin.Pin{
+		SessionKey:     sessionKey,
+		Role:           forceModelSessionRole,
+		InstallationID: installationID,
+		Reason:         userUnforcedReason,
+		TurnCount:      1,
+		PinnedUntil:    pinNeverExpires,
+	}
+	return s.pinStore.Upsert(context.Background(), cleared)
 }
 
 // previewForceModelFromRequest resolves force intent for decision-only route
@@ -172,10 +311,28 @@ func previewForceModelFromRequest(headers http.Header, env *translate.RequestEnv
 	return canonicalModel, nil
 }
 
+// isClientPassthroughModel names an inbound wire-model the client sent for
+// provider API compatibility, not a router catalog routing intent.
+func isClientPassthroughModel(model string, format translate.Format) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	switch format {
+	case translate.FormatAnthropic:
+		return strings.HasPrefix(model, "claude-") || strings.HasPrefix(model, "gemini-")
+	case translate.FormatOpenAI:
+		return strings.HasPrefix(model, "gpt-") ||
+			strings.HasPrefix(model, "o") ||
+			strings.HasPrefix(model, "claude-") ||
+			strings.HasPrefix(model, "gemini-")
+	default:
+		return false
+	}
+}
+
 // rawForceModelFromHeaders picks the raw force-model string from the inbound
 // model field and x-aiand-force-model header. A catalog-resolvable, non-auto
-// model field wins over a conflicting header; model=auto, empty, or unknown
-// defers to the header.
+// model field wins over a conflicting header; model=auto, empty, client
+// passthrough, or unknown vendor/id slugs defer to the header; bare unknown
+// names are explicit routing intent and fail when not in the catalog.
 func rawForceModelFromHeaders(headers http.Header, env *translate.RequestEnvelope) string {
 	bodyModel, _ := translate.CanonicalModel(env.Model())
 	bodyModel = strings.TrimSpace(bodyModel)
@@ -183,6 +340,10 @@ func rawForceModelFromHeaders(headers http.Header, env *translate.RequestEnvelop
 		if _, _, known, _ := resolveForceModelWithEffort(bodyModel); known {
 			return bodyModel
 		}
+		if isClientPassthroughModel(bodyModel, env.SourceFormat()) || strings.Contains(bodyModel, "/") {
+			return ""
+		}
+		return bodyModel
 	}
 	if headers == nil {
 		return ""
@@ -214,9 +375,8 @@ func mergeForceEffortKnobs(r *http.Request, effortLevel string) {
 func (s *Service) applyResolvedForceModel(
 	ctx context.Context,
 	r *http.Request,
-	env *translate.RequestEnvelope,
 	installationID uuid.UUID,
-	sessionKey [sessionpin.SessionKeyLen]byte,
+	forceModelSessionKey [sessionpin.SessionKeyLen]byte,
 	raw, logLabel string,
 ) (string, error) {
 	log := observability.FromContext(ctx)
@@ -225,7 +385,7 @@ func (s *Service) applyResolvedForceModel(
 	if !known {
 		log.Warn(logLabel+": rejected unrecognized model",
 			"input_model", raw,
-			"session_key_hex", fmt.Sprintf("%x", sessionKey),
+			"force_model_session_key_hex", fmt.Sprintf("%x", forceModelSessionKey),
 		)
 		return "", &ForcedModelUnknownError{Model: raw}
 	}
@@ -240,12 +400,8 @@ func (s *Service) applyResolvedForceModel(
 		return "", &ForcedModelExcludedError{Model: canonicalModel, Reason: reason}
 	}
 	provider = binding
-	if s.pinStore == nil {
-		return canonicalModel, nil
-	}
-	role := roleForTier(catalog.TierFor(env.Model()))
-	if err := s.setForceModelPin(ctx, sessionKey, role, installationID, canonicalModel, provider); err != nil {
-		log.Error(logLabel+": pin store upsert failed", "err", err)
+	if err := s.setForceModelSessionPin(ctx, forceModelSessionKey, installationID, canonicalModel, provider); err != nil {
+		log.Error(logLabel+": session pin upsert failed", "err", err)
 		return canonicalModel, nil
 	}
 	log.Info(logLabel+" applied",
@@ -253,8 +409,8 @@ func (s *Service) applyResolvedForceModel(
 		"canonical_model", canonicalModel,
 		"provider", provider,
 		"effort", effortLevel,
-		"session_key_hex", fmt.Sprintf("%x", sessionKey),
-		"role", role,
+		"force_model_session_key_hex", fmt.Sprintf("%x", forceModelSessionKey),
+		"role", forceModelSessionRole,
 	)
 	return canonicalModel, nil
 }
@@ -268,30 +424,27 @@ func (s *Service) applyForceModel(
 	r *http.Request,
 	env *translate.RequestEnvelope,
 	installationID uuid.UUID,
-	sessionKey [sessionpin.SessionKeyLen]byte,
+	threadSessionKey, forceModelSessionKey [sessionpin.SessionKeyLen]byte,
 ) (string, error) {
 	raw := rawForceModelFromHeaders(r.Header, env)
 	if raw == "" {
 		return "", nil
 	}
-	return s.applyResolvedForceModel(ctx, r, env, installationID, sessionKey, raw, "force-model")
+	return s.applyResolvedForceModel(ctx, r, installationID, forceModelSessionKey, raw, "force-model")
 }
 
 // applyForceModelHeader honors only the x-aiand-force-model request header.
-// Dispatch paths should prefer applyForceModel, which also reads the model
-// field; this wrapper remains for header-only call sites and tests.
 func (s *Service) applyForceModelHeader(
 	ctx context.Context,
 	r *http.Request,
-	env *translate.RequestEnvelope,
 	installationID uuid.UUID,
-	sessionKey [sessionpin.SessionKeyLen]byte,
+	forceModelSessionKey [sessionpin.SessionKeyLen]byte,
 ) (string, error) {
 	raw := strings.TrimSpace(r.Header.Get(ForceModelHeader))
 	if raw == "" {
 		return "", nil
 	}
-	return s.applyResolvedForceModel(ctx, r, env, installationID, sessionKey, raw, "x-aiand-force-model")
+	return s.applyResolvedForceModel(ctx, r, installationID, forceModelSessionKey, raw, "x-aiand-force-model")
 }
 
 // handleForceModelCommand processes a /force-model or /unforce-model directive:
@@ -305,10 +458,10 @@ func (s *Service) handleForceModelCommand(
 	env *translate.RequestEnvelope,
 	cmd translate.ForceModelResult,
 	installationID uuid.UUID,
-	sessionKey [sessionpin.SessionKeyLen]byte,
+	threadSessionKey, forceModelSessionKey [sessionpin.SessionKeyLen]byte,
 	inputTokens int,
 ) error {
-	_, msg, err := s.applyForceModelCommand(ctx, env, cmd, installationID, sessionKey)
+	_, msg, err := s.applyForceModelCommand(ctx, env, cmd, installationID, threadSessionKey, forceModelSessionKey)
 	if err != nil {
 		return err
 	}
@@ -328,26 +481,27 @@ func (s *Service) applyForceModelCommand(
 	env *translate.RequestEnvelope,
 	cmd translate.ForceModelResult,
 	installationID uuid.UUID,
-	sessionKey [sessionpin.SessionKeyLen]byte,
+	threadSessionKey, forceModelSessionKey [sessionpin.SessionKeyLen]byte,
 ) (string, string, error) {
 	log := observability.FromContext(ctx)
-	role := roleForTier(catalog.TierFor(env.Model()))
 
 	var msg string
 	if cmd.Clear {
-		if s.pinStore != nil && installationID != uuid.Nil {
-			if err := s.expireSessionPin(ctx, installationID, sessionKey, role, "user_unforced"); err != nil {
-				log.Error("/unforce-model: pin store upsert failed", "err", err)
-				return "", "", err
-			}
+		if err := s.clearLegacyForceModelPins(ctx, installationID, threadSessionKey); err != nil {
+			log.Error("/unforce-model: legacy pin cleanup failed", "err", err)
+			return "", "", err
+		}
+		if err := s.clearForceModelSessionPin(ctx, installationID, forceModelSessionKey); err != nil {
+			log.Error("/unforce-model: session pin clear failed", "err", err)
+			return "", "", err
 		}
 		msg = "✦ **Aiand Router** → force-model cleared · resuming automatic model selection\n\n"
 		if env.SourceFormat() == translate.FormatOpenAI {
 			msg = "Aiand Router: force-model cleared; resuming automatic model selection"
 		}
 		log.Debug("/unforce-model: session pin cleared",
-			"session_key_hex", fmt.Sprintf("%x", sessionKey),
-			"role", role,
+			"force_model_session_key_hex", fmt.Sprintf("%x", forceModelSessionKey),
+			"role", forceModelSessionRole,
 		)
 		return "", msg, nil
 	}
@@ -356,8 +510,8 @@ func (s *Service) applyForceModelCommand(
 	if !known {
 		log.Info("/force-model: rejected unknown model",
 			"input_model", cmd.Model,
-			"session_key_hex", fmt.Sprintf("%x", sessionKey),
-			"role", role,
+			"force_model_session_key_hex", fmt.Sprintf("%x", forceModelSessionKey),
+			"role", forceModelSessionRole,
 		)
 		msg = fmt.Sprintf("✦ **Aiand Router** → force-model: %q isn't a recognized model · keeping automatic routing. Use a full model ID, e.g. moonshotai/kimi-k3, deepseek-ai/deepseek-v4-flash, or zai-org/glm-5.3.\n\n", cmd.Model)
 		if env.SourceFormat() == translate.FormatOpenAI {
@@ -373,8 +527,8 @@ func (s *Service) applyForceModelCommand(
 			"canonical_model", canonicalModel,
 			"provider", provider,
 			"reason", reason,
-			"session_key_hex", fmt.Sprintf("%x", sessionKey),
-			"role", role,
+			"force_model_session_key_hex", fmt.Sprintf("%x", forceModelSessionKey),
+			"role", forceModelSessionRole,
 		)
 		msg = fmt.Sprintf("✦ **Aiand Router** → force-model rejected: %s · keeping automatic routing. Ask an admin to allow the provider, or force a model from one that is permitted.\n\n", reason)
 		if env.SourceFormat() == translate.FormatOpenAI {
@@ -383,8 +537,12 @@ func (s *Service) applyForceModelCommand(
 		return "", msg, nil
 	}
 
-	if err := s.setForceModelPin(ctx, sessionKey, role, installationID, canonicalModel, binding); err != nil {
-		log.Error("/force-model: pin store upsert failed", "err", err)
+	if err := s.clearLegacyForceModelPins(ctx, installationID, threadSessionKey); err != nil {
+		log.Error("/force-model: legacy pin cleanup failed", "err", err)
+		return "", "", err
+	}
+	if err := s.setForceModelSessionPin(ctx, forceModelSessionKey, installationID, canonicalModel, binding); err != nil {
+		log.Error("/force-model: session pin upsert failed", "err", err)
 		return "", "", err
 	}
 	msg = fmt.Sprintf("✦ **Aiand Router** → force-model applied: %s (%s) · Use /unforce-model to clear\n\n", canonicalModel, binding)
@@ -395,8 +553,8 @@ func (s *Service) applyForceModelCommand(
 		"input_model", cmd.Model,
 		"canonical_model", canonicalModel,
 		"provider", binding,
-		"session_key_hex", fmt.Sprintf("%x", sessionKey),
-		"role", role,
+		"force_model_session_key_hex", fmt.Sprintf("%x", forceModelSessionKey),
+		"role", forceModelSessionRole,
 	)
 	return canonicalModel, msg, nil
 }

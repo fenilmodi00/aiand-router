@@ -141,6 +141,7 @@ func (s *Service) handleLoopEscalation(
 	sessionKey [sessionpin.SessionKeyLen]byte,
 	role string,
 	routedModel string,
+	forceModelSessionKeys ...[sessionpin.SessionKeyLen]byte,
 ) {
 	log := observability.FromContext(ctx)
 
@@ -162,6 +163,13 @@ func (s *Service) handleLoopEscalation(
 			if existing.Model != "" {
 				loopingModel = existing.Model
 			}
+		}
+	}
+	if len(forceModelSessionKeys) > 0 {
+		forcePin, active, _ := s.loadForceModelSessionPin(ctx, forceModelSessionKeys[0])
+		if active {
+			userForced = true
+			loopingModel = forcePin.Model
 		}
 	}
 

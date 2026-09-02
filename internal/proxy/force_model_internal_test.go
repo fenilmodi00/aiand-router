@@ -16,6 +16,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func forceModelKeysForTest(ctx context.Context, env *translate.RequestEnvelope, apiKeyID string) ([sessionpin.SessionKeyLen]byte, [sessionpin.SessionKeyLen]byte) {
+	thread := DeriveSessionKey(env, apiKeyID)
+	force := deriveForceModelSessionKeyForRequest(ctx, env, apiKeyID, thread)
+	return thread, force
+}
+
 func TestResolveForceModel(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -256,24 +262,24 @@ func TestResolveRequestedModel_PrecedenceAndPin(t *testing.T) {
 			name:      "resolvable model field forces canonical id",
 			body:      `{"model":"` + kimiK3 + `","messages":[{"role":"user","content":"hi"}]}`,
 			wantID:    kimiK3,
-			wantRole:  sessionpin.DefaultRole + "_high",
+			wantRole:  forceModelSessionRole,
 			bodyModel: kimiK3,
 		},
 		{
-			name:   "unknown alias routes without forcing",
-			body:   `{"model":"fable","messages":[{"role":"user","content":"hi"}]}`,
-			wantID: "",
+			name:    "unknown alias fails the request",
+			body:    `{"model":"fable","messages":[{"role":"user","content":"hi"}]}`,
+			wantErr: ErrForcedModelUnknown,
 		},
 		{
-			name:   "unknown bare tail routes without forcing",
-			body:   `{"model":"kimi-k3","messages":[{"role":"user","content":"hi"}]}`,
-			wantID: "",
+			name:    "unknown bare tail fails the request",
+			body:    `{"model":"kimi-k3","messages":[{"role":"user","content":"hi"}]}`,
+			wantErr: ErrForcedModelUnknown,
 		},
 		{
 			name:      "model field beats conflicting header",
 			body:      `{"model":"` + kimiK3 + `","messages":[{"role":"user","content":"hi"}]}`,
 			wantID:    kimiK3,
-			wantRole:  sessionpin.DefaultRole + "_high",
+			wantRole:  forceModelSessionRole,
 			bodyModel: kimiK3,
 		},
 		{
@@ -287,9 +293,9 @@ func TestResolveRequestedModel_PrecedenceAndPin(t *testing.T) {
 			wantID: "",
 		},
 		{
-			name:   "unknown model field routes without forcing",
-			body:   `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`,
-			wantID: "",
+			name:    "unknown model field fails the request",
+			body:    `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`,
+			wantErr: ErrForcedModelUnknown,
 		},
 		{
 			name:    "unknown header fails the request",
@@ -314,7 +320,8 @@ func TestResolveRequestedModel_PrecedenceAndPin(t *testing.T) {
 			}
 			ctx := context.WithValue(context.Background(), InstallationIDContextKey{}, uuid.New().String())
 			insID := uuid.New()
-			got, err := svc.applyForceModel(ctx, httpReq, env, insID, DeriveSessionKey(env, "key-1"))
+			threadKey, forceKey := forceModelKeysForTest(ctx, env, "key-1")
+			got, err := svc.applyForceModel(ctx, httpReq, env, insID, threadKey, forceKey)
 			if tt.wantErr != nil {
 				require.ErrorIs(t, err, tt.wantErr, "expected typed error")
 				assert.Empty(t, store.upserts, "no pin must be written on a failed resolution")
@@ -353,7 +360,8 @@ func TestResolveRequestedModel_KeepsEnvModelByteForByte(t *testing.T) {
 	require.NoError(t, err)
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	ctx := context.WithValue(context.Background(), InstallationIDContextKey{}, uuid.New().String())
-	got, err := svc.applyForceModel(ctx, httpReq, env, uuid.New(), DeriveSessionKey(env, "key-1"))
+	threadKey, forceKey := forceModelKeysForTest(ctx, env, "key-1")
+	got, err := svc.applyForceModel(ctx, httpReq, env, uuid.New(), threadKey, forceKey)
 	require.NoError(t, err)
 	assert.Equal(t, "moonshotai/kimi-k3", got)
 
@@ -375,7 +383,8 @@ func TestResolveRequestedModel_EffortSuffixMergesOverride(t *testing.T) {
 
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	ctx := context.WithValue(context.Background(), InstallationIDContextKey{}, uuid.New().String())
-	got, err := svc.applyForceModel(ctx, httpReq, env, uuid.New(), DeriveSessionKey(env, "key-1"))
+	threadKey, forceKey := forceModelKeysForTest(ctx, env, "key-1")
+	got, err := svc.applyForceModel(ctx, httpReq, env, uuid.New(), threadKey, forceKey)
 	require.NoError(t, err)
 
 	assert.Equal(t, "zai-org/glm-5.3", got, "canonical model, suffix stripped")
@@ -397,7 +406,8 @@ func TestResolveRequestedModel_ClaudeCodeContextStripsVariant(t *testing.T) {
 	require.NoError(t, err)
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	ctx := context.WithValue(context.Background(), InstallationIDContextKey{}, uuid.New().String())
-	got, err := svc.applyForceModel(ctx, httpReq, env, uuid.New(), DeriveSessionKey(env, "key-1"))
+	threadKey, forceKey := forceModelKeysForTest(ctx, env, "key-1")
+	got, err := svc.applyForceModel(ctx, httpReq, env, uuid.New(), threadKey, forceKey)
 	require.NoError(t, err)
 	assert.Equal(t, "moonshotai/kimi-k3", got, "variant tag stripped before resolution")
 	require.Len(t, store.upserts, 1)
@@ -415,7 +425,8 @@ func TestResolveRequestedModel_ExcludedModelFails(t *testing.T) {
 	ctx := context.WithValue(context.Background(), InstallationIDContextKey{}, uuid.New().String())
 	ctx = context.WithValue(ctx, InstallationExcludedModelsContextKey{}, []string{"deepseek-ai/deepseek-v4-flash"})
 
-	_, err = svc.applyForceModel(ctx, httpReq, env, uuid.New(), DeriveSessionKey(env, "key-1"))
+	threadKey, forceKey := forceModelKeysForTest(ctx, env, "key-1")
+	_, err = svc.applyForceModel(ctx, httpReq, env, uuid.New(), threadKey, forceKey)
 	require.ErrorIs(t, err, ErrForcedModelExcluded, "excluded model must be rejected")
 	assert.Empty(t, store.upserts)
 }
@@ -431,7 +442,8 @@ func TestResolveRequestedModel_NoPinStoreStillResolves(t *testing.T) {
 	ctx := context.WithValue(context.Background(), InstallationIDContextKey{}, uuid.New().String())
 	ctx, cancel := context.WithCancel(ctx)
 	cancel()
-	got, err := svc.applyForceModel(ctx, httpReq, env, uuid.New(), DeriveSessionKey(env, "key-1"))
+	threadKey, forceKey := forceModelKeysForTest(ctx, env, "key-1")
+	got, err := svc.applyForceModel(ctx, httpReq, env, uuid.New(), threadKey, forceKey)
 	require.NoError(t, err)
 	assert.Equal(t, "moonshotai/kimi-k3", got, "canonical force model returned without a pin store")
 }

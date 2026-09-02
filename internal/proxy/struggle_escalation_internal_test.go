@@ -140,7 +140,7 @@ func TestHandleStruggleEscalation_PinsTheClusterAbove(t *testing.T) {
 		"high":     {struggleHighModel},
 	})
 
-	svc.handleStruggleEscalation(context.Background(), uuid.New(), struggleTestKey(1), "default")
+	svc.handleStruggleEscalation(context.Background(), uuid.New(), struggleTestKey(1), "default", nil)
 
 	require.Len(t, pins.upserts, 1)
 	assert.Equal(t, struggleHighModel, pins.upserts[0].Model)
@@ -161,7 +161,7 @@ func TestHandleStruggleEscalation_SidewaysWhenTheClusterAboveCannotServe(t *test
 		"balanced": {struggleLowModel, struggleMidModel},
 	})
 
-	svc.handleStruggleEscalation(context.Background(), uuid.New(), struggleTestKey(2), "default")
+	svc.handleStruggleEscalation(context.Background(), uuid.New(), struggleTestKey(2), "default", nil)
 
 	require.Len(t, pins.upserts, 1)
 	assert.Equal(t, struggleMidModel, pins.upserts[0].Model)
@@ -169,4 +169,23 @@ func TestHandleStruggleEscalation_SidewaysWhenTheClusterAboveCannotServe(t *test
 
 	require.Len(t, events.events, 1)
 	assert.Equal(t, struggleActionSideways, events.events[0].Action)
+}
+
+func TestHandleStruggleEscalation_SkipsInstallationExcludedTargets(t *testing.T) {
+	pins := newStubPinStore()
+	pins.getFound = true
+	pins.getPin = strugglingPin(struggleLowModel, "balanced")
+	events := &recordingStruggleStore{}
+	svc := newStruggleEscalationSvc(pins, events, map[string][]string{
+		"balanced": {struggleLowModel, struggleMidModel},
+		"high":     {"zai-org/glm-5.3", struggleHighModel},
+	})
+	ctx := context.WithValue(context.Background(), InstallationExcludedModelsContextKey{}, []string{"zai-org/glm-5.3"})
+
+	svc.handleStruggleEscalation(ctx, uuid.New(), struggleTestKey(1), "default", nil)
+
+	require.Len(t, pins.upserts, 1)
+	assert.Equal(t, struggleHighModel, pins.upserts[0].Model,
+		"an installation-excluded arm must never become the escalation target")
+	assert.Equal(t, "high", pins.upserts[0].PolicyGroup)
 }

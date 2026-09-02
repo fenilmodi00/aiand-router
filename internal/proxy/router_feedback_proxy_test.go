@@ -489,7 +489,7 @@ func TestService_RouterFeedbackCommand_OmitsTrainingTranscriptWithoutPermission(
 
 func TestService_RouterFeedbackCommand_CorrelatesCompactedHMMEmbeddingRoute(t *testing.T) {
 	routeBody := []byte(`{
-		"model":"qwen/qwen3.8-27b",
+		"model":"auto",
 		"max_tokens":230000,
 		"messages":[
 			{"role":"user","content":"` + strings.Repeat("x", 30_000) + `"},
@@ -532,7 +532,7 @@ func TestService_RouterFeedbackCommand_CorrelatesCompactedHMMEmbeddingRoute(t *t
 	assert.Equal(t, installationID, requests[0].InstallationID)
 
 	feedbackBody := []byte(`{
-		"model":"qwen/qwen3.8-27b",
+		"model":"auto",
 		"max_tokens":1024,
 		"messages":[
 			{"role":"user","content":"` + strings.Repeat("x", 30_000) + `"},

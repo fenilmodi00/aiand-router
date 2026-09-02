@@ -122,7 +122,7 @@ func TestService_ProxyOpenAIResponses_CustomToolUsesNativeOpenAIFamily(t *testin
 		providers.ProviderAiand: provider,
 	}, nil, false, nil, nil, false, providers.ProviderAiand, "deepseek-ai/deepseek-v4-flash", nil)
 
-	body := []byte(`{"model":"moonshotai/kimi-k3","input":"apply a patch","reasoning":{"effort":"high"},"tools":[{"type":"custom","name":"apply_patch"}]}`)
+	body := []byte(`{"model":"auto","input":"apply a patch","reasoning":{"effort":"high"},"tools":[{"type":"custom","name":"apply_patch"}]}`)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(""))
 	require.NoError(t, svc.ProxyOpenAIResponses(context.Background(), body, rec, req))
@@ -496,7 +496,7 @@ func TestService_ProxyMessages_PropagatesUpstreamStatusError(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
-	body := []byte(`{"model":"moonshotai/kimi-k3","messages":[{"role":"user","content":"hi"}]}`)
+	body := []byte(`{"model":"auto","messages":[{"role":"user","content":"hi"}]}`)
 
 	err := svc.ProxyMessages(context.Background(), body, rec, httpReq)
 
@@ -527,7 +527,7 @@ func TestService_ProxyMessages_CrossFormatUpstreamErrorBodyReachesClient(t *test
 
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
-	body := []byte(`{"model":"moonshotai/kimi-k3","messages":[{"role":"user","content":"hi"}]}`)
+	body := []byte(`{"model":"auto","messages":[{"role":"user","content":"hi"}]}`)
 
 	err := svc.ProxyMessages(context.Background(), body, rec, httpReq)
 
@@ -597,7 +597,7 @@ func TestService_ProxyMessages_EmbedOnlyUserMessageFlag(t *testing.T) {
 	// embedOnlyUserMessage must keep both user prompts, drop system text,
 	// assistant tool_use, and tool_result blocks.
 	body := []byte(`{
-		"model":"moonshotai/kimi-k3",
+		"model":"auto",
 		"system":"You are Claude Code. CLAUDE.md says: do not use emojis...",
 		"messages":[
 			{"role":"user","content":"` + firstUserPrompt + `"},
@@ -657,7 +657,7 @@ func TestService_ProxyMessages_EmbedOnlyUserMessageFlag(t *testing.T) {
 func TestService_ProxyMessages_EmbedOnlyUserMessageContextOverride(t *testing.T) {
 	const userPrompt = "Find the race condition in main.go"
 	body := []byte(`{
-		"model":"moonshotai/kimi-k3",
+		"model":"auto",
 		"system":"You are Claude Code preamble...",
 		"messages":[{"role":"user","content":"` + userPrompt + `"}]
 	}`)
@@ -728,7 +728,7 @@ func boolPtr(b bool) *bool { return &b }
 // TestService_ProxyMessages_NoPinStoreRunsScorerEveryTurn verifies that
 // without a pin store, every turn re-runs the cluster scorer.
 func TestService_ProxyMessages_NoPinStoreRunsScorerEveryTurn(t *testing.T) {
-	body := []byte(`{"model":"moonshotai/kimi-k3","messages":[{"role":"user","content":"hi"}]}`)
+	body := []byte(`{"model":"auto","messages":[{"role":"user","content":"hi"}]}`)
 	fr := &fakeRouter{decision: router.Decision{Provider: providers.ProviderAiand, Model: "deepseek-ai/deepseek-v4-flash"}}
 	svc := proxy.NewService(fr,
 		map[string]providers.Client{providers.ProviderAiand: &fakeProvider{}},
@@ -933,7 +933,7 @@ func TestService_ProxyOpenAIChatCompletion_DispatchesBedrockMakoraTogether(t *te
 // TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer: with BYOK-only,
 // providers without per-request creds must be excluded, or argmax 402s.
 func TestService_WithByokOnly_FiltersUnauthedProvidersFromScorer(t *testing.T) {
-	body := []byte(`{"model":"moonshotai/kimi-k3","messages":[{"role":"user","content":"hi"}]}`)
+	body := []byte(`{"model":"auto","messages":[{"role":"user","content":"hi"}]}`)
 	providerMap := map[string]providers.Client{
 		providers.ProviderAiand: &fakeProvider{},
 	}

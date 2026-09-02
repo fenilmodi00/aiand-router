@@ -604,7 +604,7 @@ func TestProxyEntrypointsStripHistoricalBetaArtifactsBeforeRouting(t *testing.T)
 				providers.ProviderAiand, "moonshotai/kimi-k3", nil,
 			)
 			body, err := json.Marshal(map[string]any{
-				"model": "moonshotai/kimi-k3",
+				"model": "auto",
 				"messages": []any{
 					map[string]any{"role": "user", "content": "inspect this repository"},
 					map[string]any{"role": "assistant", "content": "I will inspect it."},
