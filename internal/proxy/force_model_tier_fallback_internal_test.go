@@ -294,7 +294,7 @@ func TestForceModelHeader_OverridesHardPin(t *testing.T) {
 	headerReq, err := http.NewRequest(http.MethodPost, "/v1/messages", nil)
 	require.NoError(t, err)
 	headerReq.Header.Set(ForceModelHeader, "moonshotai/kimi-k3")
-	_, forceErr := svc.applyForceModelHeader(context.Background(), headerReq, env, uuid.New(), key)
+	_, forceErr := svc.applyForceModelHeader(context.Background(), headerReq, uuid.New(), key)
 	require.NoError(t, forceErr)
 
 	feats := env.RoutingFeatures(false)
@@ -307,6 +307,49 @@ func TestForceModelHeader_OverridesHardPin(t *testing.T) {
 		"the x-aiand-force-model pin must outrank the automatic compaction hard-pin")
 	assert.Equal(t, translate.ReasonUserForceModel, res.Decision.Reason)
 	assert.False(t, res.HardPinned)
+}
+
+func TestRunTurnLoop_ExcludedEscalationPin_NoTierFloorAndEvicted(t *testing.T) {
+	const escalated = "zai-org/glm-5.3"
+	require.Equal(t, catalog.TierHigh, catalog.TierFor(escalated), "test premise: escalation pin is high-tier but excluded")
+
+	fr := &tierProbeRouter{available: map[string]struct{}{
+		escalated:                       {},
+		"moonshotai/kimi-k3":            {},
+		"deepseek-ai/deepseek-v4-flash": {},
+	}}
+	store := newStubPinStore()
+	store.getFound = true
+	store.getPin = sessionpin.Pin{
+		Provider:    providers.ProviderAiand,
+		Model:       escalated,
+		Reason:      translate.ReasonStruggleEscalation,
+		PinnedUntil: time.Now().Add(time.Hour),
+	}
+	svc := NewService(fr, nil, nil, false, nil, store, false,
+		providers.ProviderAiand, "deepseek-ai/deepseek-v4-flash", nil).
+		WithAvailableModels(fr.available).
+		WithPlannerEnabled(false)
+
+	env, err := translate.ParseAnthropic([]byte(`{"model":"moonshotai/kimi-k3","messages":[{"role":"user","content":"hello"}]}`))
+	require.NoError(t, err)
+	feats := env.RoutingFeatures(false)
+
+	res, err := svc.runTurnLoop(context.Background(), env, feats, "key-1", uuid.New(), "", nil, router.Request{
+		RequestedModel: feats.Model,
+		ExcludedModels: map[string]struct{}{escalated: {}, "deepseek-ai/deepseek-v4-flash": {}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "moonshotai/kimi-k3", res.Decision.Model)
+
+	require.Len(t, fr.captured, 1)
+	_, kimiExcluded := fr.captured[0].ExcludedModels["moonshotai/kimi-k3"]
+	assert.False(t, kimiExcluded, "an auto-escalation pin must not constrain the fresh route to its tier")
+
+	require.NotEmpty(t, store.upserts, "the unservable escalation pin must be written over")
+	expired := store.upserts[0]
+	assert.Equal(t, "escalation_pin_excluded", expired.Reason)
+	assert.True(t, expired.PinnedUntil.Before(time.Now()), "the unservable escalation pin must be expired")
 }
 
 // Guards the empty-pool escape hatch: with no in-tier candidate, the helper
