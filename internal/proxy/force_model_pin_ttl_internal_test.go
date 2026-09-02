@@ -16,8 +16,8 @@ import (
 )
 
 // recordingPinStore captures the last Upsert so the written PinnedUntil can be
-// asserted. Get returns nothing — setForceModelPin only reads to carry forward
-// LastServedModel.
+// asserted. Get returns nothing — setForceModelSessionPin only reads to carry
+// forward LastServedModel.
 type recordingPinStore struct {
 	upserts []sessionpin.Pin
 }
@@ -71,35 +71,35 @@ func TestPinExpiry_UserForcedNeverExpires(t *testing.T) {
 		"cluster pin keeps the bounded one-hour session TTL, not the sentinel")
 }
 
-// TestSetForceModelPin_WritesNeverExpiresSentinel guards the write path: the
-// /force-model upsert must persist the never-expires PinnedUntil so an idle gap
-// can never silently drop the user's directive.
-func TestSetForceModelPin_WritesNeverExpiresSentinel(t *testing.T) {
+// TestSetForceModelSessionPin_WritesNeverExpiresSentinel guards the write path:
+// the /force-model upsert must persist the never-expires PinnedUntil so an idle
+// gap can never silently drop the user's directive.
+func TestSetForceModelSessionPin_WritesNeverExpiresSentinel(t *testing.T) {
 	store := &recordingPinStore{}
 	svc := NewService(nil, nil, nil, false, nil, store, false,
 		providers.ProviderAiand, "deepseek-ai/deepseek-v4-flash", nil)
 
 	var key [sessionpin.SessionKeyLen]byte
-	require.NoError(t, svc.setForceModelPin(
-		context.Background(), key, roleForTier(0), uuid.New(),
+	require.NoError(t, svc.setForceModelSessionPin(
+		context.Background(), key, uuid.New(),
 		"moonshotai/kimi-k3", providers.ProviderAiand))
 
 	require.Len(t, store.upserts, 1)
+	assert.Equal(t, forceModelSessionRole, store.upserts[0].Role)
 	assert.Equal(t, translate.ReasonUserForceModel, store.upserts[0].Reason)
 	assert.Equal(t, pinNeverExpires, store.upserts[0].PinnedUntil,
 		"a /force-model pin must be written with the never-expires sentinel")
 }
 
-func TestSetForceModelPin_WritesEffectiveStrategy(t *testing.T) {
+func TestSetForceModelSessionPin_UsesSessionRole(t *testing.T) {
 	store := &recordingPinStore{}
 	svc := NewService(nil, nil, nil, false, nil, store, false,
-		providers.ProviderAiand, "claude-haiku-4-5", nil)
+		providers.ProviderAiand, "deepseek-ai/deepseek-v4-flash", nil)
 
-	ctx := router.WithStrategy(context.Background(), router.StrategyHMMBeta)
-	require.NoError(t, svc.setForceModelPin(
-		ctx, [sessionpin.SessionKeyLen]byte{}, sessionpin.DefaultRole, uuid.New(),
-		"claude-opus-4-8", providers.ProviderAiand))
+	require.NoError(t, svc.setForceModelSessionPin(
+		context.Background(), [sessionpin.SessionKeyLen]byte{}, uuid.New(),
+		"moonshotai/kimi-k3", providers.ProviderAiand))
 
 	require.Len(t, store.upserts, 1)
-	assert.Equal(t, router.StrategyHMMBeta, store.upserts[0].Strategy)
+	assert.Equal(t, forceModelSessionRole, store.upserts[0].Role)
 }

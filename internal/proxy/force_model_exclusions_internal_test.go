@@ -45,7 +45,7 @@ func TestForceModelCommand_SessionStrikeOutDoesNotReject(t *testing.T) {
 	rec := httptest.NewRecorder()
 	require.NoError(t, svc.handleForceModelCommand(ctx, rec, env,
 		translate.ForceModelResult{Model: "zai-org/glm-5.2"},
-		uuid.New(), DeriveSessionKey(env, "key-1"), 10))
+		uuid.New(), DeriveSessionKey(env, "key-1"), deriveForceModelSessionKeyForRequest(ctx, env, "key-1", DeriveSessionKey(env, "key-1")), 10))
 
 	require.Len(t, store.upserts, 1,
 		"a provider struck out for overload is not an exclusion")

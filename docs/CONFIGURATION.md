@@ -365,9 +365,11 @@ with nowhere to go (HTTP 503 from the scorer), so exclude deliberately.
 
 ## Forcing a model or a routing cluster
 
-`/force-model <model>` (alias `/fm`) pins the session to one model, and the
-inbound `model` field / `x-aiand-force-model` header are its headless
-equivalents (see [Routing intent via the `model` field](#routing-intent-via-the-model-field)).
+`/force-model <model>` (alias `/fm`) pins the client session to one model. The
+pin applies to parent and child agent threads that share the same client-session
+identity; clients that send no session identity can only be pinned at the current
+thread scope. The inbound `model` field / `x-aiand-force-model` header are its
+headless equivalents (see [Routing intent via the `model` field](#routing-intent-via-the-model-field)).
 The name is matched **exactly** — it must be a canonical catalog ID
 (`qwen/qwen3.8-max`), that model's bare name without the vendor prefix
 (`qwen3.8-max`), or an alias (`opus`, `qwen-max`), optionally with a `:level`

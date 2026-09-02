@@ -216,7 +216,7 @@ func TestPolicyShadowComparisonSkipsDryRunAndCollectsServingRoute(t *testing.T) 
 	}
 
 	recorder := httptest.NewRecorder()
-	body := []byte(`{"model":"moonshotai/kimi-k3","tools":[],"output_config":{"format":{"type":"json_schema","schema":{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}}},"messages":[{"role":"user","content":"hello"}]}`)
+	body := []byte(`{"model":"auto","tools":[],"output_config":{"format":{"type":"json_schema","schema":{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}}},"messages":[{"role":"user","content":"hello"}]}`)
 	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, body, recorder, request))
 
@@ -270,7 +270,7 @@ func TestProxyMessages_RecordsClusterObservation(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, installID)
 	rec := httptest.NewRecorder()
-	body := []byte(`{"model":"moonshotai/kimi-k3","messages":[{"role":"user","content":"hello"}]}`)
+	body := []byte(`{"model":"auto","messages":[{"role":"user","content":"hello"}]}`)
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
 
@@ -328,7 +328,7 @@ func TestProxyMessages_RecordsPolicyObservation(t *testing.T) {
 	ctx = context.WithValue(ctx, proxy.PolicyTrainingAllowedContextKey{}, true)
 	ctx = context.WithValue(ctx, proxy.PolicyDebugEnabledContextKey{}, true)
 	rec := httptest.NewRecorder()
-	body := []byte(`{"model":"moonshotai/kimi-k3","messages":[{"role":"user","content":"hello"}]}`)
+	body := []byte(`{"model":"auto","messages":[{"role":"user","content":"hello"}]}`)
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
 
@@ -381,7 +381,7 @@ func TestProxyMessages_PersistsCacheTokens(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, installID)
 	rec := httptest.NewRecorder()
-	body := []byte(`{"model":"moonshotai/kimi-k3","messages":[{"role":"user","content":"hello"}]}`)
+	body := []byte(`{"model":"auto","messages":[{"role":"user","content":"hello"}]}`)
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
 
@@ -418,7 +418,7 @@ func TestProxyMessages_ChosenScoreZeroIsPersisted(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, installID)
 	rec := httptest.NewRecorder()
-	body := []byte(`{"model":"moonshotai/kimi-k3","messages":[{"role":"user","content":"hello"}]}`)
+	body := []byte(`{"model":"auto","messages":[{"role":"user","content":"hello"}]}`)
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
 
@@ -454,7 +454,7 @@ func TestProxyMessages_NoMetadataOmitsClusterFields(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, installID)
 	rec := httptest.NewRecorder()
-	body := []byte(`{"model":"moonshotai/kimi-k3","messages":[{"role":"user","content":"hello"}]}`)
+	body := []byte(`{"model":"auto","messages":[{"role":"user","content":"hello"}]}`)
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
 
@@ -486,12 +486,12 @@ func TestProxyMessages_PersistsTurnType(t *testing.T) {
 	}{
 		{
 			name:     "main loop",
-			body:     `{"model":"moonshotai/kimi-k3","messages":[{"role":"user","content":"hello"}]}`,
+			body:     `{"model":"auto","messages":[{"role":"user","content":"hello"}]}`,
 			turnType: "main_loop",
 		},
 		{
 			name:     "probe",
-			body:     `{"model":"moonshotai/kimi-k3","max_tokens":1,"messages":[{"role":"user","content":"quota"}]}`,
+			body:     `{"model":"auto","max_tokens":1,"messages":[{"role":"user","content":"quota"}]}`,
 			turnType: "probe",
 		},
 	}
@@ -540,7 +540,7 @@ func TestProxyMessages_PersistsRolloutID(t *testing.T) {
 	ctx = context.WithValue(ctx, proxy.ClientIdentityContextKey{}, proxy.ClientIdentity{RolloutID: "client-rollout"})
 	ctx = context.WithValue(ctx, proxy.PolicyRolloutIDContextKey{}, rolloutID)
 	rec := httptest.NewRecorder()
-	body := []byte(`{"model":"moonshotai/kimi-k3","messages":[{"role":"user","content":"hello"}]}`)
+	body := []byte(`{"model":"auto","messages":[{"role":"user","content":"hello"}]}`)
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
 
@@ -569,7 +569,7 @@ func TestProxyMessages_PersistedPolicyRolloutIDOverridesClientIdentity(t *testin
 	ctx = context.WithValue(ctx, proxy.ClientIdentityContextKey{}, proxy.ClientIdentity{RolloutID: "header-rollout"})
 	ctx = context.WithValue(ctx, proxy.PolicyRolloutIDContextKey{}, rolloutID)
 	rec := httptest.NewRecorder()
-	body := []byte(`{"model":"moonshotai/kimi-k3","messages":[{"role":"user","content":"hello"}]}`)
+	body := []byte(`{"model":"auto","messages":[{"role":"user","content":"hello"}]}`)
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
 
@@ -579,8 +579,8 @@ func TestProxyMessages_PersistedPolicyRolloutIDOverridesClientIdentity(t *testin
 
 // TestProxyMessages_PersistsSessionKeyAndRole: session_key/role are the join
 // key to router.spiral_shadow_events, so they must match spiral's encoding
-// byte-for-byte. role is keyed off the *requested* model (opus-4-7 ->
-// "default_high"), not the cheaper model the router actually picked.
+// byte-for-byte. role is keyed off the requested model tier; model=auto is
+// TierUnknown and maps to the default pin role.
 func TestProxyMessages_PersistsSessionKeyAndRole(t *testing.T) {
 	const installID = "77777777-7777-7777-7777-777777777777"
 	decision := router.Decision{
@@ -599,14 +599,14 @@ func TestProxyMessages_PersistsSessionKeyAndRole(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), proxy.InstallationIDContextKey{}, installID)
 	rec := httptest.NewRecorder()
-	body := []byte(`{"model":"moonshotai/kimi-k3","messages":[{"role":"user","content":"hello"}]}`)
+	body := []byte(`{"model":"auto","messages":[{"role":"user","content":"hello"}]}`)
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, body, rec, httpReq))
 
 	row := telem.firstRow(t)
 	require.Len(t, row.SessionKey, 16, "session_key must be the 16-byte digest, not empty")
 	assert.NotEqual(t, make([]byte, 16), row.SessionKey, "session_key must be a real (non-zero) digest")
-	assert.Equal(t, "default_high", row.Role, "role must be the requested model's pin role (opus-4-7 = TierHigh)")
+	assert.Equal(t, "default", row.Role, "role must be the requested model's pin role (auto = TierUnknown)")
 }
 
 func TestProxyOpenAIChatCompletion_PlaygroundTelemetry(t *testing.T) {

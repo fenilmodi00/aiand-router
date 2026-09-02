@@ -71,7 +71,7 @@ func TestProxyMessages_ForceClusterOnNonSidecarStrategyRejects(t *testing.T) {
 	svc := NewService(fr, map[string]providers.Client{providers.ProviderAiand: fp}, nil, false, nil, nil, false,
 		providers.ProviderAiand, "deepseek-ai/deepseek-v4-flash", nil)
 
-	body := `{"model":"moonshotai/kimi-k3","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}`
+	body := `{"model":"auto","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}`
 	rec := httptest.NewRecorder()
 
 	err := svc.ProxyMessages(context.Background(), []byte(body), rec, forceClusterRequest(t, "maximum"))
@@ -109,7 +109,7 @@ func TestProxyMessages_ForceClusterReachesRouterRequest(t *testing.T) {
 
 	// Tools + a real max_tokens keep the turn off the classifier/probe hard-pin
 	// fast paths, which would never reach the router at all.
-	body := `{"model":"moonshotai/kimi-k3","max_tokens":4096,` +
+	body := `{"model":"auto","max_tokens":4096,` +
 		`"tools":[{"name":"Bash","input_schema":{"type":"object"}}],` +
 		`"messages":[{"role":"user","content":"hi"}]}`
 	ctx := router.WithStrategy(context.Background(), strategy)

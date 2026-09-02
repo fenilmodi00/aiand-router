@@ -98,7 +98,7 @@ func largeBody(t *testing.T) []byte {
 	t.Helper()
 	prompt := strings.Repeat("aaaa ", 8000) // ~10k tokens
 	return []byte(`{
-		"model":"moonshotai/kimi-k3",
+		"model":"auto",
 		"system":"sys",
 		"messages":[{"role":"user","content":"` + prompt + `"}]
 	}`)
@@ -118,7 +118,7 @@ func largeMultiTurnBody(t *testing.T) []byte {
 		`{"role":"user","content":"` + chunk + `"}`,
 		`{"role":"user","content":"latest question"}`,
 	}
-	return []byte(`{"model":"moonshotai/kimi-k3","system":"sys","messages":[` + strings.Join(msgs, ",") + `]}`)
+	return []byte(`{"model":"auto","system":"sys","messages":[` + strings.Join(msgs, ",") + `]}`)
 }
 
 // forwardedMessageCount returns the number of messages in the body the
@@ -195,7 +195,7 @@ func TestTurnLoop_ToolResultScoringDisabledSkipsScorer(t *testing.T) {
 	ctx := authedCtx(uuid.New().String())
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
-	require.NoError(t, svc.ProxyMessages(ctx, []byte(toolResultPinnedBody), rec, httpReq))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(toolResultPinnedBodyAutoRoute), rec, httpReq))
 
 	assert.Equal(t, 0, fr.routeCalls, "disabled tool-result scoring must not invoke the scorer")
 	assert.Equal(t, "deepseek-ai/deepseek-v4-flash", rec.Header().Get(proxy.HeaderRouterModel))
@@ -220,7 +220,7 @@ func TestTurnLoop_ToolResultScoringEnabledRunsScorerAndStays(t *testing.T) {
 	ctx := authedCtx(uuid.New().String())
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
-	require.NoError(t, svc.ProxyMessages(ctx, []byte(toolResultPinnedBody), rec, httpReq))
+	require.NoError(t, svc.ProxyMessages(ctx, []byte(toolResultPinnedBodyAutoRoute), rec, httpReq))
 
 	assert.Equal(t, 1, fr.routeCalls, "tool_result must run the scorer under MainLoop parity")
 	assert.Equal(t, "deepseek-ai/deepseek-v4-flash", rec.Header().Get(proxy.HeaderRouterModel), "planner agreement STAYs on the pinned model")
@@ -231,7 +231,7 @@ func TestTurnLoop_ToolResultScoringEnabledRunsScorerAndStays(t *testing.T) {
 func TestTurnLoop_ToolResultScoringEnabledSwitchesSafely(t *testing.T) {
 	chunk := strings.Repeat("aaaa ", 4000) // ~5k tokens each, positive EV
 	toolResultLargeBody := []byte(`{
-		"model":"moonshotai/kimi-k3",
+		"model":"auto",
 		"system":"sys",
 		"messages":[
 			{"role":"user","content":"` + chunk + `"},
@@ -799,7 +799,7 @@ func trimSessionTurn(t *testing.T, msgCount int) []byte {
 		msgs = append(msgs, `{"role":"`+role+`","content":"TRIM-SESSION turn `+itoa(i)+`"}`)
 	}
 	msgs[0] = `{"role":"user","content":"TRIM-SESSION refactor the dispatch loop"}`
-	return []byte(`{"model":"moonshotai/kimi-k3","system":"sys","messages":[` + strings.Join(msgs, ",") + `]}`)
+	return []byte(`{"model":"auto","system":"sys","messages":[` + strings.Join(msgs, ",") + `]}`)
 }
 
 // warmOpusPin's prior turn billed 1.5k input tokens seconds ago (warm), so an
@@ -901,6 +901,16 @@ func TestTurnLoop_PrefixTrimSkipsExpiredPinReAnchor(t *testing.T) {
 	require.NoError(t, svc.ProxyMessages(ctx, trimSessionTurn(t, 9), rec1, req1))
 	require.Equal(t, "moonshotai/kimi-k3", rec1.Header().Get(proxy.HeaderRouterModel),
 		"expired pin must re-anchor on a normal turn (guard baseline)")
+
+	// Turn 1 re-anchors into a live pin; expire it again so turn 2 exercises
+	// the prefix-trim guard against expired-pin re-anchor, not a sticky hit.
+	store.mu.Lock()
+	for k, p := range store.pins {
+		p.PinnedUntil = time.Now().Add(-time.Minute)
+		store.pins[k] = p
+	}
+	store.pin.PinnedUntil = time.Now().Add(-time.Minute)
+	store.mu.Unlock()
 
 	rec2 := httptest.NewRecorder()
 	req2 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))

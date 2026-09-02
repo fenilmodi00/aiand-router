@@ -34,6 +34,7 @@ type fakePinStore struct {
 	hasPin                 bool
 	hmmHistory             sessionpin.Pin
 	hasHMMHistory          bool
+	pins                   map[string]sessionpin.Pin
 	getErr                 error
 	getCalls               int
 	upserts                []sessionpin.Pin
@@ -51,10 +52,15 @@ type fakePinStore struct {
 
 func newFakePinStore() *fakePinStore {
 	return &fakePinStore{
+		pins:                 make(map[string]sessionpin.Pin),
 		upsertCh:             make(chan struct{}, 16),
 		usageCh:              make(chan struct{}, 16),
 		commandContinuations: make(map[string]sessionpin.Pin),
 	}
+}
+
+func fakePinStoreKey(key [sessionpin.SessionKeyLen]byte, role string) string {
+	return hex.EncodeToString(key[:]) + ":" + role
 }
 
 func (f *fakePinStore) Get(ctx context.Context, key [sessionpin.SessionKeyLen]byte, role string) (sessionpin.Pin, bool, error) {
@@ -82,6 +88,9 @@ func (f *fakePinStore) Get(ctx context.Context, key [sessionpin.SessionKeyLen]by
 		pin.Role = role
 		return pin, true, nil
 	}
+	if pin, ok := f.pins[fakePinStoreKey(key, role)]; ok {
+		return pin, true, nil
+	}
 	if !f.hasPin {
 		return sessionpin.Pin{}, false, nil
 	}
@@ -93,6 +102,7 @@ func (f *fakePinStore) Get(ctx context.Context, key [sessionpin.SessionKeyLen]by
 
 func (f *fakePinStore) Upsert(ctx context.Context, p sessionpin.Pin) error {
 	f.mu.Lock()
+	f.pins[fakePinStoreKey(p.SessionKey, p.Role)] = p
 	f.upserts = append(f.upserts, p)
 	if strings.HasSuffix(p.Role, "_cmd_next") {
 		f.commandContinuations[p.Role] = p
@@ -312,7 +322,7 @@ func TestService_SessionPin_ImageTurnEvictsTextOnlyPin(t *testing.T) {
 	svc := newPinSvc(fr, store)
 
 	imageBody := []byte(`{
-		"model":"moonshotai/kimi-k3",
+		"model":"auto",
 		"system":"sys",
 		"messages":[{"role":"user","content":[
 			{"type":"text","text":"what is in this screenshot"},
@@ -345,13 +355,13 @@ func TestService_SessionPin_EveryTurnReadsPostgres(t *testing.T) {
 	httpReq1 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec1, httpReq1))
 	require.Equal(t, 1, fr.routeCalls)
-	require.Equal(t, 2, store.getCalls, "first turn must read the active pin and HMM history roles")
+	require.Equal(t, 3, store.getCalls, "first turn must read force-model session pin, active pin, and HMM history roles")
 
 	rec2 := httptest.NewRecorder()
 	httpReq2 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(pinTestBody), rec2, httpReq2))
 	assert.Equal(t, 2, fr.routeCalls, "planner re-evaluates every MainLoop turn")
-	assert.Equal(t, 4, store.getCalls, "second turn must also read Postgres — there is no in-process cache")
+	assert.Equal(t, 6, store.getCalls, "second turn must also read Postgres — there is no in-process cache")
 }
 
 func TestService_SessionPin_StoreErrorFallsThroughToFreshRoute(t *testing.T) {
@@ -404,13 +414,13 @@ func TestService_SessionPin_EvalOverrideHeaderKeepsSessionKeyPinning(t *testing.
 
 	// Scorer still runs, but the pin wins under ReasonNoPriorUsage.
 	assert.Equal(t, 1, fr.routeCalls, "scorer runs every MainLoop turn under the planner")
-	assert.Equal(t, 2, store.getCalls)
+	assert.Equal(t, 3, store.getCalls)
 	assert.Equal(t, "deepseek-ai/deepseek-v4-flash", rec.Header().Get(proxy.HeaderRouterModel))
 }
 
 // compactionBody triggers the compaction detector (§3.4).
 const compactionBody = `{
-	"model":"moonshotai/kimi-k3",
+	"model":"auto",
 	"system":"Your task is to create a detailed summary of the conversation so far.",
 	"messages":[{"role":"user","content":"go"}]
 }`
@@ -426,7 +436,7 @@ const compactionBodyAutoRoute = `{
 
 // exploreBody marks an Explore sub-agent dispatch (§3.4).
 const exploreBody = `{
-	"model":"moonshotai/kimi-k3",
+	"model":"auto",
 	"metadata":{"user_id":"subagent:Explore"},
 	"messages":[{"role":"user","content":"list go files"}]
 }`
@@ -508,7 +518,7 @@ func TestService_HardPin_Compaction_ByokOnly_NoEligibleProviderErrors(t *testing
 
 // classifierBody: small max_tokens, no tools — DetectFromEnvelope hard-pins
 // this, bypassing the scorer that normally applies excluded_models.
-const classifierBody = `{"model":"deepseek-ai/deepseek-v4-flash","max_tokens":5,"messages":[{"role":"user","content":"hello"}]}`
+const classifierBody = `{"model":"auto","max_tokens":5,"messages":[{"role":"user","content":"hello"}]}`
 
 // Regression guard: excluded_models must be honored on the hard-pin tier too.
 // Prod symptom: an excluded gemini model still got all utility traffic
@@ -569,7 +579,7 @@ func TestService_HardPin_CompactionAlwaysRoutesToHaiku(t *testing.T) {
 
 	assert.Equal(t, 0, fr.routeCalls, "compaction must bypass the cluster scorer")
 	assert.Equal(t, "deepseek-ai/deepseek-v4-flash", rec.Header().Get(proxy.HeaderRouterModel))
-	assert.Equal(t, 1, store.getCalls, "compaction must check for an explicit user-forced pin before the hard-pin fast path")
+	assert.Equal(t, 2, store.getCalls, "compaction must check force-model session pin and explicit user-forced pin before the hard-pin fast path")
 
 	select {
 	case <-store.upsertCh:
@@ -1242,7 +1252,7 @@ func TestService_HardPin_BypassesTierCeiling(t *testing.T) {
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(""))
 	// Haiku-requesting body with the compaction system marker → hard-pin
 	// triggers; tier ceiling is Low but hard-pin must bypass it.
-	body := `{"model":"deepseek-ai/deepseek-v4-flash","system":"Your task is to create a detailed summary of the conversation so far.","messages":[{"role":"user","content":"go"}]}`
+	body := `{"model":"auto","system":"Your task is to create a detailed summary of the conversation so far.","messages":[{"role":"user","content":"go"}]}`
 	require.NoError(t, svc.ProxyMessages(ctx, []byte(body), rec, httpReq))
 
 	assert.Equal(t, "moonshotai/kimi-k3", rec.Header().Get(proxy.HeaderRouterModel), "operator hard-pin must win over the tier ceiling")
@@ -1251,7 +1261,7 @@ func TestService_HardPin_BypassesTierCeiling(t *testing.T) {
 // haikuClampBody requests haiku (Low); scorer returns opus (High) — router
 // honors the upgrade instead of downgrading to a cheap in-tier model.
 const haikuClampBody = `{
-	"model":"deepseek-ai/deepseek-v4-flash",
+	"model":"auto",
 	"system":"sys",
 	"messages":[{"role":"user","content":"summarize this"}]
 }`
@@ -1375,7 +1385,7 @@ func buildCyclicLoopBody(t *testing.T, nFiles, total int) []byte {
 			}},
 		)
 	}
-	b, err := json.Marshal(map[string]any{"model": "moonshotai/kimi-k3", "max_tokens": 256, "messages": msgs})
+	b, err := json.Marshal(map[string]any{"model": "auto", "max_tokens": 256, "messages": msgs})
 	require.NoError(t, err)
 	return b
 }
@@ -1452,10 +1462,10 @@ func TestService_ForceModelHeader_WritesUserForcedPin(t *testing.T) {
 		}
 	}
 	require.NotNil(t, forced, "header must write a user_forced pin upsert")
+	assert.Equal(t, "force_model", forced.Role)
 	assert.Equal(t, "zai-org/glm-5.3", forced.Model, "alias 'zai-org/glm-5.2' resolves to the canonical id")
 	assert.Equal(t, providers.ProviderAiand, forced.Provider)
-	require.NotNil(t, fr.capturedReq)
-	assert.Equal(t, "zai-org/glm-5.3", fr.capturedReq.ForceModel, "valid force-model header must bypass router decorators")
+	assert.Zero(t, fr.routeCalls, "session force-model bypasses the scorer on the forcing turn")
 }
 
 // An unrecognized x-aiand-force-model value fails the request: routing on
