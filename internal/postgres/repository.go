@@ -26,25 +26,30 @@ type Repository struct {
 	Feedback              *FeedbackRepo
 	Analytics             *AnalyticsRepo
 	FlagDefinitions       *FlagDefinitionRepo
-	Accounts              auth.AccountRepository
-	LoginSessions         auth.LoginSessionRepository
+	// GlobalAutomaticExclusions is deployment-scoped rather than
+	// installation-scoped: it is the control plane's list of models withdrawn
+	// from automatic routing for every tenant.
+	GlobalAutomaticExclusions *GlobalAutomaticExclusionRepo
+	Accounts                  auth.AccountRepository
+	LoginSessions             auth.LoginSessionRepository
 }
 
 // NewRepository constructs a Repository. Pass auth.NoOpEncryptor{} for local dev without a keyset.
 func NewRepository(tx sqlc.DBTX, encryptor auth.Encryptor) *Repository {
 	return &Repository{
-		Installations:         &installationRepo{tx: tx},
-		APIKeys:               &apiKeyRepo{tx: tx},
-		ExternalAPIKeys:       NewExternalAPIKeyRepo(tx, encryptor),
-		Users:                 NewUserRepository(tx),
-		ClusterModelLists:     NewClusterModelListRepo(tx),
-		UserClusterModelLists: NewUserClusterModelListRepo(tx),
-		Telemetry:             NewTelemetryRepo(tx),
-		Feedback:              NewFeedbackRepo(tx),
-		Analytics:             NewAnalyticsRepo(tx),
-		FlagDefinitions:       NewFlagDefinitionRepo(tx),
-		Accounts:              &accountRepo{tx: tx},
-		LoginSessions:         &loginSessionRepo{tx: tx},
+		Installations:             &installationRepo{tx: tx},
+		APIKeys:                   &apiKeyRepo{tx: tx},
+		ExternalAPIKeys:           NewExternalAPIKeyRepo(tx, encryptor),
+		Users:                     NewUserRepository(tx),
+		ClusterModelLists:         NewClusterModelListRepo(tx),
+		UserClusterModelLists:     NewUserClusterModelListRepo(tx),
+		Telemetry:                 NewTelemetryRepo(tx),
+		Feedback:                  NewFeedbackRepo(tx),
+		Analytics:                 NewAnalyticsRepo(tx),
+		FlagDefinitions:           NewFlagDefinitionRepo(tx),
+		GlobalAutomaticExclusions: NewGlobalAutomaticExclusionRepo(tx),
+		Accounts:                  &accountRepo{tx: tx},
+		LoginSessions:             &loginSessionRepo{tx: tx},
 	}
 }
 
