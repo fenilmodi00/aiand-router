@@ -89,7 +89,7 @@ func TestGenerateSmokeCassettes(t *testing.T) {
 			pinModel: smokePinModel,
 			stream:   true,
 			toolCall: true,
-			usage:     smokeUsageSpec{input: 140, output: 24},
+			usage:    smokeUsageSpec{input: 140, output: 24},
 		},
 		{
 			name: "semantic-parity",
@@ -99,7 +99,7 @@ func TestGenerateSmokeCassettes(t *testing.T) {
 					text: "Reply with exactly the word: parity. Do not use tools.",
 				})
 			},
-			pinModel: smokePinModel,
+			pinModel:  smokePinModel,
 			usage:     smokeUsageSpec{input: 130, output: 1},
 			replyText: "parity",
 		},
@@ -346,11 +346,11 @@ func smokeService(r router.Router, provider *fakeProvider) *proxy.Service {
 		providers.ProviderAiand, "deepseek-ai/deepseek-v4-pro", nil,
 	).WithDeploymentKeyedProviders(map[string]struct{}{providers.ProviderAiand: {}}).
 		WithAvailableModels(map[string]struct{}{
-			smokePinModel:                  {},
-			"motif-technologies/motif-3":   {},
-			"moonshotai/kimi-k3":           {},
-			"qwen/qwen3.8-27b":             {},
-			"deepseek-ai/deepseek-v4-pro":  {},
+			smokePinModel:                 {},
+			"motif-technologies/motif-3":  {},
+			"moonshotai/kimi-k3":          {},
+			"qwen/qwen3.8-27b":            {},
+			"deepseek-ai/deepseek-v4-pro": {},
 		})
 }
 
