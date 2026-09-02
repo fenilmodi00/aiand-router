@@ -583,7 +583,7 @@ func TestService_RouterFeedbackCommand_DoesNotForwardPolicyFeedbackOutsideHMM(t 
 
 func TestService_RouterFeedbackCommand_OpenAIIngress(t *testing.T) {
 	const body = `{
-		"model":"gpt-4o",
+		"model":"deepseek-ai/deepseek-v4-flash",
 		"messages":[
 			{"role":"user","content":"/router-feedback wrong model for this refactor"}
 		]
@@ -706,7 +706,7 @@ func TestService_RouterFeedbackCommand_ThumbsUpShortcutPersists(t *testing.T) {
 
 func TestService_RouterFeedbackCommand_ThumbsDownShortcutWithNote(t *testing.T) {
 	const body = `{
-		"model":"gpt-4o",
+		"model":"deepseek-ai/deepseek-v4-flash",
 		"messages":[
 			{"role":"user","content":"/rf- wrong model for this refactor"}
 		]

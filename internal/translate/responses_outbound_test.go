@@ -115,6 +115,11 @@ func TestPrepareOpenAIResponses_RequestShape(t *testing.T) {
 		}
 	}
 	assert.Equal(t, []string{"msg:user", "msg:assistant", "function_call", "function_call_output"}, types)
+	asst, _ := input[1].(map[string]any)
+	asstParts, _ := asst["content"].([]any)
+	require.Len(t, asstParts, 1)
+	assert.Equal(t, "input_text", asstParts[0].(map[string]any)["type"],
+		"Anthropic->Responses assistant history takes input_text — output_text 400s in easy-input position")
 	require.NotNil(t, fc)
 	assert.Equal(t, "toolu_1", fc["call_id"], "tool_use.id must round-trip as call_id")
 	assert.Equal(t, "bash", fc["name"])

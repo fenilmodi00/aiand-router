@@ -29,6 +29,11 @@ func ChatCompletionHandler(svc *proxy.Service, authSvc *auth.Service) gin.Handle
 			return
 		}
 
+		if msg, ok := validateChatCompletionBody(body); !ok {
+			writeOpenAIError(c, http.StatusBadRequest, "invalid_request_error", msg)
+			return
+		}
+
 		ctx := context.WithValue(c.Request.Context(), proxy.ClientIdentityContextKey{}, proxy.ClientIdentityFromHeaders(c.Request.Header))
 		ctx = proxy.ResolveUserFromContext(ctx, authSvc, middleware.InstallationFrom(c))
 		c.Request = c.Request.WithContext(ctx)

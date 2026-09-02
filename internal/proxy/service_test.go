@@ -770,7 +770,7 @@ func TestService_ProxyOpenAIChatCompletion_AnthropicCrossFormat(t *testing.T) {
 
 	// Tool-free turn keeps the transformer on chat/completions dispatch; the
 	// translated upstream body is Responses-shaped.
-	openAIReq := `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"max_tokens":1024}`
+	openAIReq := `{"model":"auto","messages":[{"role":"user","content":"hi"}],"max_tokens":1024}`
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(openAIReq))
 
@@ -806,7 +806,7 @@ func TestService_ProxyOpenAIChatCompletion_AnthropicProxyError_PropagatesError(t
 		map[string]providers.Client{providers.ProviderAiand: provider},
 	)
 
-	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`
+	body := `{"model":"auto","messages":[{"role":"user","content":"hi"}]}`
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
 
@@ -830,7 +830,7 @@ func TestService_ProxyOpenAIChatCompletion_NativeOpenAI(t *testing.T) {
 		map[string]providers.Client{providers.ProviderAiand: provider},
 	)
 
-	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`
+	body := `{"model":"auto","messages":[{"role":"user","content":"hi"}]}`
 	rec := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
 
@@ -921,7 +921,7 @@ func TestService_ProxyOpenAIChatCompletion_DispatchesBedrockMakoraTogether(t *te
 				router.Decision{Provider: tc.provider, Model: tc.model, Reason: "test"},
 				map[string]providers.Client{tc.provider: p},
 			)
-			body := `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`
+			body := `{"model":"auto","messages":[{"role":"user","content":"hi"}]}`
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
 			require.NoError(t, svc.ProxyOpenAIChatCompletion(context.Background(), []byte(body), rec, req))

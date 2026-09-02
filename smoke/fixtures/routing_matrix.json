@@ -1,0 +1,482 @@
+[
+ {
+  "id": "easy-short-01",
+  "difficulty": "easy",
+  "length": "short",
+  "category": "casual-chat",
+  "prompt": "Just checking in \u2014 can you give me one friendly tip for staying productive while working from home? Answer concisely.",
+  "expected_answer": null
+ },
+ {
+  "id": "easy-short-02",
+  "difficulty": "easy",
+  "length": "short",
+  "category": "trivia",
+  "prompt": "What is the capital of Australia? One word. Answer concisely.",
+  "expected_answer": "Canberra"
+ },
+ {
+  "id": "easy-short-03",
+  "difficulty": "easy",
+  "length": "short",
+  "category": "arithmetic",
+  "prompt": "Maya buys 3 apples that cost $2.25 total. How much would 7 apples cost at the same price? Answer concisely.",
+  "expected_answer": "$5.25"
+ },
+ {
+  "id": "easy-short-04",
+  "difficulty": "easy",
+  "length": "short",
+  "category": "greeting",
+  "prompt": "Hey! I'm new to this team. What's a good one-line way to introduce myself on my first day? Answer concisely.",
+  "expected_answer": null
+ },
+ {
+  "id": "easy-short-05",
+  "difficulty": "easy",
+  "length": "short",
+  "category": "trivia",
+  "prompt": "Which planet in our solar system has the most confirmed moons as of 2024? Answer concisely.",
+  "expected_answer": "Saturn"
+ },
+ {
+  "id": "easy-medium-01",
+  "difficulty": "easy",
+  "length": "medium",
+  "category": "casual-chat",
+  "prompt": "I'm planning a small birthday dinner for a friend this weekend for 6 people. One guest is vegetarian and one avoids gluten. Budget is about $120 total.\n\nSuggest a simple 3-course menu (starter, main, dessert) that works for everyone, and give a rough per-dish cost so I can see it fits the budget. Answer concisely.",
+  "expected_answer": null
+ },
+ {
+  "id": "easy-medium-02",
+  "difficulty": "easy",
+  "length": "medium",
+  "category": "trivia",
+  "prompt": "Quick true-or-false round \u2014 answer each with True or False:\n\n1. The Great Wall of China is visible to the naked eye from the Moon.\n2. Bananas are botanically berries.\n3. The Pacific Ocean is the largest ocean on Earth.\n4. Sound travels faster in air than in water.\n5. The Eiffel Tower can be more than 15 cm taller in summer than in winter.\n\nThen give a one-line total of how many were true. Answer concisely.",
+  "expected_answer": "1 False, 2 True, 3 True, 4 True (faster in water), 5 True -> statement 1 False, statement 4 as written is False: sound is faster in water than air -> 'faster in air' is False. Totals: True: 2,3,5 = 3"
+ },
+ {
+  "id": "easy-medium-03",
+  "difficulty": "easy",
+  "length": "medium",
+  "category": "arithmetic",
+  "prompt": "A jar contains nickels, dimes, and quarters. There are twice as many nickels as dimes, there are 5 dimes, and exactly 1 quarter. What is the total value of all the coins, in cents? Answer concisely.",
+  "expected_answer": "10 nickels + 5 dimes + 1 quarter = 50 + 50 + 25 = 125 cents ($1.25)"
+ },
+ {
+  "id": "easy-medium-04",
+  "difficulty": "easy",
+  "length": "medium",
+  "category": "summarization",
+  "prompt": "Summarize this text in 2 sentences, and state the single main subject it describes.\n\nThe Apollo program, also known as Project Apollo, was the United States human spaceflight program led by NASA, which landed the first humans on the Moon in 1969. Apollo was conceived in 1960 in the Dwight D. Eisenhower presidency during Project Mercury and executed after Project Gemini. Apollo was later dedicated to President John F. Kennedy's national goal, \"before this decade is out, of landing a man on the Moon and returning him safely to the Earth\" in his address to the U.S. Congress on May 25, 1961.\nKennedy's goal was accomplished on the Apollo 11 mission, when astronauts Neil Armstrong and Buzz Aldrin landed their Apollo Lunar Module (LM) on July 20, 1969, and walked on the lunar surface, while Michael Collins remained in lunar orbit in the command and service module (CSM), and all three landed safely on Earth in the Pacific Ocean on July 24. Approximately 650 million people worldwide watched this first landing on television. Five subsequent Apollo missions also landed astronauts on the Moon, the last, Apollo 17, in December 1972. In these six spaceflights, twelve people walked on the Moon.\n\nApollo ran from 1961 to 1972, with the first crewed flight in 1968. It encountered a major setback in 1967 when the Apollo 1 cabin fire killed the entire crew during a ground test. After the first Moon landing, sufficient flight hardware remained for nine follow-on landings with a pla\n...\nAnswer concisely.",
+  "expected_answer": null
+ },
+ {
+  "id": "easy-medium-05",
+  "difficulty": "easy",
+  "length": "medium",
+  "category": "reasoning",
+  "prompt": "Five friends each high-five once with every other friend. How many high-fives happen in total? Answer concisely.",
+  "expected_answer": "10"
+ },
+ {
+  "id": "easy-long-01",
+  "difficulty": "easy",
+  "length": "long",
+  "category": "reading-comprehension",
+  "prompt": "Below is the opening of a novel. Then I'll ask two simple questions.\n\nCall me Ishmael. Some years ago\u2014never mind how long precisely\u2014having\nlittle or no money in my purse, and nothing particular to interest me\non shore, I thought I would sail about a little and see the watery part\nof the world. It is a way I have of driving off the spleen and\nregulating the circulation. Whenever I find myself growing grim about\nthe mouth; whenever it is a damp, drizzly November in my soul; whenever\nI find myself involuntarily pausing before coffin warehouses, and\nbringing up the rear of every funeral I meet; and especially whenever\nmy hypos get such an upper hand of me, that it requires a strong moral\nprinciple to prevent me from deliberately stepping into the street, and\nmethodically knocking people\u2019s hats off\u2014then, I account it high time to\nget to sea as soon as I can. This is my substitute for pistol and ball.\nWith a philosophical flourish Cato throws himself upon his sword; I\nquietly take to the ship. There is nothing surprising in this. If they\nbut knew it, almost all men in their degree, some time or other,\ncherish very nearly the same feelings towards the ocean with me.\n\nThere now is your insular city of the Manhattoes, belted round by\nwharves as Indian isles by coral reefs\u2014commerce surrounds it with her\nsurf. Right and left, the streets take you waterward. Its extreme\ndowntown is the battery, where that noble mole is washed by waves, and\ncooled by breezes, which a few hours previous were out of sight of\nland. Look at the crowds of water-gazers there.\n\nCircumambulate the city of a dreamy Sabbath afternoon. Go from Corlears\nHook to Coenties Slip, and from thence, by Whitehall, northward. What\ndo you see?\u2014Posted like silent sentinels all around the town, stand\nthousands upon thousands of mortal men fixed in ocean reveries. Some\nleaning against the spiles; some seated upon the pier-heads; some\nlooking over the bulwarks of ships from China; some high aloft in the\nrigging, as if striving to get a still better seaward peep. But these\nare all landsmen; of week days pent up in lath and plaster\u2014tied to\ncounters, nailed to benches, clinched to desks. How then is this? Are\nthe green fields gone? What do they here?\n\nBut look! here come more crowds, pacing straight for the water, and\nseemingly bound for a dive. Strange! Nothing will content them but the\nextremest limit of the land; loitering under the shady lee of yonder\nwarehouses will not suffice. No. They must get just as nigh the water\nas they possibly can without falling in. And there they stand\u2014miles of\nthem\u2014leagues. Inlanders all, they come from lanes and alleys, streets\nand avenues\u2014north, east, south, and west. Yet here they all unite. Tell\nme, does the magnetic virtue of the needles of the compasses of all\nthose ships attract them thither?\n\nOnce more. Say you are in the country; in some high land of lakes. Take\nalmost any path you please, and ten to one it carries you down in a\ndal\n\nQuestions:\n1. In one sentence, what is the narrator's stated reason for going to sea?\n2. On Sabbath afternoons, what do large crowds of the narrator's fellow townsmen do, according to the passage?\n\nAnswer concisely.",
+  "expected_answer": null
+ },
+ {
+  "id": "easy-long-02",
+  "difficulty": "easy",
+  "length": "long",
+  "category": "reading-comprehension",
+  "prompt": "Read this novel excerpt, then answer the two questions below it.\n\nIt is a truth universally acknowledged, that a single man in possession\nof a good fortune must be in want of a wife.\n\nHowever little known the feelings or views of such a man may be on his\nfirst entering a neighbourhood, this truth is so well fixed in the minds\nof the surrounding families, that he is considered as the rightful\nproperty of some one or other of their daughters.\n\n\u201cMy dear Mr. Bennet,\u201d said his lady to him one day, \u201chave you heard that\nNetherfield Park is let at last?\u201d\n\nMr. Bennet replied that he had not.\n\n\u201cBut it is,\u201d returned she; \u201cfor Mrs. Long has just been here, and she\ntold me all about it.\u201d\n\nMr. Bennet made no answer.\n\n\u201cDo not you want to know who has taken it?\u201d cried his wife, impatiently.\n\n\u201c_You_ want to tell me, and I have no objection to hearing it.\u201d\n\n[Illustration:\n\n\u201cHe came down to see the place\u201d\n\n[_Copyright 1894 by George Allen._]]\n\nThis was invitation enough.\n\n\u201cWhy, my dear, you must know, Mrs. Long says that Netherfield is taken\nby a young man of large fortune from the north of England; that he came\ndown on Monday in a chaise and four to see the place, and was so much\ndelighted with it that he agreed with Mr. Morris immediately; that he is\nto take possession before Michaelmas, and some of his servants are to be\nin the house by the end of next week.\u201d\n\n\u201cWhat is his name?\u201d\n\n\u201cBingley.\u201d\n\n\u201cIs he married or single?\u201d\n\n\u201cOh, single, my dear, to be sure! A single man of large fortune; four or\nfive thousand a year. What a fine thing for our girls!\u201d\n\n\u201cHow so? how can it affect them?\u201d\n\n\u201cMy dear Mr. Bennet,\u201d replied his wife, \u201chow can you be so tiresome? You\nmust know that I am thinking of his marrying one of them.\u201d\n\n\u201cIs that his design in settling here?\u201d\n\n\u201cDesign? Nonsense, how can you talk so! But it is very likely that he\n_may_ fall in love with one of them, and therefore you must visit him as\nsoon as he comes.\u201d\n\n\u201cI see no occasion for that. You and the girls may go--or you may send\nthem by themselves, which perhaps will be still better; for as you are\nas handsome as any of them, Mr. Bingley might like you the best of the\nparty.\u201d\n\n\u201cMy dear, you flatter me. I certainly _have_ had my share of beauty, but\nI do not pretend to be anything extraordinary now. When a woman has five\ngrown-up daughters, she ought to give over thinking of her own beauty.\u201d\n\n\u201cIn such cases, a woman has not often much beauty to think of.\u201d\n\n\u201cBut, my dear, you must indeed \n\nQuestions:\n1. What is Mrs. Bennet eager to know at the start of the chapter?\n2. What is the name of the young man who has rented Netherfield Park?\n\nAnswer concisely.",
+  "expected_answer": "1. Who has taken/let Netherfield Park. 2. Bingley."
+ },
+ {
+  "id": "easy-long-03",
+  "difficulty": "easy",
+  "length": "long",
+  "category": "reading-comprehension",
+  "prompt": "Here is an encyclopedia-style overview. After reading it, answer the two questions below.\n\nThe Great Wall of China is a series of fortifications in China. They were built across the historical northern borders of ancient Chinese states and Imperial China as protection against various nomadic groups from the Eurasian Steppe. The first walls date to the 7th century BC; these were joined together in the Qin dynasty. Successive dynasties expanded the wall system; the best-known sections were built by the Ming dynasty (1368\u20131644).\nTo aid in defense, the Great Wall utilized watchtowers, troop barracks, garrison stations, signaling capabilities through the means of smoke or fire, and its status as a transportation corridor. Other purposes of the Great Wall have included border controls (allowing control of immigration and emigration, and the imposition of duties on goods transported along the Silk Road), and the regulation of trade. \nThe collective fortifications constituting the Great Wall stretch from Liaodong in the east to Lop Lake in the west, and from the present-day Sino-Russian border in the north to Tao River in the south: an arc that roughly delineates the edge of the Mongolian steppe, spanning 21,196.18 km (13,170.70 mi) in total. It is a UNESCO World Heritage Site, and was voted one of the New 7 Wonders of the World in 2007. Today, the defensive system of the Great Wall is recognized as one of the most impressive architectural feats in history.\n\n\n\nQuestions:\n1. During which dynasty were the best-known sections of the Great Wall built?\n2. Approximately how long, in kilometers, is the collective system of fortifications?\n\nAnswer concisely.",
+  "expected_answer": "1. Ming dynasty (1368-1644). 2. 21,196.18 km"
+ },
+ {
+  "id": "easy-long-04",
+  "difficulty": "easy",
+  "length": "long",
+  "category": "instruction-following",
+  "prompt": "I need a quick reference for a talk. Below is the text of \"The Zen of Python\" (PEP 20), a set of design aphorisms.\n\nBeautiful is better than ugly.\nExplicit is better than implicit.\nSimple is better than complex.\nComplex is better than complicated.\nFlat is better than nested.\nSparse is better than dense.\nReadability counts.\nSpecial cases aren't special enough to break the rules.\nAlthough practicality beats purity.\nErrors should never pass silently.\nUnless explicitly silenced.\nIn the face of ambiguity, refuse the temptation to guess.\nThere should be one-- and preferably only one --obvious way to do it.\nAlthough that way may not be obvious at first unless you're Dutch.\nNow is better than never.\nAlthough never is often better than *right* now.\nIf the implementation is hard to explain, it's a bad idea.\nIf the implementation is easy to explain, it may be a good idea.\nNamespaces are one honking great idea -- let's do more of those!\n\nTask:\n1. Count how many aphorisms are listed.\n2. Quote the one aphorism that mentions \"readability\".\n\nAnswer concisely.",
+  "expected_answer": "19 aphorisms; the readability line is \"Readability counts.\""
+ },
+ {
+  "id": "easy-long-05",
+  "difficulty": "easy",
+  "length": "long",
+  "category": "summarization",
+  "prompt": "Here's a news article a friend shared. Read it and answer: (1) what happened, in one sentence; (2) what did the State Department say, in one sentence.\n\n(CNN)The Palestinian Authority officially became the 123rd member of the International Criminal Court on Wednesday, a step that gives the court jurisdiction over alleged crimes in Palestinian territories. The formal accession was marked with a ceremony at The Hague, in the Netherlands, where the court is based. The Palestinians signed the ICC's founding Rome Statute in January, when they also accepted its jurisdiction over alleged crimes committed \"in the occupied Palestinian territory, including East Jerusalem, since June 13, 2014.\" Later that month, the ICC opened a preliminary examination into the situation in Palestinian territories, paving the way for possible war crimes investigations against Israelis. As members of the court, Palestinians may be subject to counter-charges as well. Israel and the United States, neither of which is an ICC member, opposed the Palestinians' efforts to join the body. But Palestinian Foreign Minister Riad al-Malki, speaking at Wednesday's ceremony, said it was a move toward greater justice. \"As Palestine formally becomes a State Party to the Rome Statute today, the world is also a step closer to ending a long era of impunity and injustice,\" he said, according to an ICC news release. \"Indeed, today brings us closer to our shared goals of justice and peace.\" Judge Kuniko Ozaki, a vice president of the ICC, said acceding to the treaty was just the first step for the Palestinians. \"As the Rome Statute today enters into force for the State of Palestine, Palestine acquires all the rights as well as responsibilities that come with being a State Party to the Statute. These are substantive commitments, which cannot be taken lightly,\" she said. Rights group Human Rights Watch welcomed the development. \"Governments seeking to penalize Palestine for joining the ICC should immediately end their pressure, and countries that support universal acceptance of the court's treaty should speak out to welcome its membership,\" said Balkees Jarrah, international justice counsel for the group. \"What's objectionable is the attempts to undermine international justice, not Palestine's decision to join a treaty to which over 100 countries around the world are members.\" In January, when the preliminary ICC examination was opened, Israeli Prime Minister Benjamin Netanyahu described it as an outrage, saying the court was overstepping its boundaries. The United States also said it \"strongly\" disagreed with the court's decision. \"As we have said repeatedly, we do not believe that Palestine is a state and therefore we do not believe that it is eligible to join the ICC,\" the State Department said in a statement. It urged the warring sides to resolve their differences through direct negotiations. \"We will continue to oppose actions against Israel at the ICC as counterproductive to the cause of peace,\" it said. But the ICC begs to differ with the definition of a state for its purposes and refers to the territories as \"Palestine.\" While a preliminary examination is not a formal investigation, it allows the court to review evidence and determine whether to investigate suspects on both sides. Prosecutor Fatou Bensouda said her office would \"conduct its analysis in full independence and impartiality.\" The war between Israel and Hamas militants in Gaza last summer left more than 2,000 people dead. The inquiry will include alleged war crimes committed since June. The International Criminal Court was set up in 2002 to prosecute genocide, crimes against humanity and war crimes. CNN's Vasco Cotovio, Kareem Khadder and Faith Karimi contributed to this report.\n\nAnswer concisely.",
+  "expected_answer": null
+ },
+ {
+  "id": "medium-short-01",
+  "difficulty": "medium",
+  "length": "short",
+  "category": "code-fix",
+  "prompt": "Fix this Python function: it should return the maximum value in a list, but it returns 0 whenever all numbers are negative. Give a corrected one-line replacement using a built-in, and state what the buggy version returns for [-5, -2, -9].\n\ndef find_max(nums):\n    m = 0\n    for n in nums:\n        if n > m:\n            m = n\n    return m\n\nAnswer concisely.",
+  "expected_answer": "buggy returns 0; fix: return max(nums)"
+ },
+ {
+  "id": "medium-short-02",
+  "difficulty": "medium",
+  "length": "short",
+  "category": "math",
+  "prompt": "Two workers push a cart: one applies 150 N east, the other 100 N west. Friction is 20 N opposing motion. Find the net force and direction, plus the cart's acceleration if its mass is 30 kg. Answer concisely.",
+  "expected_answer": "net 30 N east; a = 1 m/s^2"
+ },
+ {
+  "id": "medium-short-03",
+  "difficulty": "medium",
+  "length": "short",
+  "category": "summarization",
+  "prompt": "Summarize the following 3-sentence note in one sentence of at most 20 words.\n\nNote: The lab's backup script failed on Tuesday. Root cause: a malformed date string in the config. Fix has been merged; a guard was added to fail fast on bad dates in the future.\n\nAnswer concisely.",
+  "expected_answer": null
+ },
+ {
+  "id": "medium-short-04",
+  "difficulty": "medium",
+  "length": "short",
+  "category": "math",
+  "prompt": "If f(x) = 2x + 3 and g(x) = x^2 - 1, what is g(f(4))? Answer concisely.",
+  "expected_answer": "120"
+ },
+ {
+  "id": "medium-short-05",
+  "difficulty": "medium",
+  "length": "short",
+  "category": "code-output",
+  "prompt": "Without running it, what does this Python snippet print?\n\n```python\nnums = [3, 1, 4, 1, 5, 9, 2, 6]\nnums = [x for x in nums if x > 3]\nnums.append(nums[0] + nums[-1])\nprint(nums)\n```\n\nAnswer concisely.",
+  "expected_answer": "[4, 5, 9, 6, 10]"
+ },
+ {
+  "id": "medium-medium-01",
+  "difficulty": "medium",
+  "length": "medium",
+  "category": "code-fix",
+  "prompt": "This Python function should return the average of the even numbers in a list, but a teammate says it crashes on some inputs. Identify the two failure modes (empty list; list with no even numbers) and give corrected short code that returns None for both cases.\n\ndef avg_even(nums):\n    total = 0\n    count = 0\n    for n in nums:\n        if n % 2 == 0:\n            total += n\n            count += 1\n    return total // count\n\nAnswer concisely.",
+  "expected_answer": null
+ },
+ {
+  "id": "medium-medium-02",
+  "difficulty": "medium",
+  "length": "medium",
+  "category": "summarization",
+  "prompt": "Summarize the article below in exactly 3 bullet points (each at most 15 words), then give the single most important takeaway as a final sentence.\n\n(CNN)The Palestinian Authority officially became the 123rd member of the International Criminal Court on Wednesday, a step that gives the court jurisdiction over alleged crimes in Palestinian territories. The formal accession was marked with a ceremony at The Hague, in the Netherlands, where the court is based. The Palestinians signed the ICC's founding Rome Statute in January, when they also accepted its jurisdiction over alleged crimes committed \"in the occupied Palestinian territory, including East Jerusalem, since June 13, 2014.\" Later that month, the ICC opened a preliminary examination into the situation in Palestinian territories, paving the way for possible war crimes investigations against Israelis. As members of the court, Palestinians may be subject to counter-charges as well. Israel and the United States, neither of which is an ICC member, opposed the Palestinians' efforts to join the body. But Palestinian Foreign Minister Riad al-Malki, speaking at Wednesday's ceremony, said it was a move toward greater justice. \"As Palestine formally becomes a State Party to the Rome Statute today, the world is also a step closer to ending a long era of impunity and injustice,\" he said, according to an ICC news release. \"Indeed, today brings us closer to our shared goals of justice and peace.\" Judge Kuniko Ozaki, a vice president of the ICC, said acceding to the treaty was just the first step for the Palestinians. \"As the Rome Statute today enters into force for the State of Palestine, Palestine acquires all the rights as well as responsibilities that come with being a State Party to the Statute. These are substantive commitments, which cannot be taken lightly,\" she said. Rights group Human Rights Watch welcomed the development. \"Governments seeking to penalize Palestine for joining the ICC should immediately end their pressure, and countries that support universal acceptance of the court's treaty should speak out to welcome its membership,\" said Balkees Jarrah, international justice counsel for the group. \"What's objectionable is the attempts to undermine international justice, not Palestine's decision to join a treaty to which over 100 countries around the world are members.\" In January, when the preliminary ICC examination was opened, Israeli Prime Minister Benjamin Netanyahu described it as an outrage, saying the court was overstepping its boundaries. The United States also said it \"strongly\" disagreed with the court's decision. \"As we have said repeatedly, we do not believe that Palestine is a state and therefore we do not believe that it is eligible to join the ICC,\" the State Department said in a statement. It urged the warring sides to resolve their differences through direct negotiations. \"We will continue to oppose actions against Israel at the ICC as counterproductive to the cause of peace,\" it said. But the ICC begs to differ with the definition of a state for its purposes and refers to the territories as \"Palestine.\" While a preliminary examination is not a formal investigation, it allows the court to review evidence and determine whether to investigate suspects on both sides. Prosecutor Fatou Bensouda said her office would \"conduct its analysis in full independence and impartiality.\" The war between Israel and Hamas militants in Gaza last summer left more than 2,000 people dead. The inquiry will include alleged war crimes committed since June. The International Criminal Court was set up in 2002 to prosecute genocide, crimes against humanity and war crimes. CNN's Vasco Cotovio, Kareem Khadder and Faith Karimi contributed to this report.\n\nAnswer concisely.",
+  "expected_answer": null
+ },
+ {
+  "id": "medium-medium-03",
+  "difficulty": "medium",
+  "length": "medium",
+  "category": "math",
+  "prompt": "A water tank has two pipes. Pipe A fills the tank in 6 hours; Pipe B fills it in 3 hours. A drain opened alone empties the full tank in 12 hours.\n\nIf A and B are opened together while the drain is also open, how many hours does it take to fill the empty tank? Answer concisely.",
+  "expected_answer": "net rate = 1/6+1/3-1/12 = 5/12 per hour -> 12/5 = 2.4 hours"
+ },
+ {
+  "id": "medium-medium-04",
+  "difficulty": "medium",
+  "length": "medium",
+  "category": "reasoning",
+  "prompt": "Three switches outside a room control three lamps inside. You may flip switches however you like, then enter the room only once. How can you determine which switch controls which lamp? Give a short numbered plan. Answer concisely.",
+  "expected_answer": null
+ },
+ {
+  "id": "medium-medium-05",
+  "difficulty": "medium",
+  "length": "medium",
+  "category": "code-output",
+  "prompt": "Without running it, what is the exact printed output of this JavaScript, then of the equivalent Python?\n\nJS:\nconsole.log([10, 1, 2].sort());\n\nPython:\nprint(sorted([10, 1, 2]))\n\nExplain the difference in one clause. Answer concisely.",
+  "expected_answer": "JS prints [1, 10, 2] (string sort); Python prints [1, 2, 10] (numeric sort)"
+ },
+ {
+  "id": "medium-long-01",
+  "difficulty": "medium",
+  "length": "long",
+  "category": "code-review",
+  "prompt": "Review the Python task spec below from a code-review queue. Without solving it, describe in 2-3 sentences what the target function should compute, plus one likely edge case a naive implementation could get wrong.\n\ndef is_palindrome(string: str) -> bool:\n    \"\"\" Test if given string is a palindrome \"\"\"\n    return string == string[::-1]\n\n\ndef make_palindrome(string: str) -> str:\n    \"\"\" Find the shortest palindrome that begins with a supplied string.\n    Algorithm idea is simple:\n    - Find the longest postfix of supplied string that is a palindrome.\n    - Append to the end of the string reverse of a string prefix that comes before the palindromic suffix.\n    >>> make_palindrome('')\n    ''\n    >>> make_palindrome('cat')\n    'catac'\n    >>> make_palindrome('cata')\n    'catac'\n    \"\"\"\n\nAnswer concisely.",
+  "expected_answer": "makes the shortest palindrome starting with the input; edge: empty string / already-palindrome input"
+ },
+ {
+  "id": "medium-long-02",
+  "difficulty": "medium",
+  "length": "long",
+  "category": "summarization",
+  "prompt": "Condense this novel excerpt (from Moby-Dick, Chapter 1) into a 3-sentence summary focused on what the narrator says drives men to sea, and his plan.\n\ne, and leaves you there by a pool in the stream. There is magic in\nit. Let the most absent-minded of men be plunged in his deepest\nreveries\u2014stand that man on his legs, set his feet a-going, and he will\ninfallibly lead you to water, if water there be in all that region.\nShould you ever be athirst in the great American desert, try this\nexperiment, if your caravan happen to be supplied with a metaphysical\nprofessor. Yes, as every one knows, meditation and water are wedded for\never.\n\nBut here is an artist. He desires to paint you the dreamiest, shadiest,\nquietest, most enchanting bit of romantic landscape in all the valley\nof the Saco. What is the chief element he employs? There stand his\ntrees, each with a hollow trunk, as if a hermit and a crucifix were\nwithin; and here sleeps his meadow, and there sleep his cattle; and up\nfrom yonder cottage goes a sleepy smoke. Deep into distant woodlands\nwinds a mazy way, reaching to overlapping spurs of mountains bathed in\ntheir hill-side blue. But though the picture lies thus tranced, and\nthough this pine-tree shakes down its sighs like leaves upon this\nshepherd\u2019s head, yet all were vain, unless the shepherd\u2019s eye were\nfixed upon the magic stream before him. Go visit the Prairies in June,\nwhen for scores on scores of miles you wade knee-deep among\nTiger-lilies\u2014what is the one charm wanting?\u2014Water\u2014there is not a drop\nof water there! Were Niagara but a cataract of sand, would you travel\nyour thousand miles to see it? Why did the poor poet of Tennessee, upon\nsuddenly receiving two handfuls of silver, deliberate whether to buy\nhim a coat, which he sadly needed, or invest his money in a pedestrian\ntrip to Rockaway Beach? Why is almost every robust healthy boy with a\nrobust healthy soul in him, at some time or other crazy to go to sea?\nWhy upon your first voyage as a passenger, did you yourself feel such a\nmystical vibration, when first told that you and your ship were now out\nof sight of land? Why did the old Persians hold the sea holy? Why did\nthe Greeks give it a separate deity, and own brother of Jove? Surely\nall this is not without meaning. And still deeper the meaning of that\nstory of Narcissus, who because he could not grasp the tormenting, mild\nimage he saw in the fountain, plunged into it and was drowned. But that\nsame image, we ourselves see in all rivers and oceans. It is the image\nof the ungraspable phantom of life; and this is the key to it all.\n\nNow, when I say that I am in the habit of going to sea whenever I begin\nto grow hazy about the eyes, and begin to be over conscious of my\nlungs, I do not mean to have it inferred that I ever go to sea as a\npassenger. For to go as a passenger you must needs have a pur\n\nAnswer concisely.",
+  "expected_answer": null
+ },
+ {
+  "id": "medium-long-03",
+  "difficulty": "medium",
+  "length": "long",
+  "category": "code-review",
+  "prompt": "Here is a function spec from a code review queue. Without implementing, explain in 2-3 sentences what it must compute, plus one specified edge case and what should be returned in it.\n\ndef pluck(arr):\n    \"\"\"\n    \"Given an array representing a branch of a tree that has non-negative integer nodes\n    your task is to pluck one of the nodes and return it.\n    The plucked node should be the node with the smallest even value.\n    If multiple nodes with the same smallest even value are found return the node that has smallest index.\n\n    The plucked node should be returned in a list, [ smalest_value, its index ],\n    If there are no even values or the given array is empty, return [].\n\n    Example 1:\n        Input: [4,2,3]\n        Output: [2, 1]\n        Explanation: 2 has the smallest even value, and 2 has the smallest index.\n\n    Example 2:\n        Input: [1,2,3]\n        Output: [2, 1]\n        Explanation: 2 has the smallest even value, and 2 has the smallest index. \n\n    Example 3:\n        Input: []\n        Output: []\n    \n    Example 4:\n        Input: [5, 0, 3, 0, 4, 2]\n        Output: [0, 1]\n        Explanation: 0 is the smallest value, but  there are two zeros,\n                     so we will choose the first zero, which has the smallest index.\n\n    Constraints:\n        * 1 <= nodes.length <= 10000\n        * 0 <= node.value\n    \"\"\"\n\nAnswer concisely.",
+  "expected_answer": "returns [smallest even value, its index] or [] when no even values/empty"
+ },
+ {
+  "id": "medium-long-04",
+  "difficulty": "medium",
+  "length": "long",
+  "category": "reading-comprehension",
+  "prompt": "Read this overview, then in 2 sentences state (1) what program it describes and (2) which single mission it highlights as the first crewed Moon landing.\n\nThe Apollo program, also known as Project Apollo, was the United States human spaceflight program led by NASA, which landed the first humans on the Moon in 1969. Apollo was conceived in 1960 in the Dwight D. Eisenhower presidency during Project Mercury and executed after Project Gemini. Apollo was later dedicated to President John F. Kennedy's national goal, \"before this decade is out, of landing a man on the Moon and returning him safely to the Earth\" in his address to the U.S. Congress on May 25, 1961.\nKennedy's goal was accomplished on the Apollo 11 mission, when astronauts Neil Armstrong and Buzz Aldrin landed their Apollo Lunar Module (LM) on July 20, 1969, and walked on the lunar surface, while Michael Collins remained in lunar orbit in the command and service module (CSM), and all three landed safely on Earth in the Pacific Ocean on July 24. Approximately 650 million people worldwide watched this first landing on television. Five subsequent Apollo missions also landed astronauts on the Moon, the last, Apollo 17, in December 1972. In these six spaceflights, twelve people walked on the Moon.\n\nApollo ran from 1961 to 1972, with the first crewed flight in 1968. It encountered a major setback in 1967 when the Apollo 1 cabin fire killed the entire crew during a ground test. After the first Moon landing, sufficient flight hardware remained for nine follow-on landings with a plan for extended lunar geological and astrophysical exploration. Budget cuts forced the cancellation of three of these. Five of the remaining six missions achieved landings; but the Apollo 13 landing had to be aborted after an oxygen tank exploded en route to the Moon, crippling the CSM. The crew barely managed a safe return to Earth by using the Lunar Module as a \"lifeboat\" on the return journey. \nApollo used the Saturn family of rockets as launch vehicles, which were also used for an Apollo Applications Program, which consisted of Skylab, a space station that supported three crewed missions in 1973\u20131974, and the Apollo\u2013Soyuz Test Project, a joint United States-Soviet Union low Earth orbit mission in 1975.\nApollo set several major human spaceflight milestones. It stands alone in sending humans to the lunar surface. Apollo 8 was the first crewed mission to leave low Earth orbit and to orbit another celestial body, and Apollo 11 was the first crewed mission to land humans on one.\nOverall, the Apollo program returned 842 pounds (382 kg) of lunar rocks to Earth, greatly contributing to the understanding of the Moon's composition and geological history. The program laid the foundation for NASA's subsequent human spaceflight capability and funded construction of its Johnson Space Center and Kennedy Space Center. Apollo also spurred advances in many areas of technology incidental to rocketry and human spaceflight, including avionics, telecommunications, and computers.\nThe only other time humans have left low Earth orbit has been the Artemis II flyby of the Moon in 2026, as part of the Artemis program, established as a successor to Apollo in 2017. Artemis intends to return humans to the Moon's surface no earlier than 2028.\n\nAnswer concisely.",
+  "expected_answer": "Apollo program; Apollo 11"
+ },
+ {
+  "id": "medium-long-05",
+  "difficulty": "medium",
+  "length": "long",
+  "category": "code-review",
+  "prompt": "Here is a function spec from a code review queue. Without implementing, state in 2-3 sentences what it must compute, plus one specified edge case and its required output.\n\ndef max_fill(grid, capacity):\n    import math\n    \"\"\"\n    You are given a rectangular grid of wells. Each row represents a single well,\n    and each 1 in a row represents a single unit of water.\n    Each well has a corresponding bucket that can be used to extract water from it, \n    and all buckets have the same capacity.\n    Your task is to use the buckets to empty the wells.\n    Output the number of times you need to lower the buckets.\n\n    Example 1:\n        Input: \n            grid : [[0,0,1,0], [0,1,0,0], [1,1,1,1]]\n            bucket_capacity : 1\n        Output: 6\n\n    Example 2:\n        Input: \n            grid : [[0,0,1,1], [0,0,0,0], [1,1,1,1], [0,1,1,1]]\n            bucket_capacity : 2\n        Output: 5\n    \n    Example 3:\n        Input: \n            grid : [[0,0,0], [0,0,0]]\n            bucket_capacity : 5\n        Output: 0\n\n    Constraints:\n        * all wells have the same length\n        * 1 <= grid.length <= 10^2\n        * 1 <= grid[:,1].length <= 10^2\n        * grid[i][j] -> 0 | 1\n        * 1 <= capacity <= 10\n    \"\"\"\n\nAnswer concisely.",
+  "expected_answer": "buckets-loads needed to empty all wells; edge: grid of all zeros -> 0"
+ },
+ {
+  "id": "hard-short-01",
+  "difficulty": "hard",
+  "length": "short",
+  "category": "gsm8k-math",
+  "prompt": "Janet's ducks lay 16 eggs per day. She eats three for breakfast every morning and bakes muffins for her friends every day with four. She sells the remainder at the farmers' market daily for $2 per fresh duck egg. How much in dollars does she make every day at the farmers' market? Answer concisely.",
+  "expected_answer": "18"
+ },
+ {
+  "id": "hard-short-02",
+  "difficulty": "hard",
+  "length": "short",
+  "category": "gsm8k-math",
+  "prompt": "Eliza's rate per hour for the first 40 hours she works each week is $10. She also receives an overtime pay of 1.2 times her regular hourly rate. If Eliza worked for 45 hours this week, how much are her earnings for this week? Answer concisely.",
+  "expected_answer": "460"
+ },
+ {
+  "id": "hard-short-03",
+  "difficulty": "hard",
+  "length": "short",
+  "category": "gsm8k-math",
+  "prompt": "Carlos is planting a lemon tree. The tree will cost $90 to plant. Each year it will grow 7 lemons, which he can sell for $1.5 each. It costs $3 a year to water and feed the tree. How many years will it take before he starts earning money on the lemon tree? Answer concisely.",
+  "expected_answer": "13 (year 12 breaks even)"
+ },
+ {
+  "id": "hard-short-04",
+  "difficulty": "hard",
+  "length": "short",
+  "category": "gsm8k-math",
+  "prompt": "Melanie is a door-to-door saleswoman. She sold a third of her vacuum cleaners at the green house, 2 more to the red house, and half of what was left at the orange house. If Melanie has 5 vacuum cleaners left, how many did she start with? Answer concisely.",
+  "expected_answer": "18"
+ },
+ {
+  "id": "hard-short-05",
+  "difficulty": "hard",
+  "length": "short",
+  "category": "math-dataset",
+  "prompt": "Is f(x) = 3^x an even function, odd function, or neither?\n\nEnter \"odd\", \"even\", or \"neither\". Answer concisely.",
+  "expected_answer": "neither"
+ },
+ {
+  "id": "hard-medium-01",
+  "difficulty": "hard",
+  "length": "medium",
+  "category": "humaneval-code",
+  "prompt": "Here is a HumanEval-style problem. Provide a working Python implementation.\n\nfrom typing import List\n\n\ndef has_close_elements(numbers: List[float], threshold: float) -> bool:\n    \"\"\" Check if in given list of numbers, are any two numbers closer to each other than\n    given threshold.\n    >>> has_close_elements([1.0, 2.0, 3.0], 0.5)\n    False\n    >>> has_close_elements([1.0, 2.8, 3.0, 4.0, 5.0, 2.0], 0.3)\n    True\n    \"\"\"\n\nAlso state the output of a call with ([1.0, 2.0, 3.0], 0.5). Answer concisely.",
+  "expected_answer": "False"
+ },
+ {
+  "id": "hard-medium-02",
+  "difficulty": "hard",
+  "length": "medium",
+  "category": "humaneval-code",
+  "prompt": "Here is a HumanEval-style problem. Provide a working Python implementation.\n\nfrom typing import List\n\n\ndef separate_paren_groups(paren_string: str) -> List[str]:\n    \"\"\" Input to this function is a string containing multiple groups of nested parentheses. Your goal is to\n    separate those group into separate strings and return the list of those.\n    Separate groups are balanced (each open brace is properly closed) and not nested within each other\n    Ignore any spaces in the input string.\n    >>> separate_paren_groups('( ) (( )) (( )( ))')\n    ['()', '(())', '(()())']\n    \"\"\"\n\nState what it returns for \"( ) (( )) (( )( ))\" (spaces ignored). Answer concisely.",
+  "expected_answer": "['()', '(())', '(()())']"
+ },
+ {
+  "id": "hard-medium-03",
+  "difficulty": "hard",
+  "length": "medium",
+  "category": "math-dataset",
+  "prompt": "Suppose that x, y, and z are complex numbers such that\n  xy = -80 - 320i,   yz = 60,   zx = -96 + 24i,\nwhere i^2 = -1. Compute |x + y + z|. Answer concisely.",
+  "expected_answer": "sqrt(74) (~8.60)"
+ },
+ {
+  "id": "hard-medium-04",
+  "difficulty": "hard",
+  "length": "medium",
+  "category": "multi-step-math",
+  "prompt": "You are given three tasks to do in order, with results feeding forward.\n\nTask 1: Compute the number of ordered integer triples (a, b, c) with a + b + c = 12 and a, b, c >= 0.\nTask 2: Take Task 1's result and count its positive divisors.\nTask 3: Report both values on one line in the format \"triples=<n>, divisors=<d>\".\n\nAnswer concisely.",
+  "expected_answer": "triples=91, divisors=4 (91=7*13)"
+ },
+ {
+  "id": "hard-medium-05",
+  "difficulty": "hard",
+  "length": "medium",
+  "category": "gpqa-science",
+  "prompt": "A spin-half particle is in a linear superposition 0.5|up> + sqrt(3)/2|down> of its spin-up and spin-down states. If |up> and |down> are the eigenstates of sigma_z, what is the expectation value, up to one decimal place, of the operator 10*sigma_z + 5*sigma_x? Answer concisely.",
+  "expected_answer": "-0.7"
+ },
+ {
+  "id": "hard-long-01",
+  "difficulty": "hard",
+  "length": "long",
+  "category": "humaneval-code",
+  "prompt": "Here is a HumanEval-style problem. Provide a working Python implementation.\n\ndef minPath(grid, k):\n    \"\"\"\n    Given a grid with N rows and N columns (N >= 2) and a positive integer k, \n    each cell of the grid contains a value. Every integer in the range [1, N * N]\n    inclusive appears exactly once on the cells of the grid.\n\n    You have to find the minimum path of length k in the grid. You can start\n    from any cell, and in each step you can move to any of the neighbor cells,\n    in other words, you can go to cells which share an edge with you current\n    cell.\n    Please note that a path of length k means visiting exactly k cells (not\n    necessarily distinct).\n    You CANNOT go off the grid.\n    A path A (of length k) is considered less than a path B (of length k) if\n    after making the ordered lists of the values on the cells that A and B go\n    through (let's call them lst_A and lst_B), lst_A is lexicographically less\n    than lst_B, in other words, there exist an integer index i (1 <= i <= k)\n    such that lst_A[i] < lst_B[i] and for any j (1 <= j < i) we have\n    lst_A[j] = lst_B[j].\n    It is guaranteed that the answer is unique.\n    Return an ordered list of the values on the cells that the minimum path go through.\n\n    Examples:\n\n        Input: grid = [ [1,2,3], [4,5,6], [7,8,9]], k = 3\n        Output: [1, 2, 1]\n\n        Input: grid = [ [5,9,3], [4,1,6], [7,8,2]], k = 1\n        Output: [1]\n    \"\"\"\n\nAdditionally, state the output for grid = [[1,2,3],[4,5,6],[7,8,9]] and k = 3. Answer concisely.",
+  "expected_answer": "[1, 2, 1]"
+ },
+ {
+  "id": "hard-long-02",
+  "difficulty": "hard",
+  "length": "long",
+  "category": "humaneval-code",
+  "prompt": "Here is a HumanEval-style problem. Provide a working Python implementation.\n\ndef pluck(arr):\n    \"\"\"\n    \"Given an array representing a branch of a tree that has non-negative integer nodes\n    your task is to pluck one of the nodes and return it.\n    The plucked node should be the node with the smallest even value.\n    If multiple nodes with the same smallest even value are found return the node that has smallest index.\n\n    The plucked node should be returned in a list, [ smalest_value, its index ],\n    If there are no even values or the given array is empty, return [].\n\n    Example 1:\n        Input: [4,2,3]\n        Output: [2, 1]\n        Explanation: 2 has the smallest even value, and 2 has the smallest index.\n\n    Example 2:\n        Input: [1,2,3]\n        Output: [2, 1]\n        Explanation: 2 has the smallest even value, and 2 has the smallest index. \n\n    Example 3:\n        Input: []\n        Output: []\n    \n    Example 4:\n        Input: [5, 0, 3, 0, 4, 2]\n        Output: [0, 1]\n        Explanation: 0 is the smallest value, but  there are two zeros,\n                     so we will choose the first zero, which has the smallest index.\n\n    Constraints:\n        * 1 <= nodes.length <= 10000\n        * 0 <= node.value\n    \"\"\"  # (re-anchored as implementation task: write `pluck`)\n\nState what your function returns for [5, 0, 3, 0, 4, 2]. Answer concisely.",
+  "expected_answer": null
+ },
+ {
+  "id": "hard-long-03",
+  "difficulty": "hard",
+  "length": "long",
+  "category": "humaneval-code",
+  "prompt": "Here is a HumanEval-style problem. Provide a working Python implementation.\n\ndef max_fill(grid, capacity):\n    import math\n    \"\"\"\n    You are given a rectangular grid of wells. Each row represents a single well,\n    and each 1 in a row represents a single unit of water.\n    Each well has a corresponding bucket that can be used to extract water from it, \n    and all buckets have the same capacity.\n    Your task is to use the buckets to empty the wells.\n    Output the number of times you need to lower the buckets.\n\n    Example 1:\n        Input: \n            grid : [[0,0,1,0], [0,1,0,0], [1,1,1,1]]\n            bucket_capacity : 1\n        Output: 6\n\n    Example 2:\n        Input: \n            grid : [[0,0,1,1], [0,0,0,0], [1,1,1,1], [0,1,1,1]]\n            bucket_capacity : 2\n        Output: 5\n    \n    Example 3:\n        Input: \n            grid : [[0,0,0], [0,0,0]]\n            bucket_capacity : 5\n        Output: 0\n\n    Constraints:\n        * all wells have the same length\n        * 1 <= grid.length <= 10^2\n        * 1 <= grid[:,1].length <= 10^2\n        * grid[i][j] -> 0 | 1\n        * 1 <= capacity <= 10\n    \"\"\"\n\nState what it returns for grid = [[0,0,1,1],[0,0,0,0],[1,1,1,1],[0,1,1,1]] with capacity 2. Answer concisely.",
+  "expected_answer": "5"
+ },
+ {
+  "id": "hard-long-04",
+  "difficulty": "hard",
+  "length": "long",
+  "category": "math-agentic",
+  "prompt": "Solve this multi-constraint scheduling puzzle, then answer.\n\nA machine shop must run 4 jobs (A, B, C, D) on one lathe. Durations: A=3h, B=5h, C=2h, D=4h. Deadlines from time 0: A by 5h, B by 10h, C by 3h, D by 12h. All jobs arrive at time 0; no preemption; minimize the number of missed deadlines.\n\n1. Give an ordering of jobs that meets every deadline.\n2. State the completion time of the last job in your ordering.\n3. If every duration grows by 1 hour, what is the minimum number of missed deadlines?\n\nAnswer concisely.",
+  "expected_answer": "Order C, A, B, D: completions 2, 5, 10, 14 -> all deadlines met, last finish 14h. With +1h each, at least 1 missed."
+ },
+ {
+  "id": "hard-long-05",
+  "difficulty": "hard",
+  "length": "long",
+  "category": "gpqa-science",
+  "prompt": "You are a physics tutor. Read the excerpt and then answer the combined question.\n\nThe Apollo program, also known as Project Apollo, was the United States human spaceflight program led by NASA, which landed the first humans on the Moon in 1969. Apollo was conceived in 1960 in the Dwight D. Eisenhower presidency during Project Mercury and executed after Project Gemini. Apollo was later dedicated to President John F. Kennedy's national goal, \"before this decade is out, of landing a man on the Moon and returning him safely to the Earth\" in his address to the U.S. Congress on May 25, 1961.\nKennedy's goal was accomplished on the Apollo 11 mission, when astronauts Neil Armstrong and Buzz Aldrin landed their Apollo Lunar Module (LM) on July 20, 1969, and walked on the lunar surface, while Michael Collins remained in lunar orbit in the command and service module (CSM), and all three landed safely on Earth in the Pacific Ocean on July 24. Approximately 650 million people worldwide watched this first landing on television. Five subsequent Apollo missions also landed astronauts on the Moon, the last, Apollo 17, in December 1972. In these six spaceflights, twelve people walked on the Moon.\n\nApollo ran from 1961 to 1972, with the first crewed flight in 1968. It encountered a major setback in 1967 when the Apollo 1 cabin fire killed the entire crew during a ground test. After the first Moon landing, sufficient flight hardware remained for nine follow-on landings with a plan for extended lunar geological and astrophysical exploration. Budget cuts forced the cancellation of three of these. Five of the remaining six missions achieved landings; but the Apollo 13 landing ha\n\nGiven the facts in the text, answer each, then combine:\n(1) In what year did the last Apollo Moon landing occur?\n(2) How many astronauts in total walked on the Moon?\n(3) On the one aborted lunar mission, what equipment served as a \"lifeboat\" for the return?\n\nCombine as a single line: \"year=<a>, walkers=<b>, lifeboat=<c>\". Answer concisely.",
+  "expected_answer": "year=1972, walkers=12, lifeboat=Lunar Module"
+ },
+ {
+  "id": "hardest-short-01",
+  "difficulty": "hardest",
+  "length": "short",
+  "category": "aime-math",
+  "prompt": "(2024 AIME I #2) Positive reals x, y satisfy x^10 = y^x and y^10 = x^(4y). Compute xy. Answer concisely.",
+  "expected_answer": "25"
+ },
+ {
+  "id": "hardest-short-02",
+  "difficulty": "hardest",
+  "length": "short",
+  "category": "gpqa-physics",
+  "prompt": "In a parallel universe where a magnet can have an isolated North or South pole, Maxwell's equations look different. But, specifically, which of those equations are different? Answer concisely.",
+  "expected_answer": "The ones related to the circulation of the electric field and the divergence of the magnetic field."
+ },
+ {
+  "id": "hardest-short-03",
+  "difficulty": "hardest",
+  "length": "short",
+  "category": "gpqa-chemistry",
+  "prompt": "trans-cinnamaldehyde was treated with methylmagnesium bromide, forming product 1. Product 1 was treated with pyridinium chlorochromate, forming product 2. Product 2 was treated with (dimethyl(oxo)-lambda6-sulfaneylidene)methane in DMSO at elevated temperature, forming product 3. How many carbon atoms are there in product 3? Answer concisely.",
+  "expected_answer": "11"
+ },
+ {
+  "id": "hardest-short-04",
+  "difficulty": "hardest",
+  "length": "short",
+  "category": "aime-math",
+  "prompt": "Let 0 < a < b be real numbers such that b^2 - ab - a^2 = 0. Compute b/a in simplest radical form. Answer concisely.",
+  "expected_answer": "(1 + sqrt(5))/2  (phi)"
+ },
+ {
+  "id": "hardest-short-05",
+  "difficulty": "hardest",
+  "length": "short",
+  "category": "gpqa-physics-quantum",
+  "prompt": "Two quantum states have lifetimes of 10^-9 sec and 10^-8 sec. To clearly distinguish the two energy levels, which energy difference is the smallest sufficient one?\n(A) 10^-4 eV  (B) 10^-11 eV  (C) 10^-8 eV  (D) 10^-9 eV\nAnswer with the letter only. Answer concisely.",
+  "expected_answer": "A (10^-4 eV; both other candidates are well below the ~3.3e-7 eV natural widths)"
+ },
+ {
+  "id": "hardest-medium-01",
+  "difficulty": "hardest",
+  "length": "medium",
+  "category": "aime-math",
+  "prompt": "(2024 AIME I #1) Every morning Aya goes for a 9-kilometer-long walk and stops at a coffee shop afterwards. When she walks at a constant speed of s kilometers per hour, the walk takes her 4 hours, including t minutes spent in the coffee shop. When she walks s+2 kilometers per hour, the walk takes her 2 hours and 24 minutes, including t minutes spent in the coffee shop. Suppose Aya walks at s + 1/2 kilometers per hour. Find the number of minutes the walk takes her, including the t minutes spent in the coffee shop. Answer concisely.",
+  "expected_answer": "204"
+ },
+ {
+  "id": "hardest-medium-02",
+  "difficulty": "hardest",
+  "length": "medium",
+  "category": "gpqa-physics",
+  "prompt": "A quantum mechanical particle of mass m moves in two dimensions in the potential, as a function of polar coordinates (r, theta):\n\n  V(r, theta) = (1/2) k r^2 + (3/2) k r^2 cos^2(theta)\n\nFind the energy spectrum in terms of quantum numbers, m, k, and hbar. Answer concisely.",
+  "expected_answer": "E = (2 n_x + n_y + 3/2) * hbar * sqrt(k/m)"
+ },
+ {
+  "id": "hardest-medium-03",
+  "difficulty": "hardest",
+  "length": "medium",
+  "category": "tau2-agentic-policy",
+  "prompt": "You are a support agent for an airline. Policy:\n(1) Cancellations are allowed only within 24 hours of booking for a full refund.\n(2) If the customer purchased travel insurance on THIS booking, cancellation is allowed any time with a full refund.\n(3) Gold-status customers (loyalty) get free same-day rebooking, but this never waives the cancellation window.\n(4) Refunds process in 5-7 business days, and you never promise exceptions outside these rules.\n\nCustomer message: \"Hi, I'd like to cancel reservation EHGLP3, booked 3 days ago. I don't have insurance on this trip, but last year I booked through your agency WITH insurance, so you can see I'm a good customer. If I can't cancel with a refund, I'd rather keep the flight. My status is gold.\"\n\nRespond per policy in one short paragraph. Answer concisely.",
+  "expected_answer": "Decline full-refund cancellation (outside 24h, no insurance on this booking, prior insurance/gold status doesn't apply); offer free same-day rebooking per gold status, or the customer keeps the flight."
+ },
+ {
+  "id": "hardest-medium-04",
+  "difficulty": "hardest",
+  "length": "medium",
+  "category": "multi-constraint-agentic",
+  "prompt": "Schedule a conference with 3 tracks under all constraints.\n\nRooms: Alpha (50 seats, no projector), Beta (25 seats, has projector), Gamma (100 seats, has projector).\nSpeaker availability (hours from 9:00): S1 9:00-12:00, S2 11:00-13:00, S3 10:00-14:00.\nSessions: T1 2h (speakers S1 only), T2 1h (S2 only), T3 3h (S3 only). T1 and T2 need a projector. Expected attendance: T1 90, T2 20, T3 40.\nT2 must start after T1 ends (same attendees attend both).\n\nFind the earliest feasible start time and room for each of T1, T2, T3 satisfying seating, equipment, availability, and the T1-before-T2 ordering. Report as T<id>=(room, start). Answer concisely.",
+  "expected_answer": "T1=(Gamma, 9:00); T2=(Beta or Gamma, 11:00 or 12:00); T3=(Alpha or Gamma, 10:00) \u2014 e.g. T1=(Gamma,9), T2=(Gamma,11), T3=(Alpha,10); all end by 13:00"
+ },
+ {
+  "id": "hardest-medium-05",
+  "difficulty": "hardest",
+  "length": "medium",
+  "category": "gpqa-chemistry",
+  "prompt": "Propose the product and justify briefly: benzaldehyde is treated with NaBH4 in methanol, and the resulting alcohol is then treated with PBr3. What is the final product, and how many carbons does it contain? Answer concisely.",
+  "expected_answer": "benzyl bromide, 7 carbons"
+ },
+ {
+  "id": "hardest-long-01",
+  "difficulty": "hardest",
+  "length": "long",
+  "category": "math-agentic-hard",
+  "prompt": "This is a three-task multi-step job. Each task's result feeds the next. During the reasoning you may show work, but your FINAL reply must contain ONLY the last combined line.\n\nTask A: Compute the number of ordered integer triples (a, b, c) with a + b + c = 21, a, b, c >= 0, and at least one of the three equal to 5. Call this count N.\nTask B: A contest has N participants in round one. Each round, exactly half (rounded up, i.e. ceil(n/2)) advance, until one remains. How many rounds?\nTask C: Compute (N mod 23) and then (N + 5) mod 23.\n\nCombine everything as one final line: \"N=<...>, rounds=<...>, a=<...>, b=<...>\". Answer concisely.",
+  "expected_answer": "N=48, rounds=6, a=2, b=7 (brute-force verified)"
+ },
+ {
+  "id": "hardest-long-02",
+  "difficulty": "hardest",
+  "length": "long",
+  "category": "multi-constraint-agentic",
+  "prompt": "You are scheduling a small freelance team. Work with the data inline.\n\nWorkers and skills/hours: Ana (design, writing, QA; 20 h/week), Boris (design only; 15 h), Chen (writing, QA; 12 h).\nProjects due Friday 17:00:\n- P1: 6h design + 4h writing.\n- P2: 8h writing.\n- P3: 5h QA.\n- P4: 3h design + 3h QA.\n\nConstraints:\n1. Ana is out Monday, reducing her usable weekly hours by 8.\n2. No worker exceeds their weekly budget; skill must match the task type.\n3. P3 (QA of P1's deliverable) may not begin before all of P1 is complete; assume sequential per-person work.\n\nTasks:\n(a) Is there a feasible assignment? Yes/No.\n(b) Give one valid assignment as worker -> [(project, task type, hours), ...].\n(c) What is the total slack (sum of unassigned weekly hours) in your solution?\n\nAnswer concisely.",
+  "expected_answer": "Yes. e.g. Boris: P1-design 6 + P4-design 3 (9h used); Chen: P2-writing 8 (of 12); Ana: P1-writing 4 + P3-QA 5 + P4-QA 3 (12h used). Slack = 6 + 4 + 0 = 10 h."
+ },
+ {
+  "id": "hardest-long-03",
+  "difficulty": "hardest",
+  "length": "long",
+  "category": "gpqa-hard",
+  "prompt": "You're a physics tutor reviewing this NASA overview. Read it, then do the combined task.\n\nThe Apollo program, also known as Project Apollo, was the United States human spaceflight program led by NASA, which landed the first humans on the Moon in 1969. Apollo was conceived in 1960 in the Dwight D. Eisenhower presidency during Project Mercury and executed after Project Gemini. Apollo was later dedicated to President John F. Kennedy's national goal, \"before this decade is out, of landing a man on the Moon and returning him safely to the Earth\" in his address to the U.S. Congress on May 25, 1961.\nKennedy's goal was accomplished on the Apollo 11 mission, when astronauts Neil Armstrong and Buzz Aldrin landed their Apollo Lunar Module (LM) on July 20, 1969, and walked on the lunar surface, while Michael Collins remained in lunar orbit in the command and service module (CSM), and all three landed safely on Earth in the Pacific Ocean on July 24. Approximately 650 million people worldwide watched this first landing on television. Five subsequent Apollo missions also landed astronauts on the Moon, the last, Apollo 17, in December 1972. In these six spaceflights, twelve people walked on the Moon.\n\nApollo ran from 1961 to 1972, with the first crewed flight in 1968. It encountered a major setback in 1967 when the Apollo 1 cabin fire killed the entire crew during a ground test. After the first Moon landing, sufficient flight hardware remained for nine follow-on landings with a plan for extended lunar geological and astrophysical exploration. Budget cuts forced the cancellation of three of these. Five of the remaining six missions achieved landings; but the Apollo 13 landing had to be aborted after an oxygen tank exploded en route to the Moon, crippling the CSM. The crew barely managed a safe return to Earth by using the Lunar Module as a \"lifeboat\" on the return journey. \nApollo used the Saturn family of rockets as launch vehicles, which were also used for an Apollo Applications Program, which consisted of Skylab, a space station that supported three crewed missions in 1973\u20131974, and the Apollo\u2013Soyuz Test Project, a joint United States-Soviet Union low Earth orbit mission in 1975.\nApollo set several major human spaceflight milestones. It stands alone in sending humans to the lunar surface. Apollo 8 was the first crewed mission to leave low Earth orbit and to orbit another celestial body, and Apollo 11 was the first crewed mission to land humans on one.\nOverall, the Apollo program returned 842 pounds (382 kg) of lunar rocks to Earth, greatly contributing to the understanding of the Moon's composition and geological history. The program laid the foundation for NASA's subsequent human spaceflight capability and funded construction of its Johnson Space Center and Kennedy Space Center. Apollo also spurred advances in many areas of technology incidental to rocketry and human spaceflight, including avionics, telecommunications, and computers.\nThe only other time humans have left low Earth orbit has been the Artemis II flyby of the Moon in 2026, as part of the Artemis program, established as a successor to Apollo in 2017. Artemis intends to return humans to the Moon's surface no earlier than 2028.\n\nCombine facts from the text:\n(1) In what year did the last Apollo Moon landing occur?\n(2) How many astronauts in total walked on the Moon?\n(3) On the aborted mission, what served as the \"lifeboat\"?\n(4) What launch family carried these missions?\n\nAnswer as one line: \"year=<a>, walkers=<b>, lifeboat=<c>, rocket=<d>\". Answer concisely.",
+  "expected_answer": "year=1972, walkers=12, lifeboat=Lunar Module, rocket=Saturn"
+ },
+ {
+  "id": "hardest-long-04",
+  "difficulty": "hardest",
+  "length": "long",
+  "category": "math-agentic-hard",
+  "prompt": "Work through these steps, integrating results forward.\n\nStep 1: Compute the number of positive divisors of 720.\nStep 2: A contest has that many participants in round one. Each round, half (rounded up) advance. How many rounds until one participant remains?\nStep 3: Compute 2^(remainder of 720 divided by 7) mod 11.\n\nReport on one line: \"divisors=<n>, rounds=<r>, exp=<v>\". Answer concisely.",
+  "expected_answer": "720=2^4*3^2*5 -> divisors=30; rounds=5 (30->15->8->4->2->1); 720 mod 7 = 6, 2^6=64, 64 mod 11 = 9 -> exp=9. Final: divisors=30, rounds=5, exp=9"
+ },
+ {
+  "id": "hardest-long-05",
+  "difficulty": "hardest",
+  "length": "long",
+  "category": "multi-constraint-agentic",
+  "prompt": "Multi-constraint reading + math + planning over the text below.\n\nIt is a truth universally acknowledged, that a single man in possession\nof a good fortune must be in want of a wife.\n\nHowever little known the feelings or views of such a man may be on his\nfirst entering a neighbourhood, this truth is so well fixed in the minds\nof the surrounding families, that he is considered as the rightful\nproperty of some one or other of their daughters.\n\n\u201cMy dear Mr. Bennet,\u201d said his lady to him one day, \u201chave you heard that\nNetherfield Park is let at last?\u201d\n\nMr. Bennet replied that he had not.\n\n\u201cBut it is,\u201d returned she; \u201cfor Mrs. Long has just been here, and she\ntold me all about it.\u201d\n\nMr. Bennet made no answer.\n\n\u201cDo not you want to know who has taken it?\u201d cried his wife, impatiently.\n\n\u201c_You_ want to tell me, and I have no objection to hearing it.\u201d\n\n[Illustration:\n\n\u201cHe came down to see the place\u201d\n\n[_Copyright 1894 by George Allen._]]\n\nThis was invitation enough.\n\n\u201cWhy, my dear, you must know, Mrs. Long says that Netherfield is taken\nby a young man of large fortune from the north of England; that he came\ndown on Monday in a chaise and four to see the place, and was so much\ndelighted with it that he agreed with Mr. Morris immediately; that he is\nto take possession before Michaelmas, and some of his servants are to be\nin the house by the end of next week.\u201d\n\n\u201cWhat is his name?\u201d\n\n\u201cBingley.\u201d\n\n\u201cIs he married or single?\u201d\n\n\u201cOh, single, my dear, to be sure! A single man of large fortune; four or\nfive thousand a year. What a fine thing for our girls!\u201d\n\n\u201cHow so? how can it affect them?\u201d\n\n\u201cMy dear Mr. Bennet,\u201d replied his wife, \u201chow can you be so tiresome? You\nmust know that I am thinking of his marrying one of them.\u201d\n\n\u201cIs that his design in settling here?\u201d\n\n\u201cDesign? Nonsense, how can you talk so! But it is very likely that he\n_may_ fall in love with one of them, and therefore you must visit him as\nsoon as he comes.\u201d\n\n\u201cI see no occasion for that. You and the girls may go--or you may send\nthem by themselves, which perhaps will be still better; for as you\n\nTasks:\n1. What is the annual income figure mentioned for Mr. Bingley?\n2. If that whole income, for one year, were split evenly among the five Bennet daughters as a one-time grant, how much would each receive (integer dollars)?\n3. Name who reported the news to Mrs. Bennet.\n\nCombine as one line: \"income=<x>, share=<y>, source=<name>\". Answer concisely.",
+  "expected_answer": "income=5000, share=1000, source=Mrs. Long"
+ }
+]

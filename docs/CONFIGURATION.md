@@ -49,13 +49,26 @@ Force-model / `model` field resolution accepts **exact catalog IDs**, binding
 `qwen/qwen3.8-27b`). An optional `:level` effort suffix is stripped first.
 
 There is **no** Claude-era short-name remap table anymore
-(`forceModelAliases` was deleted). Strings like `claude-opus-5`, `opus`, or
-`claude-sonnet-5` do **not** resolve to catalog rows — they fail force-model /
-non-`auto` `model` with HTTP 400 (`ErrForcedModelUnknown`). Clients that still
-send Claude-era names should pin a catalog ID instead
-(`moonshotai/kimi-k3`, `zai-org/glm-5.3`, `deepseek-ai/deepseek-v4-flash`, …).
+(`forceModelAliases` was deleted). Bare fragments like `opus` or
+`claude-sonnet-5` do **not** resolve to catalog rows — they fail the
+`x-aiand-force-model` header / `/force-model` command with HTTP 400
+(`ErrForcedModelUnknown`), and bare non-passthrough words in the `model` field
+400 the same way. Clients that still send Claude-era names should pin a
+catalog ID instead (`moonshotai/kimi-k3`, `zai-org/glm-5.3`,
+`deepseek-ai/deepseek-v4-flash`, …) — except `claude-…`-prefixed ids, which
+the table below keeps as passthrough.
 
-`model="auto"` never clears an existing pin; only `/unforce-model` does.
+How non-catalog names are classified (the public API model policy):
+
+| Inbound `model` value (not in the catalog) | Behavior |
+| ------------------------------------------ | -------- |
+| `auto`, empty, or missing | Cluster routing — the scorer picks the model. |
+| `claude-…` / `gemini-…` | Wire-compat passthrough: routed by the cluster, never 400. Intentional aliasing — the aiand installer writes `claude-opus-5`/`claude-sonnet-4-6` style ids into client `models.json`, and native clients send them expecting the provider they imitate. |
+| `gpt-…`, `o…`, other bare names | Routing intent: HTTP 400 naming the model (`invalid_request_error` on the OpenAI surface, via `ErrForcedModelUnknown`). Silently serving a different model is bait-and-switch. |
+| `vendor/name` slugs not in the catalog | Deferred to cluster routing (unchanged; BYOK-adjacent shapes). |
+
+A name that **does** resolve in the catalog always wins first — a catalog id
+that merely starts with `gpt-` pins like any other.
 
 ### Routing intent via the `model` field
 
@@ -76,20 +89,15 @@ values plus everything in between:
   (`kimi-k2.7[1m]`) is stripped before resolution. Claude-era short names
   (`opus`, `claude-sonnet-5`) are **not** remapped — they 400.
 
-Precedence, when more than one carrier names a model:
-`/force-model` chat command > `model` field > `x-aiand-force-model` header. All
-three still work; the header is now the fallback when the field is empty or
-`auto`.
-
 Two rules that make `auto` safe:
 
 - `model="auto"` **never clears** an existing pin. A user-forced pin from an
   earlier `/force-model`, header, or model field survives `auto` turns —
   only `/unforce-model` clears it.
-- A `model` value that resolves to **no catalog model** (typo, misleading
-  entry) is now HTTP 400 instead of being silently ignored. This is the
-  headline behavior change: previously such fields were skipped and the request
-  routed on; now they fail loud with the unresolvable value quoted back.
+- A `model` value that resolves to **no catalog model** is HTTP 400 — quoted
+  back in the error, never silently rerouted. The exception set is the table
+  above: `claude-…`/`gemini-…` wire-compat names and unknown `vendor/name`
+  slugs defer to cluster routing.
 
 The router reuses `translate.CanonicalModel` to strip Claude Code's `[1m]`
 variant tag from the field before deciding, and ranges every resolvable value
@@ -241,6 +249,13 @@ HTTP status mirrors the classification. `429` responses include `Retry-After`
 **Metrics.** Dashboard cost summaries include additive
 `cache_input_savings_usd` on `GET /v1/metrics/summary` (prompt-cache read
 savings aggregated from telemetry).
+
+The dashboard's cached-token columns (`cache_read_tokens`) and cost fields
+keep the cache discount visible end to end: the cost columns already price the
+cached portion at each model's cache-read rate, and the token columns power
+the savings rollup — see
+[Cache-hit patterns](CACHE_PATTERNS.md#billing) for how it flows through
+billing and how to structure prompts to earn it.
 
 **Smoke script.** `scripts/playground_smoke.sh` exercises login, route preview,
 and a classified chat error against a local hosted router.

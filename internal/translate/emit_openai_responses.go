@@ -404,18 +404,24 @@ func emitResponsesReasoningItem(jw *jsonWriter, sig string) bool {
 }
 
 // writeResponsesTextMessage emits one Responses input message with a single
-// typed text part (input_text for user, output_text for assistant).
+// input_text part.
 func writeResponsesTextMessage(jw *jsonWriter, role, text string) {
 	writeResponsesContentMessage(jw, role, text, nil)
 }
 
 // writeResponsesContentMessage emits one Responses message with a text part
-// followed by typed non-text parts (input_image / input_file); those are
-// dropped on assistant-role messages, which take output_text only.
+// followed by typed non-text parts (input_image / input_file).
+//
+// Every text part is input_text regardless of role. The upstream accepts
+// output_text only inside fully-typed {"type":"message"} items; in easy-input
+// position (role+content, no type) an output_text part is rejected with 400.
+// That penalizes every multi-turn client, because replayed assistant history
+// is emitted as easy-input items.
 func writeResponsesContentMessage(jw *jsonWriter, role, text string, extraPartRaws []string) {
-	partType := "input_text"
+	const partType = "input_text"
 	if role == "assistant" {
-		partType = "output_text"
+		// function_call_output is text-only; non-text parts have no assistant
+		// easy-input equivalent.
 		extraPartRaws = nil
 	}
 	if text == "" && len(extraPartRaws) == 0 {

@@ -19,6 +19,7 @@ upstream path. See root [README](../README.md) and [AGENTS.md](../AGENTS.md).
 | [TRANSLATION_COMPATIBILITY.md](TRANSLATION_COMPATIBILITY.md) | Cross-format translation requirements and rollout modes. |
 | [aiand-api-reference.md](aiand-api-reference.md) | ai& API notes used by this deploy. |
 | [aiand-live-catalog.md](aiand-live-catalog.md) | Live catalog endpoint / dashboard wiring. |
+| [CACHE_PATTERNS.md](CACHE_PATTERNS.md) | Prompt-cache hit patterns and how the cache-read discount flows into router cost accounting. |
 | [aiand-dashboard-features.md](aiand-dashboard-features.md) | Dashboard feature notes for the ai& fork. |
 
 For engineering conventions (layer model, package layout, recipes), see the

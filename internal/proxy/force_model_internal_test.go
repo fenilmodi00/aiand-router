@@ -502,3 +502,133 @@ func TestResolveForceModel_GLM53CanonicalAlias(t *testing.T) {
 		})
 	}
 }
+
+// TestRawForceModelFromHeaders_ModelFamilyPolicy pins the public-API model
+// policy at the raw resolver both dispatch (applyForceModel) and the /v1/route
+// preview (previewForceModelFromRequest) share: unknown gpt-*/o* names are
+// routing intent and fail via the ForcedModelUnknownError path; unknown
+// claude-*/gemini-* wire-compat names and unknown vendor-qualified slugs defer
+// to cluster routing; catalog ids pin; auto/empty defer to the header.
+func TestRawForceModelFromHeaders_ModelFamilyPolicy(t *testing.T) {
+	tests := []struct {
+		name       string
+		format     translate.Format
+		body       string
+		wantForce  string // "" = no force: raw "" means cluster routing
+		wantRaw    string // raw string returned by rawForceModelFromHeaders
+		wantRawErr error  // nil = raw must resolve; non-nil = expects this error
+	}{
+		{
+			name:       "unknown gpt-4o on OpenAI surface fails",
+			format:     translate.FormatOpenAI,
+			body:       `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`,
+			wantRaw:    "gpt-4o",
+			wantRawErr: ErrForcedModelUnknown,
+		},
+		{
+			name:       "unknown gpt-5.6-sol on OpenAI surface fails",
+			format:     translate.FormatOpenAI,
+			body:       `{"model":"gpt-5.6-sol","messages":[{"role":"user","content":"hi"}]}`,
+			wantRaw:    "gpt-5.6-sol",
+			wantRawErr: ErrForcedModelUnknown,
+		},
+		{
+			name:       "unknown o-series name fails",
+			format:     translate.FormatOpenAI,
+			body:       `{"model":"o3-unknown","messages":[{"role":"user","content":"hi"}]}`,
+			wantRaw:    "o3-unknown",
+			wantRawErr: ErrForcedModelUnknown,
+		},
+		{
+			name:      "unknown claude-sonnet-4-6 passes through on OpenAI surface",
+			format:    translate.FormatOpenAI,
+			body:      `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hi"}]}`,
+			wantForce: "",
+			wantRaw:   "",
+		},
+		{
+			name:      "unknown vendor-qualified slug defers to cluster routing (unchanged)",
+			format:    translate.FormatOpenAI,
+			body:      `{"model":"openai/gpt-x","messages":[{"role":"user","content":"hi"}]}`,
+			wantForce: "",
+			wantRaw:   "",
+		},
+		{
+			name:      "unknown gemini-2.5-pro passes through on OpenAI surface",
+			format:    translate.FormatOpenAI,
+			body:      `{"model":"gemini-2.5-pro","messages":[{"role":"user","content":"hi"}]}`,
+			wantForce: "",
+			wantRaw:   "",
+		},
+		{
+			name:      "unknown gemini-2.5-pro passes through on Anthropic surface",
+			format:    translate.FormatAnthropic,
+			body:      `{"model":"gemini-2.5-pro","messages":[{"role":"user","content":"hi"}]}`,
+			wantForce: "",
+			wantRaw:   "",
+		},
+		{
+			name:      "catalog id pins on OpenAI surface",
+			format:    translate.FormatOpenAI,
+			body:      `{"model":"zai-org/glm-5.3","messages":[{"role":"user","content":"hi"}]}`,
+			wantForce: "zai-org/glm-5.3",
+			wantRaw:   "zai-org/glm-5.3",
+		},
+		{
+			name:      "auto defers to cluster routing",
+			format:    translate.FormatOpenAI,
+			body:      `{"model":"auto","messages":[{"role":"user","content":"hi"}]}`,
+			wantForce: "",
+			wantRaw:   "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parse := translate.ParseAnthropic
+			if tt.format == translate.FormatOpenAI {
+				parse = translate.ParseOpenAI
+			}
+			env, err := parse([]byte(tt.body))
+			require.NoError(t, err)
+			require.Equal(t, tt.format, env.SourceFormat(), "parse helper must yield the expected source format")
+
+			gotRaw := rawForceModelFromHeaders(nil, env)
+			assert.Equal(t, tt.wantRaw, gotRaw, "raw force string")
+
+			preview, previewErr := previewForceModelFromRequest(nil, env)
+			if tt.wantRaw == "" {
+				require.NoError(t, previewErr, "no raw force means no preview error")
+				assert.Empty(t, preview, "cluster routing on the preview side too")
+				return
+			}
+			canonical, _, known, _ := resolveForceModelWithEffort(gotRaw)
+			if tt.wantRawErr != nil {
+				require.ErrorIs(t, previewErr, tt.wantRawErr, "unknown name must fail the preview with the typed error")
+				assert.False(t, known, "raw must not resolve for a rejected name")
+				return
+			}
+			require.NoError(t, previewErr)
+			assert.Equal(t, canonical, preview, "preview carries the canonical catalog id")
+		})
+	}
+}
+
+// TestApplyForceModel_GPTFamilyUnknownFails pins the dispatch-path twin of the
+// raw policy: an unknown gpt-* name sent on the OpenAI surface 400s through
+// ForcedModelUnknownError (invalid_request_error envelope at the handler)
+// instead of silently routing to the cheapest cluster model.
+func TestApplyForceModel_GPTFamilyUnknownFails(t *testing.T) {
+	store := &recordingPinStore{}
+	svc := &Service{pinStore: store}
+	env, err := translate.ParseOpenAI([]byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`))
+	require.NoError(t, err)
+	httpReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	ctx := context.WithValue(context.Background(), InstallationIDContextKey{}, uuid.New().String())
+	threadKey, forceKey := forceModelKeysForTest(ctx, env, "key-1")
+	_, err = svc.applyForceModel(ctx, httpReq, env, uuid.New(), threadKey, forceKey)
+	require.ErrorIs(t, err, ErrForcedModelUnknown, "unknown gpt-* must fail dispatch")
+	var unknown *ForcedModelUnknownError
+	require.ErrorAs(t, err, &unknown)
+	assert.Equal(t, "gpt-4o", unknown.Model, "the rejected value must be quoted back")
+	assert.Empty(t, store.upserts, "no pin written for a failed resolution")
+}

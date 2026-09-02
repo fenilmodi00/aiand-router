@@ -24,6 +24,7 @@ type requestBuilder struct {
 	messageTTL  string // cache_control ttl on the final user message block ("" = none)
 	noTools     bool
 	customTools []map[string]any // additional raw tool definitions, appended verbatim
+	historyMsgs []any            // prior user/assistant turns replayed before the final user turn
 }
 
 func newRequest(userID string) *requestBuilder {
@@ -39,6 +40,15 @@ func (b *requestBuilder) tokens(n int) *requestBuilder  { b.maxTokens = n; retur
 func (b *requestBuilder) text(s string) *requestBuilder { b.userText = s; return b }
 func (b *requestBuilder) model(m string) *requestBuilder {
 	b.modelField = m
+	return b
+}
+
+// history replays prior conversation turns before the final user turn, so the
+// request carries assistant-role history. role is "user" or "assistant".
+func (b *requestBuilder) history(role, text string) *requestBuilder {
+	b.historyMsgs = append(b.historyMsgs, map[string]any{"role": role, "content": []any{
+		map[string]any{"type": "text", "text": text},
+	}})
 	return b
 }
 
@@ -86,10 +96,8 @@ func (b *requestBuilder) build(t *testing.T) []byte {
 		"model":      b.modelValue(),
 		"max_tokens": b.maxTokens,
 		"system":     []any{sysBlock},
-		"messages": []any{
-			map[string]any{"role": "user", "content": []any{userBlock}},
-		},
-		"metadata": map[string]any{"user_id": b.userID},
+		"messages": append(append([]any{}, b.historyMsgs...),
+			map[string]any{"role": "user", "content": []any{userBlock}}),
 	}
 	if b.stream {
 		req["stream"] = true

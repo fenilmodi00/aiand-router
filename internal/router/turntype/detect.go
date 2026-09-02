@@ -63,7 +63,11 @@ func DetectFromEnvelope(env *translate.RequestEnvelope, feats translate.RoutingF
 	if isProbe(feats) {
 		return Probe
 	}
-	if isTitleGen(env, feats.HasTools) {
+	// TitleGen is Claude Code's sidebar-title call, and Claude Code speaks
+	// Anthropic format (same reasoning as the Classifier gate below): an
+	// OpenAI-surface request with a title-shaped schema is a real customer's
+	// structured-output ask and must reach the scorer.
+	if env.SourceFormat() == translate.FormatAnthropic && isTitleGen(env, feats.HasTools) {
 		return TitleGen
 	}
 	systemText := env.SystemText()
@@ -76,7 +80,17 @@ func DetectFromEnvelope(env *translate.RequestEnvelope, feats translate.RoutingF
 	if isSubAgentDispatch(env.MetadataUserID(), env.FirstUserMessageText(), subAgentHint) {
 		return SubAgentDispatch
 	}
-	if isClassifier(feats) {
+	// Classifier hard-pin is Anthropic-source only. The Classifier role was
+	// built for Claude Code's internal short-form calls (security monitor),
+	// and Claude Code speaks Anthropic format — but the shape (no tools,
+	// max_tokens<=256, <=3 messages) also matches every genuine short
+	// third-party prompt on the OpenAI surface ("model":"auto",
+	// "max_tokens":80, one user message). Beta-QA fired its whole 60-prompt
+	// routing matrix that way and every request was hard-pinned to the
+	// cheapest model, bypassing the cluster scorer entirely (ticket 04).
+	// Third-party short prompts must be scored, so OpenAI-source requests
+	// with the classifier shape fall through to MainLoop.
+	if env.SourceFormat() == translate.FormatAnthropic && isClassifier(feats) {
 		return Classifier
 	}
 	if feats.LastKind == "tool_result" {

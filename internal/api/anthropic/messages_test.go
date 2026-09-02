@@ -216,6 +216,54 @@ func TestMessagesHandler_InvalidRoutingKnobsReturns400(t *testing.T) {
 	assert.Equal(t, "invalid_request_error", errObj["type"])
 }
 
+// --- Pre-dispatch input validation (beta-QA blocker 02) ---
+// Client-input garbage must 400 naming the field before any routing happens,
+// not bubble into a misleading "cluster scorer failed" 503.
+
+func TestMessagesHandler_MissingMessagesReturns400(t *testing.T) {
+	svc := newTestService(&fakeRouter{}, "", nil)
+
+	rec := postMessages(messagesEngine(svc), []byte(`{"model":"auto","max_tokens":4096}`))
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	errObj := errorEnvelope(t, rec.Body.Bytes())
+	assert.Equal(t, "invalid_request_error", errObj["type"])
+	assert.Contains(t, errObj["message"], "messages")
+}
+
+func TestMessagesHandler_EmptyMessagesReturns400(t *testing.T) {
+	svc := newTestService(&fakeRouter{}, "", nil)
+
+	rec := postMessages(messagesEngine(svc), []byte(`{"model":"auto","messages":[],"max_tokens":4096}`))
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	errObj := errorEnvelope(t, rec.Body.Bytes())
+	assert.Equal(t, "invalid_request_error", errObj["type"])
+	assert.Contains(t, errObj["message"], "messages")
+}
+
+func TestMessagesHandler_NegativeMaxTokensReturns400(t *testing.T) {
+	svc := newTestService(&fakeRouter{}, "", nil)
+
+	rec := postMessages(messagesEngine(svc), []byte(`{"model":"auto","messages":[{"role":"user","content":"hi"}],"max_tokens":-5}`))
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	errObj := errorEnvelope(t, rec.Body.Bytes())
+	assert.Equal(t, "invalid_request_error", errObj["type"])
+	assert.Contains(t, errObj["message"], "max_tokens")
+}
+
+func TestMessagesHandler_StringMaxTokensReturns400(t *testing.T) {
+	svc := newTestService(&fakeRouter{}, "", nil)
+
+	rec := postMessages(messagesEngine(svc), []byte(`{"model":"auto","messages":[{"role":"user","content":"hi"}],"max_tokens":"eighty"}`))
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	errObj := errorEnvelope(t, rec.Body.Bytes())
+	assert.Equal(t, "invalid_request_error", errObj["type"])
+	assert.Contains(t, errObj["message"], "max_tokens")
+}
+
 func TestMessagesHandler_ClusterUnavailableReturns503WithRetryAfter(t *testing.T) {
 	svc := newTestService(&fakeRouter{err: cluster.ErrClusterUnavailable}, "", nil)
 	engine := messagesEngine(svc)

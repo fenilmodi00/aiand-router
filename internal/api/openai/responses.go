@@ -1,5 +1,11 @@
 package openai
 
+// Validation note: /v1/responses rejects a Chat Completions body ("messages"
+// key) via translate.ErrResponsesChatCompletionsBody, already classified to a
+// 400 in proxy.ClassifyDispatchError. Empty `input` is accepted deliberately:
+// instructions-only requests are valid, so no messages-style pre-dispatch
+// validation is added here. max_output_tokens, when present, is validated the
+// same way as the chat surface's max_tokens.
 import (
 	"context"
 	"io"
@@ -30,6 +36,10 @@ func ResponsesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc
 		}
 		if len(body) > proxy.MaxRequestBodyBytes {
 			writeOpenAIError(c, http.StatusRequestEntityTooLarge, "invalid_request_error", "Request body too large.")
+			return
+		}
+		if msg, ok := validateResponsesBody(body); !ok {
+			writeOpenAIError(c, http.StatusBadRequest, "invalid_request_error", msg)
 			return
 		}
 

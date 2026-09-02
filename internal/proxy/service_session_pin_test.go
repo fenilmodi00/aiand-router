@@ -727,7 +727,7 @@ func TestService_HMMFeedbackKeyUsesClientSessionBeforeCompaction(t *testing.T) {
 
 func TestService_HMMFeedbackKeyOpenAIUsesClientSessionBeforeCompaction(t *testing.T) {
 	body := []byte(`{
-		"model":"gpt-4o",
+		"model":"auto",
 		"max_tokens":123000,
 		"messages":[
 			{"role":"user","content":"` + strings.Repeat("x", 30_000) + `"},
@@ -979,7 +979,7 @@ func TestService_HardPin_SubAgentOverrideIneligibleProviderErrors(t *testing.T) 
 // OpenAI ingress: same Stage 1 path via ProxyOpenAIChatCompletion.
 
 const openAIPinTestBody = `{
-	"model":"gpt-4o",
+	"model":"auto",
 	"messages":[
 		{"role":"system","content":"You are helpful."},
 		{"role":"user","content":"original prompt"}
@@ -1044,7 +1044,7 @@ func TestService_SessionPin_OpenAI_FreshRouteCreatesPin(t *testing.T) {
 func TestService_SessionPin_OpenAI_ForceModelCommandSetsPin(t *testing.T) {
 	t.Skip("OpenAI force-model pin needs aiand provider")
 	const forceBody = `{
-		"model":"gpt-4o",
+		"model":"auto",
 		"messages":[
 			{"role":"system","content":"You are helpful."},
 			{"role":"user","content":"/force-model gpt-5\nuse this model for now"}
@@ -1080,7 +1080,7 @@ func TestService_SessionPin_OpenAI_ForceModelCommandSetsPin(t *testing.T) {
 
 func TestService_SessionPin_OpenAI_UnforceModelCommandClearsPin(t *testing.T) {
 	const unforceBody = `{
-		"model":"gpt-4o",
+		"model":"auto",
 		"messages":[
 			{"role":"system","content":"You are helpful."},
 			{"role":"user","content":"/unforce-model"}
@@ -1116,7 +1116,7 @@ func TestService_SessionPin_OpenAI_UnforceModelCommandClearsPin(t *testing.T) {
 
 func TestService_SessionPin_OpenAI_ForceModelCommandStreamShape(t *testing.T) {
 	const forceStreamBody = `{
-		"model":"gpt-4o",
+		"model":"auto",
 		"stream":true,
 		"messages":[
 			{"role":"user","content":"/force-model gpt-5"}
@@ -1142,7 +1142,7 @@ func TestService_SessionPin_OpenAI_ToolResultShortCircuit(t *testing.T) {
 	// Kill switch OFF: pinned tool_result reuses the pin verbatim (legacy #82 path).
 	// Default (scorer runs) is covered by turnloop_test.go.
 	const toolResultBody = `{
-		"model":"gpt-4o",
+		"model":"auto",
 		"messages":[
 			{"role":"system","content":"You are helpful."},
 			{"role":"user","content":"original prompt"},
@@ -1193,7 +1193,7 @@ func newOpenAIHardPinSvc(fr *fakeRouter, store *fakePinStore, hardPinExplore boo
 // Compaction detection is now gated on Anthropic format only.
 func TestService_OpenAI_CompactionPhraseDoesNotHardPin(t *testing.T) {
 	const compactionOpenAIBody = `{
-		"model":"gpt-4o",
+		"model":"auto",
 		"messages":[
 			{"role":"system","content":"Your task is to create a detailed summary of the conversation so far."},
 			{"role":"user","content":"go"}
@@ -1497,7 +1497,7 @@ func TestService_ForceModelHeader_UnknownModelRejected(t *testing.T) {
 // the turn fell through to the scorer while the user trusted the prior ack.
 // The pin must still be dropped (serving it would 401), but now it surfaces.
 func TestService_SessionPin_ForcedPinDropped_SurfacesInMarker(t *testing.T) {
-	const body = `{"model":"gpt-4o","stream":true,"messages":[{"role":"user","content":"analyze usage"}]}`
+	const body = `{"model":"auto","stream":true,"messages":[{"role":"user","content":"analyze usage"}]}`
 
 	store := newFakePinStore()
 	store.hasPin = true

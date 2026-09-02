@@ -80,7 +80,7 @@ func TestPrepareOpenAIResponses_FromChatCompletions_RequestShape(t *testing.T) {
 	assistantParts, _ := assistant["content"].([]any)
 	require.Len(t, assistantParts, 1)
 	aPart, _ := assistantParts[0].(map[string]any)
-	assert.Equal(t, "output_text", aPart["type"], "assistant text takes output_text on the Responses wire")
+	assert.Equal(t, "input_text", aPart["type"], "assistant text must carry input_text even in easy-input position — the upstream rejects output_text there with 400")
 
 	call, _ := input[2].(map[string]any)
 	assert.Equal(t, "function_call", call["type"])
@@ -99,6 +99,32 @@ func TestPrepareOpenAIResponses_FromChatCompletions_RequestShape(t *testing.T) {
 	assert.Equal(t, "function", tool["type"])
 	assert.Equal(t, "bash", tool["name"], "Responses tools are flat — no nested function wrapper")
 	assert.NotNil(t, tool["parameters"])
+}
+
+// Replayed assistant history must carry input_text parts even in easy-input
+// position: the upstream rejects output_text outside fully-typed message
+// items with 400, which broke every multi-turn conversation.
+func TestPrepareOpenAIResponses_FromChatCompletions_AssistantHistoryInputText(t *testing.T) {
+	out := prepareChatOnResponses(t, `{
+      "model":"gpt-5.6-luna","max_tokens":2048,
+      "messages":[
+        {"role":"user","content":"Remember the word banana"},
+        {"role":"assistant","content":"Banana."},
+        {"role":"user","content":"What word did I ask you to remember?"}
+      ]
+    }`, chatOnResponsesOpts())
+
+	input, _ := out["input"].([]any)
+	require.Len(t, input, 3)
+	assistant, _ := input[1].(map[string]any)
+	assert.Equal(t, "assistant", assistant["role"])
+	parts, _ := assistant["content"].([]any)
+	require.Len(t, parts, 1)
+	for _, p := range parts {
+		pm, _ := p.(map[string]any)
+		assert.Equal(t, "input_text", pm["type"], "assistant history takes input_text — output_text 400s in easy-input position")
+	}
+	assert.Equal(t, "Banana.", parts[0].(map[string]any)["text"])
 }
 
 // A mid-conversation system message must stay in place: hoisting it to the

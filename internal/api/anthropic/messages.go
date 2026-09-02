@@ -32,6 +32,11 @@ func MessagesHandler(svc *proxy.Service, authSvc *auth.Service) gin.HandlerFunc 
 			return
 		}
 
+		if msg, ok := validateMessagesBody(body); !ok {
+			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", msg)
+			return
+		}
+
 		msgs := gjson.GetBytes(body, "messages")
 		log.Debug("inbound anthropic request",
 			"body_bytes", len(body),

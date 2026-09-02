@@ -311,28 +311,28 @@ func previewForceModelFromRequest(headers http.Header, env *translate.RequestEnv
 	return canonicalModel, nil
 }
 
-// isClientPassthroughModel names an inbound wire-model the client sent for
-// provider API compatibility, not a router catalog routing intent.
-func isClientPassthroughModel(model string, format translate.Format) bool {
+// isWireCompatPassthroughModel classifies a non-catalog model as a wire-compat
+// name the client sent for provider API compatibility, not router routing
+// intent: the claude-* and gemini-* families on both surfaces. The aiand
+// installer writes claude-opus-5/claude-sonnet-4-6 style ids into models.json,
+// so rejecting them would break installs; they route via the cluster silently
+// when they resolve to no catalog row — intentional aliasing documented in
+// docs/CONFIGURATION.md. The OpenAI gpt-*/o* families are NOT passthrough:
+// unknown names there are routing intent and fail (see
+// rawForceModelFromHeaders). The old `HasPrefix(model, "o")` matched every
+// o-word (opus, offline, …) and silently rerouted them; that broad match is
+// gone.
+func isWireCompatPassthroughModel(model string, format translate.Format) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
-	switch format {
-	case translate.FormatAnthropic:
-		return strings.HasPrefix(model, "claude-") || strings.HasPrefix(model, "gemini-")
-	case translate.FormatOpenAI:
-		return strings.HasPrefix(model, "gpt-") ||
-			strings.HasPrefix(model, "o") ||
-			strings.HasPrefix(model, "claude-") ||
-			strings.HasPrefix(model, "gemini-")
-	default:
-		return false
-	}
+	return strings.HasPrefix(model, "claude-") || strings.HasPrefix(model, "gemini-")
 }
 
 // rawForceModelFromHeaders picks the raw force-model string from the inbound
 // model field and x-aiand-force-model header. A catalog-resolvable, non-auto
-// model field wins over a conflicting header; model=auto, empty, client
-// passthrough, or unknown vendor/id slugs defer to the header; bare unknown
-// names are explicit routing intent and fail when not in the catalog.
+// model field wins over a conflicting header; model=auto, empty, wire-compat
+// passthrough, or unknown vendor/id slugs defer to the header; unknown bare
+// names — including the gpt-*/o* OpenAI family — are explicit routing intent
+// and fail when not in the catalog.
 func rawForceModelFromHeaders(headers http.Header, env *translate.RequestEnvelope) string {
 	bodyModel, _ := translate.CanonicalModel(env.Model())
 	bodyModel = strings.TrimSpace(bodyModel)
@@ -340,7 +340,7 @@ func rawForceModelFromHeaders(headers http.Header, env *translate.RequestEnvelop
 		if _, _, known, _ := resolveForceModelWithEffort(bodyModel); known {
 			return bodyModel
 		}
-		if isClientPassthroughModel(bodyModel, env.SourceFormat()) || strings.Contains(bodyModel, "/") {
+		if isWireCompatPassthroughModel(bodyModel, env.SourceFormat()) || strings.Contains(bodyModel, "/") {
 			return ""
 		}
 		return bodyModel

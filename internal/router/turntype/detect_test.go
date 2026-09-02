@@ -380,6 +380,33 @@ func TestDetectFromEnvelope_OpenAI(t *testing.T) {
 			body: `{"model":"gpt-4o","max_tokens":1,"messages":[{"role":"user","content":"quota"}]}`,
 			want: turntype.Probe,
 		},
+		{
+			// Classifier hard-pin is Anthropic-only: Claude Code speaks
+			// Anthropic format, but this exact shape is also what every
+			// genuine short third-party /v1/chat/completions prompt looks
+			// like. It must reach the scorer, not hard-pin to the cheapest
+			// model.
+			name: "openai short no-tools prompt with small max_tokens is main_loop (not classifier)",
+			body: `{"model":"auto","max_tokens":80,"messages":[{"role":"user","content":"is this safe?"}]}`,
+			want: turntype.MainLoop,
+		},
+		{
+			name: "openai classifier-shaped 3-message short turn is main_loop",
+			body: `{"model":"gpt-4o","max_tokens":64,"messages":[
+				{"role":"user","content":"transcript"},
+				{"role":"assistant","content":"verdict?"},
+				{"role":"user","content":"confirm"}
+			]}`,
+			want: turntype.MainLoop,
+		},
+		{
+			// TitleGen hard-pin is Anthropic-only for the same reason: an
+			// OpenAI-surface title-shaped schema is a customer's structured
+			// output ask, not Claude Code's sidebar-title call.
+			name: "openai title-shaped response_format stays main_loop",
+			body: `{"model":"gpt-4o","max_tokens":100,"response_format":{"type":"json_schema","json_schema":{"name":"title","schema":{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}}},"messages":[{"role":"user","content":"name this chat"}]}`,
+			want: turntype.MainLoop,
+		},
 	}
 
 	for _, tc := range tests {
@@ -396,4 +423,27 @@ func TestDetectFromEnvelope_OpenAI(t *testing.T) {
 func TestDetectFromEnvelope_NilEnv(t *testing.T) {
 	got := turntype.DetectFromEnvelope(nil, translate.RoutingFeatures{}, "")
 	assert.Equal(t, turntype.MainLoop, got)
+}
+
+// TestRoutingMatrixShape_ShortOpenAIPromptReachesScorer is the regression case
+// for ticket 04 (routing never escalates). The beta-QA harness fired its whole
+// 60-prompt routing matrix as model:"auto", max_tokens:80, one user message,
+// no tools on /v1/chat/completions. The old Classifier hard-pin — which exists
+// for Claude Code's internal security-monitor calls — matched that shape and
+// pinned every request to the cheapest model, so the cluster scorer never ran.
+// The QA-matrix shape MUST classify MainLoop when it arrives over the OpenAI
+// surface; the identical shape from Anthropic-source (Claude Code) stays
+// Classifier.
+func TestRoutingMatrixShape_ShortOpenAIPromptReachesScorer(t *testing.T) {
+	// Verbatim QA-matrix request shape (see smoke/fixtures/routing_matrix.json).
+	const body = `{"model":"auto","stream":false,"max_tokens":80,"messages":[{"role":"user","content":"What is 2+2?"}]}`
+	feats := translate.RoutingFeatures{MaxTokens: 80, MessageCount: 1, Model: "auto"}
+
+	env, err := translate.ParseOpenAI([]byte(body))
+	require.NoError(t, err)
+	assert.Equal(t, turntype.MainLoop, turntype.DetectFromEnvelope(env, feats, ""))
+
+	env, err = translate.ParseAnthropic([]byte(`{"model":"auto","max_tokens":80,"messages":[{"role":"user","content":"What is 2+2?"}]}`))
+	require.NoError(t, err)
+	assert.Equal(t, turntype.Classifier, turntype.DetectFromEnvelope(env, feats, ""))
 }

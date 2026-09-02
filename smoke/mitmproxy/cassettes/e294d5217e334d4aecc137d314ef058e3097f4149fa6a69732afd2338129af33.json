@@ -1,0 +1,9 @@
+{
+  "method": "POST",
+  "path": "/v1/responses",
+  "status_code": 200,
+  "headers": {
+    "Content-Type": "text/event-stream; charset=utf-8"
+  },
+  "body": "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_smoke\",\"status\":\"in_progress\"}}\n\n\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"banana\"}\n\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_smoke\",\"status\":\"completed\",\"model\":\"deepseek-ai/deepseek-v4-flash\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"banana\"}]}],\"usage\":{\"input_tokens\":140,\"output_tokens\":3}}}\n\n"
+}

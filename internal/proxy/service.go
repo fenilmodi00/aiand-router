@@ -1388,14 +1388,9 @@ func (s *Service) WithContentCapture(mode ContentCaptureMode, maxBytes int, reda
 
 // forcedReasoningEffort implements escalate-on-failure effort policy, returning
 // the EmitOptions.ForceReasoningEffort override ("" = no override):
-//
 //   - gpt-5.x: "low" by default, "high" after a failed/no-progress prior turn.
 //     On SWE-Bench Pro this beats both fixed policies (24% < 32% < ~40% resolved)
-//     since high is spent only where it flips the outcome.
-//   - gemini-3.x: pinned "low" — effort-immune on hard tasks (0/15 in the sweep).
-//   - grok-4.x: pinned "low" — omitting effort falls to xAI's non-disableable
-//     "high" default, a ~15 s fixed TTFT stall on every pinned turn.
-//   - everything else: "" — left to its own path.
+//   - gemini-3.x pinned low; everything else untouched ("").
 func forcedReasoningEffort(model string, escalate bool) string {
 	// Unconditional: omitting effort falls to xAI's non-disableable "high" default
 	// (~15 s TTFT stall) — a defect to correct, not an escalation to tune.
@@ -2369,6 +2364,11 @@ func (s *Service) maybeRepinOnRefusal(ctx context.Context, obs *refusalObserver,
 // upstream reasoning phases that produce no translatable frames.
 var anthropicPingFrame = []byte(sseEvent("ping", `{"type":"ping"}`))
 
+// openAIKeepaliveFrame keeps an OpenAI chat/completions client-facing stream
+// byte-alive during long upstream reasoning phases. A bare SSE comment is
+// transparent to OpenAI clients; the spec lets servers ignore it.
+var openAIKeepaliveFrame = []byte(": keepalive\n\n")
+
 func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.ResponseWriter, r *http.Request) error {
 	log := observability.FromContext(ctx)
 	requestStart := time.Now()
@@ -2854,6 +2854,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		opts.ForceReasoningEffort = translate.ResolveForceEffort(opts.Capabilities, opts.ForceEffort)
 	} else if decision.Effort != "" {
 		applyPolicyEffortToEmit(&opts, decision.Effort)
+	} else if routeRes.HardPinned {
+		// Hard-pinned turns are trivially short internal calls; reasoning
+		// only adds latency and tokens (ticket 07). applyPolicyEffortToEmit
+		// clamps to the model's menu, so models without "none" get their
+		// nearest level and are unaffected where the menu has no low tier.
+		applyPolicyEffortToEmit(&opts, catalog.EffortNone)
 	} else if effort := forcedReasoningEffort(decision.Model, routeRes.EscalateEffort); effort != "" && (s.ResolveEffortEscalation(ctx) || strings.HasPrefix(decision.Model, "grok-")) {
 		opts.ForceReasoningEffort = effort
 	}
@@ -3119,6 +3125,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			siblingOpts.ForceReasoningEffort = translate.ResolveForceEffort(siblingOpts.Capabilities, knobs.ForceEffort)
 		} else if siblingDecision.Effort != "" {
 			applyPolicyEffortToEmit(&siblingOpts, siblingDecision.Effort)
+		} else if routeRes.HardPinned {
+			// See the primary dispatch site: hard-pinned turns are trivially
+			// short, so a sibling re-serve keeps minimal effort too.
+			applyPolicyEffortToEmit(&siblingOpts, catalog.EffortNone)
 		} else if effort := forcedReasoningEffort(siblingDecision.Model, routeRes.EscalateEffort); effort != "" && (s.ResolveEffortEscalation(ctx) || strings.HasPrefix(siblingDecision.Model, "grok-")) {
 			siblingOpts.ForceReasoningEffort = effort
 		}
@@ -4642,6 +4652,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		opts.ForceReasoningEffort = translate.ResolveForceEffort(opts.Capabilities, opts.ForceEffort)
 	} else if decision.Effort != "" {
 		applyPolicyEffortToEmit(&opts, decision.Effort)
+	} else if routeRes.HardPinned {
+		// See the ProxyMessages dispatch site: hard-pinned turns are
+		// trivially short, so they run at minimal effort (ticket 07).
+		applyPolicyEffortToEmit(&opts, catalog.EffortNone)
 	} else if effort := forcedReasoningEffort(decision.Model, routeRes.EscalateEffort); effort != "" && (s.ResolveEffortEscalation(ctx) || strings.HasPrefix(decision.Model, "grok-")) {
 		opts.ForceReasoningEffort = effort
 	}
@@ -4656,11 +4670,18 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	// Append the one-click feedback thumbs as a trailing chunk (see
 	// ProxyMessages). Skipped on the Responses-API path (w is a
 	// *ResponsesWriter): wrapping it would defeat maybeCaptureResponse's
-	// special-casing — /v1/responses footers are a follow-up.
+	// special-casing — /v1/responses footers are a follow-up. Innermost wrap:
+	// the keepalive arms only once preludeBuffer commits, so it can never
+	// strand a response the router still wants to retry (see ProxyMessages).
 	clientSink := w
 	if _, isResponses := w.(*translate.ResponsesWriter); env.Stream() && !isResponses {
+		if s.sseKeepalive > 0 {
+			keepalive := sse.NewKeepaliveWriter(clientSink, openAIKeepaliveFrame, s.sseKeepalive)
+			defer keepalive.Close()
+			clientSink = keepalive
+		}
 		if footer := s.feedbackFooter(ctx, ClientIdentityFrom(ctx).ClientApp, routeRes.TurnType, footerEchoedSinceHumanTurn); footer != "" {
-			clientSink = translate.NewOpenAIRoutingFooterWriter(w, footer)
+			clientSink = translate.NewOpenAIRoutingFooterWriter(clientSink, footer)
 		}
 	}
 	contentSink, contentCap := s.maybeCaptureResponse(ctx, clientSink)

@@ -200,6 +200,39 @@ func TestGenerateSmokeCassettes(t *testing.T) {
 			cluster: true,
 			usage:   smokeUsageSpec{input: 120, output: 2},
 		},
+		{
+			name: "multiturn-nonstream",
+			build: func() []byte {
+				return smokeBody(t, systemPrompt, smokeOpts{
+					userID: "smoke-multiturn-nonstream", maxTokens: 64,
+					text: "What word did I ask you to remember?",
+					history: []any{
+						map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": "Remember the word banana"}}},
+						map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "text", "text": "Banana."}}},
+					},
+				})
+			},
+			pinModel:  smokePinModel,
+			usage:     smokeUsageSpec{input: 140, output: 3},
+			replyText: "banana",
+		},
+		{
+			name: "multiturn-stream",
+			build: func() []byte {
+				return smokeBody(t, systemPrompt, smokeOpts{
+					userID: "smoke-multiturn-stream", maxTokens: 64, stream: true,
+					text: "What word did I ask you to remember?",
+					history: []any{
+						map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": "Remember the word banana"}}},
+						map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "text", "text": "Banana."}}},
+					},
+				})
+			},
+			pinModel:  smokePinModel,
+			stream:    true,
+			usage:     smokeUsageSpec{input: 140, output: 3},
+			replyText: "banana",
+		},
 	}
 
 	dir := filepath.Clean(filepath.Join(".", cassettesDirRel))
@@ -329,6 +362,7 @@ type smokeOpts struct {
 	toolCache   string
 	cachedTools int
 	customTools []map[string]any
+	history     []any // prior user/assistant turns replayed before the final user turn
 }
 
 func loadSmokeSystemPrompt(t *testing.T) string {
@@ -371,10 +405,8 @@ func smokeBody(t *testing.T, systemPrompt string, o smokeOpts) []byte {
 		"model":      "deepseek-ai/deepseek-v4-pro",
 		"max_tokens": o.maxTokens,
 		"system":     []any{sysBlock},
-		"messages": []any{
-			map[string]any{"role": "user", "content": []any{userBlock}},
-		},
-		"metadata": map[string]any{"user_id": o.userID},
+		"messages": append(append([]any{}, o.history...),
+			map[string]any{"role": "user", "content": []any{userBlock}}),
 	}
 	if o.stream {
 		req["stream"] = true
