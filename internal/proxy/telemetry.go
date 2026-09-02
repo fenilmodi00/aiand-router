@@ -174,7 +174,7 @@ type InsertTelemetryParams struct {
 	AuthorityShadowCorrectedOutcome    string
 	AuthorityShadowCorrectedSavingsUSD *float64
 	AuthorityShadowStayScore           *float64
-	AuthorityShadowFreshScore            *float64
+	AuthorityShadowFreshScore          *float64
 
 	// Spiral* fields are a nullable group: nil = not recorded, zero = measured;
 	// spiral_shadow_events holds threshold crossings only.
