@@ -55,14 +55,19 @@ def norm(s):
 
 # ---------------------------------------------------------------- LiveBench
 
+SOLUTION_TAG_RE = re.compile(r"<solution>(.*?)</solution>", re.DOTALL | re.IGNORECASE)
+
+
 def grade_ground_truth(scoring, text):
     expected = scoring.get("ground_truth")
     if expected is None:
         return False, "no-ground-truth"
     got = strip_fence(text)
-    # Prefer the final line/answer: models often show work then answer.
+    # LiveBench convention: the final answer is wrapped in <solution> tags.
+    # Prefer the LAST tagged answer, then the final lines, then whole text.
+    candidates = [norm(m.group(1)) for m in SOLUTION_TAG_RE.finditer(text)]
     lines = [l for l in got.splitlines() if l.strip()]
-    candidates = [norm(l) for l in lines[-3:]] if lines else []
+    candidates += [norm(l) for l in lines[-3:]] if lines else []
     candidates.append(norm(got))
     want = norm(str(expected))
     for c in candidates:
