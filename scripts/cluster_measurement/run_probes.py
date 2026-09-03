@@ -231,6 +231,10 @@ def run_tier(tier, api_key, spend, only_model=None):
         def work(row):
             try:
                 tools = (row.get("scoring") or {}).get("functions")
+                if tools:
+                    # The API requires OpenAI's wrapper shape; BFCL's raw
+                    # function objects are rejected with HTTP 400.
+                    tools = [{"type": "function", "function": f} for f in tools]
                 cap = row["max_tokens"]
                 if model in REASONING_MODELS and tier == "hard":
                     # Reasoning models burn the entire cap on invisible reasoning
