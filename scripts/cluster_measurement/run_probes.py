@@ -85,7 +85,7 @@ class Spend:
             return self.spent_usd, proj
 
 
-def sse_stream_call(api_key, model, effort, prompt, max_tokens):
+def sse_stream_call(api_key, model, effort, prompt, max_tokens, tools=None):
     """One streamed chat completion. Returns (text, finish_reason, usage|None)."""
     body = {
         "model": model,
@@ -96,6 +96,9 @@ def sse_stream_call(api_key, model, effort, prompt, max_tokens):
     }
     if effort:
         body["reasoning_effort"] = effort
+    if tools:
+        body["tools"] = tools
+        body["tool_choice"] = "auto"
     data = json.dumps(body).encode()
     req = urllib.request.Request(
         API_BASE + "/chat/completions",
@@ -110,6 +113,7 @@ def sse_stream_call(api_key, model, effort, prompt, max_tokens):
         method="POST",
     )
     text_parts = []
+    tool_parts = []
     finish_reason = None
     usage = None
     with urllib.request.urlopen(req, timeout=TIMEOUT_SECS) as resp:
@@ -130,16 +134,40 @@ def sse_stream_call(api_key, model, effort, prompt, max_tokens):
                 delta = choice.get("delta") or {}
                 if delta.get("content"):
                     text_parts.append(delta["content"])
+                # Accumulate streamed tool-call fragments (BFCL rows): the
+                # API may answer with tool_calls instead of content. Fragments
+                # share an index; arguments arrive as incremental strings.
+                for tc in delta.get("tool_calls") or []:
+                    while len(tool_parts) <= tc.get("index", 0):
+                        tool_parts.append({"id": "", "name": "", "args": []})
+                    slot = tool_parts[tc["index"]]
+                    if tc.get("id"):
+                        slot["id"] += tc["id"]
+                    fn = tc.get("function") or {}
+                    if fn.get("name"):
+                        slot["name"] += fn["name"]
+                    if fn.get("arguments"):
+                        slot["args"].append(fn["arguments"])
                 if choice.get("finish_reason"):
                     finish_reason = choice["finish_reason"]
-    return "".join(text_parts), finish_reason, usage
+    tool_calls = None
+    if tool_parts:
+        tool_calls = [
+            {"name": t["name"], "arguments": "".join(t["args"])}
+            for t in tool_parts if t["name"] or t["args"]
+        ]
+    # Tool-call answers replace content for grading; keep both in the record.
+    text = "".join(text_parts)
+    if tool_calls:
+        text = json.dumps(tool_calls)
+    return text, finish_reason, usage
 
 
-def call_with_retry(api_key, model, effort, prompt, max_tokens):
+def call_with_retry(api_key, model, effort, prompt, max_tokens, tools=None):
     last_err = None
     for attempt in range(MAX_RETRIES):
         try:
-            return sse_stream_call(api_key, model, effort, prompt, max_tokens)
+            return sse_stream_call(api_key, model, effort, prompt, max_tokens, tools=tools)
         except urllib.error.HTTPError as e:
             last_err = f"HTTP {e.code}: {e.read(200).decode('utf-8', 'replace')}"
             if e.code == 429 or e.code >= 500:
@@ -199,7 +227,8 @@ def run_tier(tier, api_key, spend, only_model=None):
 
         def work(row):
             try:
-                text, finish, usage = call_with_retry(api_key, model, effort, row["prompt"], row["max_tokens"])
+                tools = (row.get("scoring") or {}).get("functions")
+                text, finish, usage = call_with_retry(api_key, model, effort, row["prompt"], row["max_tokens"], tools=tools)
                 completion_tokens = usage.get("completion_tokens") if usage else None
                 if completion_tokens is None:
                     completion_tokens = max(1, math.ceil(len(text) / 4))
