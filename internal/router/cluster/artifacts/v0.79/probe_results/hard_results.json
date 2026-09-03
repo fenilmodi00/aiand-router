@@ -1,0 +1,95 @@
+{
+  "deepseek-ai/deepseek-v4-flash": {
+    "errors": 21,
+    "fail_kinds": {
+      "answer-mismatch": 10,
+      "runtime-error": 5,
+      "wrong-output": 6
+    },
+    "mean_output_tokens": 2922.1,
+    "n": 35,
+    "passed": 14,
+    "rate": 0.4,
+    "skipped_ungradable": 65,
+    "total_output_tokens": 102273,
+    "truncated_count": 11
+  },
+  "moonshotai/kimi-k2.7-code": {
+    "errors": 31,
+    "fail_kinds": {
+      "answer-mismatch": 8,
+      "empty": 21,
+      "runtime-error": 2
+    },
+    "mean_output_tokens": 5705.1,
+    "n": 35,
+    "passed": 4,
+    "rate": 0.1143,
+    "skipped_ungradable": 65,
+    "total_output_tokens": 199677,
+    "truncated_count": 29
+  },
+  "moonshotai/kimi-k3": {
+    "errors": 14,
+    "fail_kinds": {
+      "answer-mismatch": 6,
+      "compile-error": 1,
+      "runtime-error": 5,
+      "wrong-output": 2
+    },
+    "mean_output_tokens": 2607.7,
+    "n": 35,
+    "passed": 21,
+    "rate": 0.6,
+    "skipped_ungradable": 65,
+    "total_output_tokens": 91270,
+    "truncated_count": 0
+  },
+  "motif-technologies/motif-3": {
+    "errors": 29,
+    "fail_kinds": {
+      "answer-mismatch": 10,
+      "runtime-error": 14,
+      "wrong-output": 5
+    },
+    "mean_output_tokens": 3798.5,
+    "n": 35,
+    "passed": 6,
+    "rate": 0.1714,
+    "skipped_ungradable": 65,
+    "total_output_tokens": 132948,
+    "truncated_count": 18
+  },
+  "qwen/qwen3.8-27b": {
+    "errors": 24,
+    "fail_kinds": {
+      "answer-mismatch": 8,
+      "compile-error": 1,
+      "runtime-error": 13,
+      "wrong-output": 2
+    },
+    "mean_output_tokens": 5500.3,
+    "n": 35,
+    "passed": 11,
+    "rate": 0.3143,
+    "skipped_ungradable": 65,
+    "total_output_tokens": 192512,
+    "truncated_count": 25
+  },
+  "zai-org/glm-5.3": {
+    "errors": 22,
+    "fail_kinds": {
+      "answer-mismatch": 8,
+      "empty": 7,
+      "runtime-error": 3,
+      "wrong-output": 4
+    },
+    "mean_output_tokens": 2661.5,
+    "n": 35,
+    "passed": 13,
+    "rate": 0.3714,
+    "skipped_ungradable": 65,
+    "total_output_tokens": 93152,
+    "truncated_count": 9
+  }
+}

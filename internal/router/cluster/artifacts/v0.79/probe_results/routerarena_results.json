@@ -1,0 +1,84 @@
+{
+  "deepseek-ai/deepseek-v4-flash": {
+    "errors": 66,
+    "fail_kinds": {
+      "answer-mismatch": 59,
+      "finish=length": 7
+    },
+    "mean_output_tokens": 512.6,
+    "n": 100,
+    "passed": 34,
+    "rate": 0.34,
+    "skipped_ungradable": 0,
+    "total_output_tokens": 51263,
+    "truncated_count": 38
+  },
+  "moonshotai/kimi-k2.7-code": {
+    "errors": 58,
+    "fail_kinds": {
+      "answer-mismatch": 58
+    },
+    "mean_output_tokens": 559.5,
+    "n": 100,
+    "passed": 42,
+    "rate": 0.42,
+    "skipped_ungradable": 0,
+    "total_output_tokens": 55945,
+    "truncated_count": 46
+  },
+  "moonshotai/kimi-k3": {
+    "errors": 51,
+    "fail_kinds": {
+      "answer-mismatch": 51
+    },
+    "mean_output_tokens": 466.1,
+    "n": 100,
+    "passed": 49,
+    "rate": 0.49,
+    "skipped_ungradable": 0,
+    "total_output_tokens": 46613,
+    "truncated_count": 24
+  },
+  "motif-technologies/motif-3": {
+    "errors": 59,
+    "fail_kinds": {
+      "answer-mismatch": 58,
+      "finish=length": 1
+    },
+    "mean_output_tokens": 341.7,
+    "n": 100,
+    "passed": 41,
+    "rate": 0.41,
+    "skipped_ungradable": 0,
+    "total_output_tokens": 34170,
+    "truncated_count": 26
+  },
+  "qwen/qwen3.8-27b": {
+    "errors": 59,
+    "fail_kinds": {
+      "answer-mismatch": 56,
+      "finish=length": 3
+    },
+    "mean_output_tokens": 561.8,
+    "n": 100,
+    "passed": 41,
+    "rate": 0.41,
+    "skipped_ungradable": 0,
+    "total_output_tokens": 56179,
+    "truncated_count": 49
+  },
+  "zai-org/glm-5.3": {
+    "errors": 49,
+    "fail_kinds": {
+      "answer-mismatch": 48,
+      "finish=length": 1
+    },
+    "mean_output_tokens": 370.2,
+    "n": 100,
+    "passed": 51,
+    "rate": 0.51,
+    "skipped_ungradable": 0,
+    "total_output_tokens": 37017,
+    "truncated_count": 16
+  }
+}

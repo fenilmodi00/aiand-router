@@ -113,3 +113,33 @@ func TestBlendWinnerMap_V078(t *testing.T) {
 		assert.Equalf(t, exp, blendWinnerOf(t, s, c), "v0.78 cluster %d winner", c)
 	}
 }
+
+// TestCandidateV079_LoadsAndWins pins the v0.79 candidate's per-cluster
+// blend winners: hard clusters to kimi-k3, mid/knowledge to glm-5.3,
+// conversational to kimi-k2.7-code. This is the calibration's acceptance
+// criterion — a future accidental overlay or regeneration that collapses
+// tier diversity must fail here, not in production.
+func TestCandidateV079_LoadsAndWins(t *testing.T) {
+	s := loadBundleScorer(t, "v0.79")
+
+	require.Len(t, s.models, 6, "v0.79 roster is the 6 aiand models")
+
+	want := map[int]string{
+		0: "moonshotai/kimi-k3", 1: "zai-org/glm-5.3", 2: "moonshotai/kimi-k2.7-code",
+		3: "zai-org/glm-5.3", 4: "zai-org/glm-5.3", 5: "zai-org/glm-5.3",
+		6: "zai-org/glm-5.3", 7: "zai-org/glm-5.3", 8: "zai-org/glm-5.3",
+		9: "moonshotai/kimi-k2.7-code", 10: "moonshotai/kimi-k2.7-code", 11: "moonshotai/kimi-k2.7-code",
+		12: "zai-org/glm-5.3", 13: "moonshotai/kimi-k3", 14: "zai-org/glm-5.3",
+		15: "moonshotai/kimi-k2.7-code",
+	}
+	wins := map[string]int{}
+	for c := 0; c < s.centroids.K; c++ {
+		winner := blendWinnerOf(t, s, c)
+		assert.Equalf(t, want[c], winner, "v0.79 cluster %d winner", c)
+		wins[winner]++
+	}
+	assert.Equal(t, 2, wins["moonshotai/kimi-k3"], "kimi-k3 wins the hard set")
+	assert.Equal(t, 9, wins["zai-org/glm-5.3"], "glm-5.3 wins the mid/knowledge set")
+	assert.Equal(t, 5, wins["moonshotai/kimi-k2.7-code"], "kimi-k2.7-code wins the conversational set")
+	assert.Zero(t, wins["motif-technologies/motif-3"], "motif-3 wins no cluster in v0.79")
+}

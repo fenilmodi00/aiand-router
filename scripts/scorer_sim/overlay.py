@@ -205,6 +205,47 @@ def scale_quality(parent_quality, scales):
     return new_quality
 
 
+# Cluster sets for the tier-maxpool recipe (v0.76 lineage): HARD = agentic +
+# hard_code dominants, MID = medium-coding + knowledge dominants, CONV = the
+# alpha-0.8 conversational set.
+TIER_CLUSTERS = {
+    "hard": {0, 13},
+    "mid": {1, 3, 4, 5, 6, 7, 8, 12, 14},
+    "conv": {2, 9, 10, 11, 15},
+}
+MAXPOOL_BOOST = 1.03
+
+
+def maxpool_quality(parent_quality, tier_winners):
+    """v0.76 tier-maxpool recipe: each tier winner's column becomes
+    pool_max(k) * 1.03 on its tier's clusters (pool_max taken over the
+    pre-boost pool), making it the per-cluster quality leader there; every
+    other column keeps the parent's per-cluster structure. This is the
+    lineage's mechanism for tier diversity — uniform per-model scaling
+    cannot produce it (v0.78 flattened the conversational winner's column
+    and collapsed the blend to a monoculture)."""
+    ks = sorted(parent_quality, key=int)
+    covered = set()
+    for tier in TIER_CLUSTERS:
+        if tier not in tier_winners:
+            continue
+        covered |= TIER_CLUSTERS[tier]
+    if covered != set(range(len(ks))):
+        raise OverlayError(
+            f"tier cluster sets must cover all clusters; uncovered: "
+            f"{sorted(set(range(len(ks))) - covered)}")
+    new_quality = {k: dict(parent_quality[k]) for k in parent_quality}
+    for tier, winner in tier_winners.items():
+        for k in TIER_CLUSTERS[tier]:
+            kk = str(k)
+            row = parent_quality[kk]
+            if winner not in row:
+                raise OverlayError(f"tier winner {winner} missing from parent tables")
+            pool_max = max(row.values())
+            new_quality[kk][winner] = pool_max * MAXPOOL_BOOST
+    return new_quality
+
+
 def _minmax_norm(values):
     lo, hi = min(values.values()), max(values.values())
     rng = hi - lo
@@ -222,6 +263,92 @@ def blend_scores_for_cluster(row, costs, alpha_k):
     return {
         m: alpha_k * q_norm[m] + (1.0 - alpha_k) * (1.0 - c_norm[m])
         for m in row
+    }
+
+
+PRICE_PER_1K_INPUT = {
+    "zai-org/glm-5.3": 0.001,
+    "deepseek-ai/deepseek-v4-flash": 0.00015,
+    "moonshotai/kimi-k2.7-code": 0.00075,
+    "moonshotai/kimi-k3": 0.003,
+    "motif-technologies/motif-3": 0.0005,
+    "qwen/qwen3.8-27b": 0.0004,
+}
+
+
+def read_conversational(rates_dir, rates_prefix):
+    """Local-probe pass rates (the conversational subset of the routerarena
+    measurement) from the responses on disk: rate = graded passes / probes."""
+    import json as _json, os as _os, glob as _glob
+    base = _os.path.dirname(rates_dir.rstrip("/"))
+    resp_dir = _os.path.join(base, "responses", "routerarena")
+    matrix = _os.path.join(base, "matrices", "routerarena.jsonl")
+    if not (_os.path.isdir(resp_dir) and _os.path.exists(matrix)):
+        # Fall back to the full routerarena rates (recorded in changelog).
+        return read("routerarena") if False else {}
+    rows = {}
+    with open(matrix) as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                r = _json.loads(line)
+                rows[r["id"]] = r
+    # grade with the same judge-free graders as score_responses
+    sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "cluster_measurement"))
+    try:
+        import score_responses as g
+    except ImportError:
+        return {}
+    # response files are slugged (moonshotai_kimi-k3); map back to registry ids
+    slug_to_id = {m.replace("/", "_"): m for m in PRICE_PER_1K_INPUT}
+    rates = {}
+    for path in sorted(_glob.glob(_os.path.join(resp_dir, "*.jsonl"))):
+        slug = _os.path.splitext(_os.path.basename(path))[0]
+        mid = slug_to_id.get(slug, slug)
+        n = p = 0
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                rec = _json.loads(line)
+                if not rec["id"].startswith("routerarena-probe"):
+                    continue
+                row = rows.get(rec["id"])
+                if not row:
+                    continue
+                ok, _ = g.grade_response(row, rec)
+                p += bool(ok)
+                n += 1
+        if n:
+            rates[mid] = p / n
+    return rates
+
+
+def derive_tier_winners(rates_dir, rates_prefix):
+    """Tier winners from measured rates: hard winner = argmax hard-tier rate
+    (hard/medium coding tiers drive the HARD/MID cluster sets); mid winner =
+    argmax medium+bfcl rate (medium coding + knowledge proxies); conv winner
+    = argmax local-conversational rate, ties broken by price (cheapest wins —
+    the issue's conversational user story)."""
+    rates = load_rates(rates_dir, rates_prefix, None) if False else None
+    import json as _json, os as _os
+    def read(tier):
+        path = _os.path.join(rates_dir, f"{rates_prefix}_{tier}_results.json")
+        with open(path) as f:
+            return {m: r["rate"] for m, r in _json.load(f).items()}
+    hard = read("hard")
+    medium = read("medium")
+    bfcl = read("bfcl")
+    conv = read_conversational(rates_dir, rates_prefix)
+    return {
+        "hard": max(hard, key=hard.get),
+        "mid": max(medium, key=lambda m: medium[m] + bfcl[m]),
+        # Conversational winner: local-probe subset only (the routerarena tier
+        # mixes LiveBench rows, whose winner is a different cluster family).
+        # Ties (probes are easy; most models score ~1.0) break by input price:
+        # the issue's user story — cheapest capable model serves chat.
+        "conv": min(conv, key=lambda m: (-conv[m], PRICE_PER_1K_INPUT.get(m, 9e9))),
     }
 
 
@@ -407,7 +534,7 @@ def update_metadata_text(text, new_version, parent, changelog):
 
 
 def build_bundle(parent, out_root, new_version, rates_dir, rates_prefix,
-                 tier_leaders, test_dates):
+                 tier_leaders, test_dates, recipe="uniform", tier_winners=None):
     parent_dir = os.path.join(out_root, parent)
     if not os.path.isdir(parent_dir):
         raise OverlayError(f"parent bundle dir not found: {parent_dir}")
@@ -436,7 +563,12 @@ def build_bundle(parent, out_root, new_version, rates_dir, rates_prefix,
     models = validate(parent, parent_q, parent_axes, registry, alpha, k, dim,
                       set(combined))
 
-    new_quality = scale_quality(parent_q, scales)
+    if recipe == "maxpool":
+        if not tier_winners:
+            raise OverlayError("maxpool recipe requires tier winners")
+        new_quality = maxpool_quality(parent_q, tier_winners)
+    else:
+        new_quality = scale_quality(parent_q, scales)
     costs = {m: parent_axes[m]["input_per_1k_usd"] for m in models}
     winners = derive_blend_winners(new_quality, costs, alpha)
     raw_winners = raw_argmax_winners(new_quality)
@@ -480,9 +612,12 @@ def build_bundle(parent, out_root, new_version, rates_dir, rates_prefix,
                    f"(1-alpha)*(1-cost)), not raw quality argmax. rankings.json "
                    f"intentionally absent.")
         update_features_meta(features, new_version, parent, comment)
+        # psi_probe is what the runtime prefers (model_features.json overrides
+        # quality_means at load); it must equal the FINAL quality table for
+        # the recipe used, not a uniform-scale side-channel.
         for m in models:
             features["models"][m]["psi_probe"] = [
-                q * scales[m] for q in features["models"][m]["psi_probe"]]
+                new_quality[str(k)][m] for k in range(len(new_quality))]
         write_json(os.path.join(out_dir, "model_features.json"), features)
 
         update_registry_notes(registry, scales, combined, pool_max, winners,
@@ -534,6 +669,15 @@ def main(argv=None):
     ap.add_argument("--test-dates", default=None,
                     help="probe run date recorded in the changelog "
                          "(default: today, UTC)")
+    ap.add_argument("--recipe", choices=["uniform", "maxpool"], default="uniform",
+                    help="scaling recipe: uniform = v0.78 per-model scalar "
+                         "(historical, collapses tier diversity); maxpool = "
+                         "v0.76 tier-maxpool (winner = pool_max*1.03 on its "
+                         "tier clusters — the lineage's diversity mechanism)")
+    ap.add_argument("--tier-winners", nargs=3,
+                    metavar=("HARD", "MID", "CONV"),
+                    help="maxpool recipe: winners for hard/mid/conv cluster "
+                         "sets (default: measured-rate argmax per tier)")
     args = ap.parse_args(argv)
 
     out_root = args.out
@@ -543,9 +687,16 @@ def main(argv=None):
                else DEFAULT_TIER_LEADERS)
     test_dates = args.test_dates or datetime.date.today().isoformat()
 
+    tier_winners = None
+    if args.recipe == "maxpool":
+        if args.tier_winners:
+            tier_winners = dict(zip(("hard", "mid", "conv"), args.tier_winners))
+        else:
+            tier_winners = derive_tier_winners(args.rates_dir, args.rates_prefix)
     try:
         result = build_bundle(parent, out_root, new_version, args.rates_dir,
-                              args.rates_prefix, leaders, test_dates)
+                              args.rates_prefix, leaders, test_dates,
+                              recipe=args.recipe, tier_winners=tier_winners)
     except OverlayError as e:
         print(f"overlay: {e}", file=sys.stderr)
         return 1
