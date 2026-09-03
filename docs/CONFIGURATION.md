@@ -319,7 +319,7 @@ returned unchanged, so the dashboard shows the same data.
 | --------------------------------- | ---------------------------- | ------- |
 | `ROUTER_DEFAULT_STRATEGY`         | `cluster`                    | Strategy used when an installation has no persisted strategy. Change only after the policy rollout gate passes. |
 | `ROUTER_CLUSTER_VERSION`          | *(reads `artifacts/latest`)* | Pin a specific cluster artifact version (e.g. `v0.27`). |
-| `ROUTER_CLUSTER_EMBED_TIMEOUT_MS` | `3000`                       | Per-request ONNX embed timeout. Increase for slower hosts. |
+| `ROUTER_CLUSTER_EMBED_TIMEOUT_MS` | `3000`                       | Soft per-request ONNX embed budget (warn-only). Route keeps waiting on the same in-flight embed until overall = 2× this value (6000 ms default). Soft alone does not 503; only overall miss fails closed. Raise on slow shared-CPU hosts. |
 | `ROUTER_RESPONSE_HEADER_TIMEOUT_SECONDS` | `120`               | Upstream time-to-first-byte guard for provider HTTP clients. Streaming idle/output stalls use separate knobs. |
 | `ROUTER_EMBED_ONLY_USER_MESSAGE`  | `true`                       | Feed only user-role text to the embedder. Set `false` to embed the full concatenated turn. |
 | `ROUTER_STICKY_DECISION_TTL_MS`   | `0` (disabled)               | Reuse a routing decision per API key for this many ms. |
@@ -336,9 +336,10 @@ returned unchanged, so the dashboard shows the same data.
 | `ROUTER_ONNX_ASSETS_DIR`          | `/opt/router/assets`         | Directory containing `model.onnx` + `tokenizer.json`. |
 | `ROUTER_ONNX_LIBRARY_DIR`         | *(system default)*           | Path to `libonnxruntime` (e.g. `/opt/homebrew/lib` on Apple Silicon). |
 
-If the cluster scorer can't run (missing model, embed timeout, etc.), the
+If the cluster scorer can't run (missing model, overall embed timeout, etc.), the
 router returns HTTP 503 — it does *not* silently fall back to a default
-model. Failures are loud by design.
+model. Failures are loud by design. Soft `ROUTER_CLUSTER_EMBED_TIMEOUT_MS`
+overruns only warn while the single in-flight embed continues.
 
 ## Model exclusions
 
