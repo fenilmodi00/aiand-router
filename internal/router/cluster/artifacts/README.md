@@ -85,8 +85,9 @@ unchanged (mean pooling, L2 norm, no prefix, same truncation).
 
 Before promoting any Qwen bundle (pointing `latest` at it), run the
 latency gate: Qwen3-0.6B INT8 embed p95 on the target prod CPU must
-clear the 3000 ms `EmbedTimeout` with margin; timeouts surface as
-HTTP 503, not degraded routing.
+clear the soft 3000 ms `EmbedTimeout` with margin, and p99 must clear
+`EmbedOverallTimeout` (default 2× soft = 6000 ms). Soft overruns only
+warn; only overall miss surfaces as HTTP 503, not degraded routing.
 
 ## Working with bundles
 

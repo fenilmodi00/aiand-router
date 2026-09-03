@@ -14,6 +14,7 @@ import (
 	anthropicapi "aiand/router/internal/api/anthropic"
 	openaiapi "aiand/router/internal/api/openai"
 	"aiand/router/internal/policyclient"
+	"aiand/router/internal/proxy"
 	"aiand/router/internal/router"
 	"aiand/router/internal/server/middleware"
 
@@ -29,8 +30,10 @@ const (
 	messagesTimeout       = 600 * time.Second
 	chatCompletionTimeout = 600 * time.Second
 	passthroughTimeout    = 10 * time.Second
-	routeTimeout          = 5 * time.Second
-	adminTimeout          = 10 * time.Second
+	// routeTimeout must clear EmbedOverallTimeout (default 6s) plus scoring
+	// overhead; 5s used to cut off a healthy late embed and 503 /v1/route.
+	routeTimeout = 8 * time.Second
+	adminTimeout = 10 * time.Second
 	// playgroundChatTimeout bounds streaming inference from the dashboard
 	// playground. Must exceed typical first-token latency for routed models.
 	playgroundChatTimeout = 120 * time.Second
@@ -68,6 +71,25 @@ const (
 // no catalog route (self-hosted without AIAND_API_KEY). Self-serve always
 // wires a handler that authenticates upstream with each user's BYOK key.
 func Register(engine *gin.Engine, s Services) {
+	// Browser clients need an explicit expose list before fetch can read the
+	// router's routing and cost metadata from a cross-origin response.
+	engine.Use(func(c *gin.Context) {
+		c.Header("Access-Control-Expose-Headers", strings.Join([]string{
+			proxy.HeaderRouterDecision,
+			proxy.HeaderRouterProvider,
+			proxy.HeaderRouterModel,
+			proxy.HeaderRouterContextWindow,
+			proxy.HeaderRouterCache,
+			proxy.HeaderRouterFallbackFrom,
+			proxy.HeaderRouterFallbackAttempt,
+			proxy.HeaderRouterCostUSD,
+			proxy.HeaderRouterCostInputUSD,
+			proxy.HeaderRouterCostOutputUSD,
+			proxy.HeaderRouterCacheReadTokens,
+			proxy.HeaderRouterCacheCreationTokens,
+		}, ", "))
+		c.Next()
+	})
 	engine.GET("/health", middleware.WithTimeout(healthTimeout), admin.HealthHandler)
 	engine.GET("/readyz", middleware.WithTimeout(readinessTimeout), admin.ReadinessHandler(s.ReadinessChecker))
 

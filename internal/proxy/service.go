@@ -223,6 +223,15 @@ type Service struct {
 	// context window at which the compaction cascade engages. Zero disables
 	// compaction entirely.
 	compactionTriggerPct float64
+	// compactionModel is the model the cascade summarizes with (and a
+	// client's own compaction turn is pinned to) when the session has no
+	// warm pin. Empty means DefaultCompactionModel.
+	compactionModel string
+	// compactionHardPinEnabled routes a client's own compaction turn through
+	// compactionHardPin instead of the generic utility hard-pin. Off unless
+	// the composition root enables it (an operator ROUTER_HARD_PIN_MODEL
+	// keeps winning for every hard-pinned turn).
+	compactionHardPinEnabled bool
 	// availableModels is the boot-time set of model names whose providers are
 	// registered. Read by the planner to decide whether a pin's model is still
 	// routable.
@@ -1447,6 +1456,24 @@ func (s *Service) WithCompaction(cs CompactionSummarizer, pct float64) *Service 
 	return s
 }
 
+// WithCompactionModel overrides the mid-tier default summarizer for the
+// compaction cascade and a client's native compaction turn
+// (ROUTER_COMPACTION_MODEL). A model with no catalog binding is rejected at
+// boot by the caller; empty keeps DefaultCompactionModel.
+func (s *Service) WithCompactionModel(model string) *Service {
+	s.compactionModel = model
+	return s
+}
+
+// WithCompactionHardPin enables pinning a client's native compaction turn to
+// the session's model (or the compaction model) instead of the generic
+// utility hard-pin. The composition root leaves it off when the operator set
+// an explicit ROUTER_HARD_PIN_MODEL.
+func (s *Service) WithCompactionHardPin(enabled bool) *Service {
+	s.compactionHardPinEnabled = enabled
+	return s
+}
+
 // WithAvailableModels installs the boot-time set of routable model names.
 // The planner consults this set so a pin whose model is no longer
 // available forces a switch. nil treats every model as available.
@@ -1744,6 +1771,11 @@ var headersToSkipOnHit = map[string]struct{}{
 	"X-Router-Context-Window": {},
 	"X-Router-Cache":          {},
 	"X-Router-Feedback-Url":   {},
+	http.CanonicalHeaderKey(HeaderRouterCostUSD):             {},
+	http.CanonicalHeaderKey(HeaderRouterCostInputUSD):        {},
+	http.CanonicalHeaderKey(HeaderRouterCostOutputUSD):       {},
+	http.CanonicalHeaderKey(HeaderRouterCacheReadTokens):     {},
+	http.CanonicalHeaderKey(HeaderRouterCacheCreationTokens): {},
 }
 
 // cloneCacheHeaders snapshots a header set for storage, dropping transient
@@ -2216,6 +2248,7 @@ func logUpstreamBody(log *slog.Logger, sessionKey [sessionpin.SessionKeyLen]byte
 // and usage extractor are rebuilt per attempt off the dispatched decision (d)
 // so a baseline failover that switches models renders the right marker.
 // setExtractor publishes the attempt's extractor for post-dispatch attribution.
+// setStreamCost arms the SSE cost annotator with the winning attempt's pricing.
 func (s *Service) anthropicNativeAttempt(
 	env *translate.RequestEnvelope,
 	r *http.Request,
@@ -2224,8 +2257,10 @@ func (s *Service) anthropicNativeAttempt(
 	preludeBuf *preludeBuffer,
 	marker string,
 	setExtractor func(*otel.UsageExtractor),
+	setStreamCost func(router.Decision, bool),
 ) dispatchAttempt {
 	return func(actx context.Context, d router.Decision, p providers.Client) error {
+		setStreamCost(d, false)
 		attemptSink := sink
 		if marker != "" {
 			attemptSink = translate.NewAnthropicRoutingMarkerWriter(sink, d.Model, marker)
@@ -2436,6 +2471,16 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		log.Error("Failed to parse Anthropic request", "err", parseErr)
 		return fmt.Errorf("parse request: %w", parseErr)
 	}
+	var responseBuffer *responseCostBuffer
+	if !env.Stream() {
+		responseBuffer = newResponseCostBuffer(w)
+		w = responseBuffer
+		defer func() {
+			if flushErr := responseBuffer.FlushToClient(); flushErr != nil {
+				log.Error("Failed to flush buffered response", "err", flushErr)
+			}
+		}()
+	}
 
 	apiKeyID, _ := ctx.Value(APIKeyIDContextKey{}).(string)
 	externalID, _ := ctx.Value(ExternalIDContextKey{}).(string)
@@ -2623,7 +2668,17 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	var compRes compactionResult
 	if !agentShadowMode {
 		var compErr error
-		compRes, compErr = s.maybeCompact(ctx, env, turntype.DetectFromEnvelope(env, feats, ""), outputReserve, maxEligibleWindow, r.Header)
+		compRes, compErr = s.maybeCompact(ctx, env, compactionInput{
+			TurnType:       turntype.DetectFromEnvelope(env, feats, ""),
+			OutputReserve:  outputReserve,
+			MaxWindow:      maxEligibleWindow,
+			RequestedModel: feats.Model,
+			ClientApp:      ClientIdentityFrom(ctx).ClientApp,
+			PreferredSummarizer: func() string {
+				return s.compactionPreferredSummarizer(ctx, sessionKey, roleForTier(catalog.TierFor(feats.Model)))
+			},
+			Headers: r.Header,
+		})
 		if compErr != nil {
 			log.Warn("Compaction could not fit request to any eligible model",
 				"err", compErr, "final_estimate", compRes.FinalEstimate, "max_window", maxEligibleWindow, "requested_model", feats.Model)
@@ -2899,7 +2954,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// wrapped below the capture layer so the footer never lands in
 	// cached/logged bodies. Transparent when streaming/feedback is off.
 	clientSink := w
+	var streamCost *streamCostWriter
 	if env.Stream() && !agentShadowMode {
+		streamCost = newStreamCostWriter(clientSink)
+		clientSink = streamCost
 		// Innermost wrap: arms only once preludeBuffer commits, so a keepalive
 		// can never strand a response the router still wants to retry.
 		if s.sseKeepalive > 0 {
@@ -2948,6 +3006,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 	// translators validate/repair model tool calls against it. Nil if no tools.
 	toolValidator := env.ToolValidator()
 	setExtractor := func(e *otel.UsageExtractor) { extractor = e }
+	setStreamCost := func(d router.Decision, inputIncludesCache bool) {
+		if streamCost != nil {
+			streamCost.SetCostCalculator(routerCostCalculatorFor(d.Model, d.Provider), inputIncludesCache)
+		}
+	}
 	// buildAttempt dispatches by translation family so new OpenAI-compat
 	// providers route automatically; a closure so in-turn model failover can
 	// re-emit for a candidate in a different family.
@@ -2961,7 +3024,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			}
 			crossFormat = false
 			logUpstreamBody(log, routeRes.SessionKey, target, feats, prep.Body)
-			native := s.anthropicNativeAttempt(env, r, prep, sink, preludeBuf, targetMarker, setExtractor)
+			native := s.anthropicNativeAttempt(env, r, prep, sink, preludeBuf, targetMarker, setExtractor, setStreamCost)
 			return func(actx context.Context, d router.Decision, p providers.Client) error {
 				err := native(actx, d, p)
 				if err == nil || committed(preludeBuf) || !providers.IsUpstreamOutputConfigFormatRejection(err) {
@@ -2982,7 +3045,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 					preludeBuf.Discard()
 				}
 				logUpstreamBody(log, routeRes.SessionKey, target, feats, unstructuredPrep.Body)
-				return s.anthropicNativeAttempt(env, r, unstructuredPrep, sink, preludeBuf, targetMarker, setExtractor)(actx, d, p)
+				return s.anthropicNativeAttempt(env, r, unstructuredPrep, sink, preludeBuf, targetMarker, setExtractor, setStreamCost)(actx, d, p)
 			}, nil
 		case providers.FamilyOpenAICompat:
 			crossFormat = true
@@ -2991,6 +3054,7 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 			// OpenRouter, the body must be re-emitted with TargetProvider =
 			// openrouter so those gates fire.
 			return func(actx context.Context, d router.Decision, p providers.Client) error {
+				setStreamCost(d, true)
 				attemptOpts := targetOpts
 				attemptOpts.TargetProvider = d.Provider
 				respSummary = translate.ResponseSummary{}
@@ -3234,6 +3298,9 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 
 	in, out := extractor.Tokens()
 	cacheCreation, cacheRead := extractor.CacheTokens()
+	if responseBuffer != nil && proxyErr == nil {
+		setRouterCostHeaders(w.Header(), routerResponseCostFromPricing(actPricing, decision.Provider, in, out, cacheCreation, cacheRead))
+	}
 	upstreamBuilder := otel.NewAttrBuilder(40).
 		String("request_id", requestID).
 		String("external_id", externalID).
@@ -4372,6 +4439,16 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 		log.Error("Failed to parse OpenAI request", "err", parseErr)
 		return fmt.Errorf("parse request: %w", parseErr)
 	}
+	var responseBuffer *responseCostBuffer
+	if _, isResponsesWriter := w.(*translate.ResponsesWriter); !env.Stream() && !isResponsesWriter {
+		responseBuffer = newResponseCostBuffer(w)
+		w = responseBuffer
+		defer func() {
+			if flushErr := responseBuffer.FlushToClient(); flushErr != nil {
+				log.Error("Failed to flush buffered response", "err", flushErr)
+			}
+		}()
+	}
 
 	// Bind session-scoped logger before stripping router-only history; see the
 	// matching Anthropic block for why the raw client session shape owns pins.
@@ -4531,7 +4608,17 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	if !responsesPassthrough {
 		maxEligibleWindowOAI := s.maxEligibleContextWindow(baseExcludedOAI, enabledProviders, env.SignatureTokenSavings())
 		var compErrOAI error
-		compResOAI, compErrOAI = s.maybeCompact(ctx, env, turntype.DetectFromEnvelope(env, feats, subAgentHint), outputReserveOAI, maxEligibleWindowOAI, r.Header)
+		compResOAI, compErrOAI = s.maybeCompact(ctx, env, compactionInput{
+			TurnType:       turntype.DetectFromEnvelope(env, feats, subAgentHint),
+			OutputReserve:  outputReserveOAI,
+			MaxWindow:      maxEligibleWindowOAI,
+			RequestedModel: feats.Model,
+			ClientApp:      ClientIdentityFrom(ctx).ClientApp,
+			PreferredSummarizer: func() string {
+				return s.compactionPreferredSummarizer(ctx, sessionKey, roleForTier(catalog.TierFor(feats.Model)))
+			},
+			Headers: r.Header,
+		})
 		if compErrOAI != nil {
 			log.Warn("Compaction could not fit request to any eligible model",
 				"err", compErrOAI, "final_estimate", compResOAI.FinalEstimate, "max_window", maxEligibleWindowOAI, "requested_model", feats.Model)
@@ -5049,6 +5136,9 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 
 	in, out := extractor.Tokens()
 	cacheCreation, cacheRead := extractor.CacheTokens()
+	if !env.Stream() && proxyErr == nil {
+		setRouterCostHeaders(w.Header(), routerResponseCostFromPricing(actPricing, decision.Provider, in, out, cacheCreation, cacheRead))
+	}
 	openaiUpstreamBuilder := otel.NewAttrBuilder(40).
 		String("request_id", requestID).
 		String("external_id", externalID).

@@ -404,6 +404,7 @@ func main() {
 	handoverProviderName := providers.ProviderAiand
 	handoverModel := config.GetOr("ROUTER_HANDOVER_MODEL", "deepseek-ai/deepseek-v4-flash")
 	handoverTimeout := parseEnvDurationMs("ROUTER_HANDOVER_TIMEOUT_MS", proxy.DefaultHandoverTimeout)
+	compactionTimeout := parseEnvDurationMs("ROUTER_COMPACTION_TIMEOUT_MS", proxy.DefaultCompactionTimeout)
 	// Kept as the interface type: a typed-nil *ProviderSummarizer would defeat
 	// the orchestrator's `!= nil` check.
 	var summarizer handover.Summarizer
@@ -412,14 +413,15 @@ func main() {
 	// typed-nil concrete pointer would defeat it).
 	var compactionSz proxy.CompactionSummarizer
 	if client, ok := providerMap[handoverProviderName]; ok {
-		ps := proxy.NewProviderSummarizer(client, handoverProviderName, handoverModel, handoverTimeout)
+		ps := proxy.NewProviderSummarizer(client, handoverProviderName, handoverModel, handoverTimeout).WithCompactionTimeout(compactionTimeout)
 		summarizer = ps
 		compactionSz = ps
-		logger.Info("Handover summarizer wired", "provider", handoverProviderName, "model", handoverModel, "timeout_ms", handoverTimeout.Milliseconds())
+		logger.Info("Handover summarizer wired", "provider", handoverProviderName, "model", handoverModel, "timeout_ms", handoverTimeout.Milliseconds(), "compaction_timeout_ms", compactionTimeout.Milliseconds())
 	} else {
 		logger.Info("Handover summarizer disabled (provider not registered); switch turns will preserve full history instead", "requested_provider", handoverProviderName)
 	}
 	compactionPct := parseEnvFloat("ROUTER_COMPACTION_PCT", proxy.DefaultCompactionTriggerPct)
+	compactionModel := resolveCompactionModel(logger)
 
 	// Strategy-specific artifacts own selection membership; the legacy cluster bundle must not constrain HMM candidates.
 	routingTargets := catalog.RoutingTargetSet(availableProviders)
@@ -759,7 +761,8 @@ func main() {
 		WithPlanner(plannerCfg).
 		WithSummarizer(summarizer).
 		WithCompaction(compactionSz, compactionPct).
-		WithAvailableModels(proxyRoutableModels(routingTargets, availableProviders, hmmRouter != nil)).
+		WithCompactionModel(compactionModel).
+		WithCompactionHardPin(config.GetOr("ROUTER_HARD_PIN_MODEL", "") == "").
 		WithDefaultBaselineModel(resolveDefaultBaselineModel())
 	for _, spec := range configuredPolicySpecs {
 		proxySvc = proxySvc.WithPolicyStrategy(spec)
@@ -1423,6 +1426,22 @@ func resolveHardPinModel(available map[string]struct{}, logger *slog.Logger) (pr
 		return defaultHardPinProvider, defaultHardPinModel
 	}
 	return p, m
+}
+
+// resolveCompactionModel returns the mid-tier catalog model the compaction
+// cascade summarizes with (ROUTER_COMPACTION_MODEL). An override with no
+// catalog binding is rejected in favor of the default: the summarizer
+// dispatches against catalog models only.
+func resolveCompactionModel(logger *slog.Logger) string {
+	m := strings.TrimSpace(config.GetOr("ROUTER_COMPACTION_MODEL", proxy.DefaultCompactionModel))
+	if m == "" {
+		return proxy.DefaultCompactionModel
+	}
+	if _, ok := catalog.ByID(m); !ok {
+		logger.Warn("ROUTER_COMPACTION_MODEL has no catalog binding; using default", "model", m, "default_model", proxy.DefaultCompactionModel)
+		return proxy.DefaultCompactionModel
+	}
+	return m
 }
 
 // upstreamIDsForProvider maps public model ID -> upstream model ID for the

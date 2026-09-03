@@ -319,7 +319,7 @@ returned unchanged, so the dashboard shows the same data.
 | --------------------------------- | ---------------------------- | ------- |
 | `ROUTER_DEFAULT_STRATEGY`         | `cluster`                    | Strategy used when an installation has no persisted strategy. Change only after the policy rollout gate passes. |
 | `ROUTER_CLUSTER_VERSION`          | *(reads `artifacts/latest`)* | Pin a specific cluster artifact version (e.g. `v0.27`). |
-| `ROUTER_CLUSTER_EMBED_TIMEOUT_MS` | `3000`                       | Per-request ONNX embed timeout. Increase for slower hosts. |
+| `ROUTER_CLUSTER_EMBED_TIMEOUT_MS` | `3000`                       | Soft per-request ONNX embed budget (warn-only). Route keeps waiting on the same in-flight embed until overall = 2× this value (6000 ms default). Soft alone does not 503; only overall miss fails closed. Raise on slow shared-CPU hosts. |
 | `ROUTER_RESPONSE_HEADER_TIMEOUT_SECONDS` | `120`               | Upstream time-to-first-byte guard for provider HTTP clients. Streaming idle/output stalls use separate knobs. |
 | `ROUTER_EMBED_ONLY_USER_MESSAGE`  | `true`                       | Feed only user-role text to the embedder. Set `false` to embed the full concatenated turn. |
 | `ROUTER_STICKY_DECISION_TTL_MS`   | `0` (disabled)               | Reuse a routing decision per API key for this many ms. |
@@ -331,12 +331,15 @@ returned unchanged, so the dashboard shows the same data.
 | `ROUTER_SCOPED_SEARCH_REQUIREMENT` | `true` | Scopes the citations/search native-capability requirement to sessions that actually used a web-search tool this turn or recently, instead of every turn that merely advertises one. Advertised-only turns return to normal policy routing. |
 | `ROUTER_SEARCH_REQUIREMENT_DECAY_TURNS` | `3` | With `ROUTER_SCOPED_SEARCH_REQUIREMENT`, how many routed turns after the last actual search-tool use keep the requirement before it decays. |
 | `ROUTER_COMPACTION_PCT`           | `0.85`                       | Fraction of the largest eligible model's context window at which the proactive compaction cascade engages (clear old tool results → structured summary → trim). Range `(0,1]`; `0` disables compaction (over-window requests then 413). Mirrors Claude Code's ~0.85 auto-compact trigger. |
+| `ROUTER_COMPACTION_MODEL`         | `motif-technologies/motif-3` | Catalog model the compaction cascade summarizes with (and Claude Code's native compaction turn is pinned to) when the session has no warm pin to reuse. Must be a catalog model; the large-window `moonshotai/kimi-k3` is used automatically for histories that exceed its window. |
+| `ROUTER_COMPACTION_TIMEOUT_MS`    | `90000`                      | Hard timeout for one compaction summary call (separate from `ROUTER_HANDOVER_TIMEOUT_MS`; a mid-tier summary of a near-full window is slow). On timeout the cascade falls back to trimming. |
 | `ROUTER_ONNX_ASSETS_DIR`          | `/opt/router/assets`         | Directory containing `model.onnx` + `tokenizer.json`. |
 | `ROUTER_ONNX_LIBRARY_DIR`         | *(system default)*           | Path to `libonnxruntime` (e.g. `/opt/homebrew/lib` on Apple Silicon). |
 
-If the cluster scorer can't run (missing model, embed timeout, etc.), the
+If the cluster scorer can't run (missing model, overall embed timeout, etc.), the
 router returns HTTP 503 — it does *not* silently fall back to a default
-model. Failures are loud by design.
+model. Failures are loud by design. Soft `ROUTER_CLUSTER_EMBED_TIMEOUT_MS`
+overruns only warn while the single in-flight embed continues.
 
 ## Model exclusions
 
