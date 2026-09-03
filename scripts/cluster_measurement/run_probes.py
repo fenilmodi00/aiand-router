@@ -241,10 +241,12 @@ def run_tier(tier, api_key, spend, only_model=None):
                 # 12-14/30 truncations per model). Raise to 1000.
                 if tier == "routerarena" and (row.get("scoring") or {}).get("type") == "none":
                     cap = max(cap, 1000)
-                if model in REASONING_MODELS and tier == "hard":
+                if model in REASONING_MODELS and tier in ("hard", "medium"):
                     # Reasoning models burn the entire cap on invisible reasoning
-                    # tokens at hard-tier caps (root-measured: 6000 reasoning, 0
-                    # content); raise the cap so they can emit an answer.
+                    # tokens at issue-tier caps (root-measured: 6000 reasoning,
+                    # 0 content); raise the cap so they can emit an answer.
+                    # medium included: kimi-k2.7 (high-effort-only) hit 95%
+                    # truncation at the 1000 cap.
                     cap = max(cap, 6000)
                 text, finish, usage = call_with_retry(api_key, model, effort, row["prompt"], cap, tools=tools)
                 completion_tokens = usage.get("completion_tokens") if usage else None
