@@ -236,6 +236,11 @@ def run_tier(tier, api_key, spend, only_model=None):
                     # function objects are rejected with HTTP 400.
                     tools = [{"type": "function", "function": f} for f in tools]
                 cap = row["max_tokens"]
+                # Conversational probes at the issue's 200 cap starve every
+                # model (reasoning burns the cap before content; root-measured
+                # 12-14/30 truncations per model). Raise to 1000.
+                if tier == "routerarena" and (row.get("scoring") or {}).get("type") == "none":
+                    cap = max(cap, 1000)
                 if model in REASONING_MODELS and tier == "hard":
                     # Reasoning models burn the entire cap on invisible reasoning
                     # tokens at hard-tier caps (root-measured: 6000 reasoning, 0
