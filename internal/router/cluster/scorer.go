@@ -33,7 +33,23 @@ var ErrInvalidRoutingKnobs = errors.New("cluster: invalid routing knobs")
 type Config struct {
 	TopP           int
 	MaxPromptChars int
-	EmbedTimeout   time.Duration
+	// EmbedTimeout is the soft budget for one in-flight embed. Exceeding it
+	// logs a warning; Route keeps waiting on the same attempt until
+	// EmbedOverallTimeout (or 2× EmbedTimeout when unset).
+	EmbedTimeout time.Duration
+	// EmbedOverallTimeout is the hard ceiling for a single embed attempt.
+	// Zero means 2 × EmbedTimeout.
+	EmbedOverallTimeout time.Duration
+}
+
+// embedOverall returns the hard embed ceiling.
+// ponytail: 2× soft budget; ceiling = one uncancellable ONNX run. Upgrade:
+// ctx-aware hugot cancel, or a measured p99-driven env override.
+func (c Config) embedOverall() time.Duration {
+	if c.EmbedOverallTimeout > 0 {
+		return c.EmbedOverallTimeout
+	}
+	return 2 * c.EmbedTimeout
 }
 
 // DefaultConfig returns production defaults.
@@ -43,6 +59,7 @@ func DefaultConfig() Config {
 		MaxPromptChars: 1024,
 		// Shared-CPU deploys (build.io c=0.5–1) can exceed 1.5s p95 on Jina
 		// INT8; stress-test prod saw ~2.4s /v1/route latency at the old cap.
+		// EmbedOverallTimeout left 0 → embedOverall() uses 2 × EmbedTimeout (6s).
 		EmbedTimeout: 3000 * time.Millisecond,
 	}
 }
@@ -442,50 +459,72 @@ func (s *Scorer) Route(ctx context.Context, req router.Request) (router.Decision
 	text := TailTruncate(req.PromptText, s.cfg.MaxPromptChars)
 	truncated := len(req.PromptText) > s.cfg.MaxPromptChars
 
-	// EmbedTimeout budgets one attempt. A cold ONNX session (fresh deploy,
-	// idle container) routinely spends the first attempt on lazy graph
-	// optimization and misses the budget while warming the session — observed
-	// 2026-09-02 on the beta: every auto request 503'd at exactly EmbedTimeout
-	// while the embedder reached 20-80ms steady-state right after. One retry
-	// on a timeout converts that cold-start 503 into a slower first request;
-	// a persistently-slow embedder still fails closed below.
+	// Soft EmbedTimeout is a warn-only budget: hugot's RunPipeline ignores
+	// ctx, so canceling and retrying starts a second uncancellable ONNX run
+	// on the same CPU and both miss the budget (2026-09-03 prod: soft warn
+	// at ~3s, fail at ~6s). One goroutine, one channel; keep waiting past
+	// the soft budget up to EmbedOverallTimeout.
 	embedStart := time.Now()
-	// Race Embed against EmbedTimeout since hugot can't be canceled. Fresh
-	// channel per attempt: the abandoned first attempt still writes its late
-	// result, which must never be mistaken for the retry's result.
-	embedOnce := func() ([]float32, error) {
-		embedCtx, cancel := context.WithTimeout(ctx, s.cfg.EmbedTimeout)
-		defer cancel()
-		type embedResult struct {
-			vec []float32
-			err error
-		}
-		resCh := make(chan embedResult, 1)
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Error("Cluster scorer: embed panic; returning ErrClusterUnavailable", "panic", fmt.Sprint(r))
-					resCh <- embedResult{err: fmt.Errorf("embed panic: %v", r)}
-				}
-			}()
-			v, e := s.embed.Embed(embedCtx, text)
-			resCh <- embedResult{vec: v, err: e}
+	overall := s.cfg.embedOverall()
+	overallCtx, cancelOverall := context.WithTimeout(ctx, overall)
+	defer cancelOverall()
+
+	type embedResult struct {
+		vec []float32
+		err error
+	}
+	resCh := make(chan embedResult, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("Cluster scorer: embed panic; returning ErrClusterUnavailable", "panic", fmt.Sprint(r))
+				resCh <- embedResult{err: fmt.Errorf("embed panic: %v", r)}
+			}
 		}()
+		v, e := s.embed.Embed(overallCtx, text)
+		resCh <- embedResult{vec: v, err: e}
+	}()
+
+	soft := time.NewTimer(s.cfg.EmbedTimeout)
+	defer soft.Stop()
+
+	take := func() (embedResult, bool) {
 		select {
 		case r := <-resCh:
-			return r.vec, r.err
-		case <-embedCtx.Done():
-			return nil, embedCtx.Err()
+			return r, true
+		default:
+			return embedResult{}, false
 		}
 	}
-	vec, err := embedOnce()
-	if errors.Is(err, context.DeadlineExceeded) {
-		log.Warn("Cluster scorer: embed timed out on first attempt; retrying once",
+
+	var vec []float32
+	var err error
+	select {
+	case r := <-resCh:
+		vec, err = r.vec, r.err
+	case <-soft.C:
+		log.Warn("Cluster scorer: embed exceeded soft timeout; waiting on in-flight attempt",
 			"embed_ms", time.Since(embedStart).Milliseconds(),
 			"timeout_ms", s.cfg.EmbedTimeout.Milliseconds(),
+			"overall_ms", overall.Milliseconds(),
 			"requested_model", req.RequestedModel,
 		)
-		vec, err = embedOnce()
+		select {
+		case r := <-resCh:
+			vec, err = r.vec, r.err
+		case <-overallCtx.Done():
+			if r, ok := take(); ok {
+				vec, err = r.vec, r.err
+			} else {
+				err = overallCtx.Err()
+			}
+		}
+	case <-overallCtx.Done():
+		if r, ok := take(); ok {
+			vec, err = r.vec, r.err
+		} else {
+			err = overallCtx.Err()
+		}
 	}
 	embedMs := time.Since(embedStart).Milliseconds()
 	if err != nil {

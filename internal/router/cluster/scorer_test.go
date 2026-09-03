@@ -814,8 +814,8 @@ func TestScorer_DedupesDuplicateRegistryEntries(t *testing.T) {
 	assert.Equal(t, "claude-haiku-4-5", got.Model, "haiku should win at 0.6 vs opus 0.35; if opus wins, the scoring loop is double-counting its two registry entries")
 }
 
-// Per-request EmbedTimeout must cause ErrClusterUnavailable, not a
-// silent fallback.
+// Overall embed ceiling (2× EmbedTimeout when EmbedOverallTimeout unset)
+// must cause ErrClusterUnavailable, not a silent fallback.
 func TestScorer_ReturnsErrOnEmbedTimeout(t *testing.T) {
 	slow := &slowEmbedder{delay: 100 * time.Millisecond, vec: makeOpusVec()}
 	cfg := cfgForTest()
@@ -837,49 +837,55 @@ func TestScorer_DefaultEmbedTimeoutAccommodatesSlowEmbed(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// coldThenWarmEmbedder simulates a cold ONNX embedder: the first call
-// exceeds the embed budget (lazy graph-optimization / arena alloc), the
-// second completes fast because the first burned the warmup cost.
-type coldThenWarmEmbedder struct {
-	vec     []float32
-	coldFor time.Duration
-	calls   int
+// uncancellableEmbedder ignores ctx like onnxEmbedder: hugot's RunPipeline
+// has no cancellation, so a soft EmbedTimeout must not start a second run.
+type uncancellableEmbedder struct {
+	vec   []float32
+	delay time.Duration
+	calls int
 }
 
-func (c *coldThenWarmEmbedder) Embed(ctx context.Context, _ string) ([]float32, error) {
-	c.calls++
-	if c.calls == 1 {
-		select {
-		case <-time.After(c.coldFor):
-			return c.vec, nil
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}
-	return c.vec, nil
+func (u *uncancellableEmbedder) Embed(_ context.Context, _ string) ([]float32, error) {
+	u.calls++
+	time.Sleep(u.delay)
+	return u.vec, nil
 }
 
-// Regression (2026-09-02 beta incident): a freshly-deployed router 503s
-// every auto request because the first embed exceeds EmbedTimeout on a
-// cold ONNX session, and the timeout surfaced as ErrClusterUnavailable
-// with no second attempt. The first attempt warms the session (observed
-// 3000ms timeout -> 1375ms retry -> 20-80ms steady-state), so the scorer
-// must retry once within a fresh budget instead of failing the request.
-func TestScorer_RetriesEmbedOnceOnTimeout(t *testing.T) {
-	cold := &coldThenWarmEmbedder{vec: makeOpusVec(), coldFor: 10 * time.Second}
+func (u *uncancellableEmbedder) ID() string { return EmbedderJinaV2 }
+
+func (u *uncancellableEmbedder) Dim() int { return EmbedDim }
+
+// Regression (2026-09-03): parallel retry on EmbedTimeout starts a second
+// uncancellable ONNX run while the first still burns shared CPU; both miss
+// the soft budget and the request 503s. Soft timeout must keep waiting on
+// the single in-flight result (calls == 1), not launch another Embed.
+func TestScorer_WaitsSingleFlightPastSoftEmbedTimeout(t *testing.T) {
+	emb := &uncancellableEmbedder{vec: makeOpusVec(), delay: 80 * time.Millisecond}
 	cfg := cfgForTest()
 	cfg.EmbedTimeout = 50 * time.Millisecond
-	s := newScorerForTest(t, cold, cfg)
+	cfg.EmbedOverallTimeout = 200 * time.Millisecond
+	s := newScorerForTest(t, emb, cfg)
 
 	decision, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
-	require.NoError(t, err, "the cold first embed must be retried, not surfaced as 503")
+	require.NoError(t, err, "a late first embed within the overall ceiling must succeed")
 	assert.Equal(t, "claude-opus-4-7", decision.Model)
-	assert.Equal(t, 2, cold.calls, "exactly one retry: a persistently-cold embedder must still fail closed")
+	assert.Equal(t, 1, emb.calls, "must never start a second Embed while the first runs")
 }
 
-func (c *coldThenWarmEmbedder) ID() string { return EmbedderJinaV2 }
+// A persistently-slow uncancellable embed still fails closed at the overall
+// ceiling, and still without a parallel second attempt.
+func TestScorer_FailsClosedOnOverallEmbedTimeout(t *testing.T) {
+	emb := &uncancellableEmbedder{vec: makeOpusVec(), delay: 300 * time.Millisecond}
+	cfg := cfgForTest()
+	cfg.EmbedTimeout = 50 * time.Millisecond
+	cfg.EmbedOverallTimeout = 100 * time.Millisecond
+	s := newScorerForTest(t, emb, cfg)
 
-func (c *coldThenWarmEmbedder) Dim() int { return EmbedDim }
+	_, err := s.Route(context.Background(), router.Request{PromptText: strings.Repeat("x", 100)})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrClusterUnavailable))
+	assert.Equal(t, 1, emb.calls, "fail-closed must not launch a parallel retry")
+}
 
 type slowEmbedder struct {
 	vec   []float32
