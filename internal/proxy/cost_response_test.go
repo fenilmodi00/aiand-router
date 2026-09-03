@@ -1,15 +1,14 @@
 package proxy
 
 import (
+	"aiand/router/internal/providers"
+	"aiand/router/internal/router/catalog"
+	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"aiand/router/internal/providers"
-
-	"github.com/stretchr/testify/require"
-	"github.com/tidwall/gjson"
 )
 
 func TestStreamCostWriterAnnotatesFinalMessageDelta(t *testing.T) {
@@ -80,4 +79,17 @@ func TestResponseCostBufferDoesNotCommitEmptyResponse(t *testing.T) {
 	require.NoError(t, buffer.FlushToClient())
 	require.Empty(t, rec.Body.String())
 	require.False(t, rec.Flushed)
+}
+
+func TestRouterResponseCostFromPricingRoundsFloatNoise(t *testing.T) {
+	// 12 input + 9 output tokens yielded 0.000049500000000000004 before
+	// rounding.
+	pricing := catalog.Pricing{InputUSDPer1M: 0.75, OutputUSDPer1M: 4.5}
+	cost := routerResponseCostFromPricing(pricing, providers.ProviderAiand, 12, 9, 0, 0)
+
+	rec := httptest.NewRecorder()
+	setRouterCostHeaders(rec.Header(), cost)
+	require.Equal(t, "0.0000495", rec.Header().Get(HeaderRouterCostUSD))
+	require.Equal(t, "0.000009", rec.Header().Get(HeaderRouterCostInputUSD))
+	require.Equal(t, "0.0000405", rec.Header().Get(HeaderRouterCostOutputUSD))
 }
