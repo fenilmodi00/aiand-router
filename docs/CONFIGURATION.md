@@ -331,6 +331,8 @@ returned unchanged, so the dashboard shows the same data.
 | `ROUTER_SCOPED_SEARCH_REQUIREMENT` | `true` | Scopes the citations/search native-capability requirement to sessions that actually used a web-search tool this turn or recently, instead of every turn that merely advertises one. Advertised-only turns return to normal policy routing. |
 | `ROUTER_SEARCH_REQUIREMENT_DECAY_TURNS` | `3` | With `ROUTER_SCOPED_SEARCH_REQUIREMENT`, how many routed turns after the last actual search-tool use keep the requirement before it decays. |
 | `ROUTER_COMPACTION_PCT`           | `0.85`                       | Fraction of the largest eligible model's context window at which the proactive compaction cascade engages (clear old tool results → structured summary → trim). Range `(0,1]`; `0` disables compaction (over-window requests then 413). Mirrors Claude Code's ~0.85 auto-compact trigger. |
+| `ROUTER_COMPACTION_MODEL`         | `motif-technologies/motif-3` | Catalog model the compaction cascade summarizes with (and Claude Code's native compaction turn is pinned to) when the session has no warm pin to reuse. Must be a catalog model; the large-window `moonshotai/kimi-k3` is used automatically for histories that exceed its window. |
+| `ROUTER_COMPACTION_TIMEOUT_MS`    | `90000`                      | Hard timeout for one compaction summary call (separate from `ROUTER_HANDOVER_TIMEOUT_MS`; a mid-tier summary of a near-full window is slow). On timeout the cascade falls back to trimming. |
 | `ROUTER_ONNX_ASSETS_DIR`          | `/opt/router/assets`         | Directory containing `model.onnx` + `tokenizer.json`. |
 | `ROUTER_ONNX_LIBRARY_DIR`         | *(system default)*           | Path to `libonnxruntime` (e.g. `/opt/homebrew/lib` on Apple Silicon). |
 
