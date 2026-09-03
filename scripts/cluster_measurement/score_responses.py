@@ -82,7 +82,19 @@ def grade_ground_truth(scoring, text):
 
 # ---------------------------------------------------------------- LiveCodeBench
 
+CXX_TIMEOUT_SECS = 20
+
+
 def grade_public_tests(scoring, text):
+    """Run the candidate solution against the shipped stdin/stdout pairs.
+
+    AtCoder-style problems are language-agnostic: models answer in C++ or
+    Python. Detect the fenced language (default Python) and run each solution
+    in its own runtime — a C++ answer must not be executed as Python.
+    """
+    m = FENCE_RE.search(text)
+    lang = (m.group(0).split("\n", 1)[0][3:].strip().lower()
+            if m else "python")
     code = strip_fence(text)
     if not code.strip():
         return False, "empty"
@@ -90,13 +102,30 @@ def grade_public_tests(scoring, text):
     if not tests:
         return False, "no-tests"
     with tempfile.TemporaryDirectory() as td:
-        src = os.path.join(td, "sol.py")
-        with open(src, "w") as f:
-            f.write(code)
+        runner = None
+        if lang in ("cpp", "c++"):
+            src = os.path.join(td, "sol.cpp")
+            with open(src, "w") as f:
+                f.write(code)
+            exe = os.path.join(td, "sol")
+            try:
+                cc = subprocess.run(
+                    ["g++", "-O2", "-std=c++20", src, "-o", exe],
+                    capture_output=True, text=True, timeout=CXX_TIMEOUT_SECS)
+            except subprocess.TimeoutExpired:
+                return False, "compile-timeout"
+            if cc.returncode != 0:
+                return False, "compile-error"
+            runner = [exe]
+        else:
+            src = os.path.join(td, "sol.py")
+            with open(src, "w") as f:
+                f.write(code)
+            runner = [sys.executable, src]
         for t in tests:
             try:
                 out = subprocess.run(
-                    [sys.executable, src],
+                    runner,
                     input=t["input"], capture_output=True, text=True, timeout=15)
             except subprocess.TimeoutExpired:
                 return False, "timeout"
@@ -224,7 +253,23 @@ def grade_probe(rec):
     return True, None
 
 
+# Sources whose gold tests live in per-task repos we cannot execute
+# in-process (SWE-bench Pro, Terminal-Bench 2.0, Aider polyglot). Their
+# responses are EXCLUDED from rates: no honest judge-free grade exists for
+# them, and structural "did it emit a code block" grading measures prose
+# fluency, not correctness — the same miscalibration class as v0.78.
+# Recorded per-model as skipped counts so the bundle changelog can state
+# the measured denominators explicitly.
+UNGRADABLE_SOURCES = ("swe-bench-pro", "terminal-bench-2.0", "aider-polyglot")
+
+
+def is_ungradable(row):
+    return row.get("source", "").startswith(UNGRADABLE_SOURCES)
+
+
 def grade_response(row, rec):
+    if is_ungradable(row):
+        return None, "skipped-ungradable"
     if rec.get("error"):
         return False, rec["error"]
     src = row.get("source", "")
@@ -238,7 +283,6 @@ def grade_response(row, rec):
         return grade_bfcl(st, text)
     if src.startswith("local-probe"):
         return grade_probe(rec)
-    # swe-bench-pro, terminal-bench-2.0, aider-polyglot
     return grade_structural(st, text)
 
 
@@ -261,7 +305,7 @@ def score_tier(tier):
     results = {}
     for mf in models:
         path = f"{resp_dir}/{mf}.jsonl"
-        n = passed = errors = truncated = 0
+        n = passed = errors = truncated = skipped = 0
         out_tokens = []
         fails = {}
         with open(path) as f:
@@ -273,12 +317,15 @@ def score_tier(tier):
                 row = rows.get(rec["id"])
                 if row is None:
                     continue
-                n += 1
                 ct = rec["usage"]["completion_tokens"]
+                ok, why = grade_response(row, rec)
+                if ok is None:
+                    skipped += 1
+                    continue
+                n += 1
                 out_tokens.append(ct)
                 if ct >= rec["max_tokens"]:
                     truncated += 1
-                ok, why = grade_response(row, rec)
                 if ok:
                     passed += 1
                 else:
@@ -288,6 +335,7 @@ def score_tier(tier):
         results[mf] = {
             "rate": round(passed / n, 4) if n else 0.0,
             "n": n,
+            "skipped_ungradable": skipped,
             "mean_output_tokens": round(statistics.fmean(out_tokens), 1) if out_tokens else 0,
             "total_output_tokens": sum(out_tokens),
             "errors": errors,

@@ -51,6 +51,9 @@ INPUT_USD_PER_1K = {
 
 BUDGET_CAP_USD = 70.0
 WORKERS_PER_MODEL = 6
+# kimi-k2.7 (high-effort-only) hard/medium rows are slow individual 6000-cap
+# generations; its rerun batches use more workers to keep wall time sane.
+RERUN_WORKERS_PER_MODEL = 15
 TIMEOUT_SECS = 600
 MAX_RETRIES = 6
 
@@ -241,12 +244,13 @@ def run_tier(tier, api_key, spend, only_model=None):
                 # 12-14/30 truncations per model). Raise to 1000.
                 if tier == "routerarena" and (row.get("scoring") or {}).get("type") == "none":
                     cap = max(cap, 1000)
-                if model in REASONING_MODELS and tier in ("hard", "medium"):
-                    # Reasoning models burn the entire cap on invisible reasoning
-                    # tokens at issue-tier caps (root-measured: 6000 reasoning,
-                    # 0 content); raise the cap so they can emit an answer.
-                    # medium included: kimi-k2.7 (high-effort-only) hit 95%
-                    # truncation at the 1000 cap.
+                if tier in ("hard", "medium"):
+                    # Uniform measurement conditions: issue-tier caps starve
+                    # reasoning models entirely (6000 reasoning tokens, 0
+                    # content) and cut verbose models' code mid-fence. All
+                    # models, both coding tiers, run at 6000 so rates are
+                    # comparable (root-measured truncation at issue caps:
+                    # 63-100% per model).
                     cap = max(cap, 6000)
                 text, finish, usage = call_with_retry(api_key, model, effort, row["prompt"], cap, tools=tools)
                 completion_tokens = usage.get("completion_tokens") if usage else None
@@ -282,7 +286,10 @@ def run_tier(tier, api_key, spend, only_model=None):
             spent, proj = spend.record_and_consume(tier, model, rec["usage"]["prompt_tokens"], rec["usage"]["completion_tokens"])
             return rec, spent, proj
 
-        with ThreadPoolExecutor(max_workers=WORKERS_PER_MODEL) as pool:
+        workers = WORKERS_PER_MODEL
+        if only_model:
+            workers = RERUN_WORKERS_PER_MODEL
+        with ThreadPoolExecutor(max_workers=workers) as pool:
             for rec, spent, proj in pool.map(work, pending):
                 if rec["error"]:
                     print(f"  [{tier}] {model} {rec['id']}: ERROR {rec['error'][:120]}", flush=True)
@@ -310,6 +317,7 @@ def main():
     ap.add_argument("--tier", choices=TIERS)
     ap.add_argument("--model")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--workers", type=int, default=WORKERS_PER_MODEL)
     args = ap.parse_args()
     api_key = load_api_key()
 
