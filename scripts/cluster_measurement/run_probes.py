@@ -54,6 +54,9 @@ WORKERS_PER_MODEL = 6
 TIMEOUT_SECS = 600
 MAX_RETRIES = 6
 
+# Models with mandatory reasoning that burns the token cap before content
+REASONING_MODELS = {"zai-org/glm-5.3", "moonshotai/kimi-k2.7-code", "moonshotai/kimi-k3"}
+
 
 def load_api_key():
     with open(ENV_FILE) as f:
@@ -228,7 +231,13 @@ def run_tier(tier, api_key, spend, only_model=None):
         def work(row):
             try:
                 tools = (row.get("scoring") or {}).get("functions")
-                text, finish, usage = call_with_retry(api_key, model, effort, row["prompt"], row["max_tokens"], tools=tools)
+                cap = row["max_tokens"]
+                if model in REASONING_MODELS and tier == "hard":
+                    # Reasoning models burn the entire cap on invisible reasoning
+                    # tokens at hard-tier caps (root-measured: 6000 reasoning, 0
+                    # content); raise the cap so they can emit an answer.
+                    cap = max(cap, 6000)
+                text, finish, usage = call_with_retry(api_key, model, effort, row["prompt"], cap, tools=tools)
                 completion_tokens = usage.get("completion_tokens") if usage else None
                 if completion_tokens is None:
                     completion_tokens = max(1, math.ceil(len(text) / 4))
@@ -237,7 +246,7 @@ def run_tier(tier, api_key, spend, only_model=None):
                     "id": row["id"],
                     "model": model,
                     "prompt_id": row["id"],
-                    "max_tokens": row["max_tokens"],
+                    "max_tokens": cap,
                     "response_text": text,
                     "finish_reason": finish,
                     "usage": {
@@ -251,7 +260,7 @@ def run_tier(tier, api_key, spend, only_model=None):
                     "id": row["id"],
                     "model": model,
                     "prompt_id": row["id"],
-                    "max_tokens": row["max_tokens"],
+                    "max_tokens": cap,
                     "response_text": "",
                     "finish_reason": None,
                     "usage": {"prompt_tokens": 0, "completion_tokens": 0},
