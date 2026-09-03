@@ -1433,6 +1433,26 @@ func applyPolicyEffortToEmit(opts *translate.EmitOptions, effort string) {
 	opts.ForceReasoningEffort = opts.ForceEffort
 }
 
+// easyTierMinimalEffort reports whether a scored turn to the easy/cheap tier
+// should dispatch at minimal reasoning effort (GH #15). Trivial prompts the
+// cluster scorer routes to the cheap tier (flash/qwen) must not burn reasoning
+// tokens; both TierLow catalog models serve effort "none". Keyed on tier +
+// MainLoop so hardest-tier behavior and tool-result continuation turns stay
+// untouched; models without an effort menu never take a parameter. Pins are
+// excluded — a user-forced pin is the user's explicit choice, and loop/
+// struggle-escalation rescues keep the router's pinned effort — so this only
+// fires on the scorer's own easy-tier selection (the :level knob still wins
+// at the chain's first branch).
+func easyTierMinimalEffort(model string, tt turntype.TurnType, hardPinned bool, decisionReason string) bool {
+	if hardPinned || tt != turntype.MainLoop || isPinnedDecisionReason(decisionReason) {
+		return false
+	}
+	if catalog.TierFor(model) != catalog.TierLow {
+		return false
+	}
+	return len(catalog.ReasoningEffortsFor(model)) > 0
+}
+
 // WithSummarizer installs the cheap-model summarizer for handover on switch
 // turns. nil disables the summary step; the full prior history is passed
 // through unchanged.
@@ -2935,6 +2955,11 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		// clamps to the model's menu, so models without "none" get their
 		// nearest level and are unaffected where the menu has no low tier.
 		applyPolicyEffortToEmit(&opts, catalog.EffortNone)
+	} else if easyTierMinimalEffort(decision.Model, routeRes.TurnType, routeRes.HardPinned, decision.Reason) {
+		// Scored easy-tier MainLoop turns (GH #15): trivial prompts the
+		// scorer routes to flash/qwen burn reasoning tokens otherwise.
+		// Same clamp semantics as the hard-pin branch.
+		applyPolicyEffortToEmit(&opts, catalog.EffortNone)
 	} else if effort := forcedReasoningEffort(decision.Model, routeRes.EscalateEffort); effort != "" && (s.ResolveEffortEscalation(ctx) || strings.HasPrefix(decision.Model, "grok-")) {
 		opts.ForceReasoningEffort = effort
 	}
@@ -3204,6 +3229,12 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		// The turn now serves a model the session hasn't seen, so signed
 		// thinking blocks from the prior model must not be replayed verbatim.
 		siblingOpts.ModelSwitched = true
+		// The primary chain resolved effort for the failed model; reset both
+		// fields so the sibling chain re-resolves for the model actually
+		// served — otherwise a primary easy-tier "none" leaks onto a high-tier
+		// sibling, and vice versa.
+		siblingOpts.ForceEffort = ""
+		siblingOpts.ForceReasoningEffort = ""
 		if knobs := routingKnobsForRequest(ctx); knobs != nil && knobs.ForceEffort != "" {
 			siblingOpts.ForceEffort = knobs.ForceEffort
 			siblingOpts.ForceReasoningEffort = translate.ResolveForceEffort(siblingOpts.Capabilities, knobs.ForceEffort)
@@ -3212,6 +3243,10 @@ func (s *Service) ProxyMessages(ctx context.Context, body []byte, w http.Respons
 		} else if routeRes.HardPinned {
 			// See the primary dispatch site: hard-pinned turns are trivially
 			// short, so a sibling re-serve keeps minimal effort too.
+			applyPolicyEffortToEmit(&siblingOpts, catalog.EffortNone)
+		} else if easyTierMinimalEffort(siblingDecision.Model, routeRes.TurnType, routeRes.HardPinned, siblingDecision.Reason) {
+			// See the primary dispatch site: scored easy-tier MainLoop turns
+			// keep minimal effort on a sibling re-serve too.
 			applyPolicyEffortToEmit(&siblingOpts, catalog.EffortNone)
 		} else if effort := forcedReasoningEffort(siblingDecision.Model, routeRes.EscalateEffort); effort != "" && (s.ResolveEffortEscalation(ctx) || strings.HasPrefix(siblingDecision.Model, "grok-")) {
 			siblingOpts.ForceReasoningEffort = effort
@@ -4769,6 +4804,10 @@ func (s *Service) ProxyOpenAIChatCompletion(ctx context.Context, body []byte, w 
 	} else if routeRes.HardPinned {
 		// See the ProxyMessages dispatch site: hard-pinned turns are
 		// trivially short, so they run at minimal effort (ticket 07).
+		applyPolicyEffortToEmit(&opts, catalog.EffortNone)
+	} else if easyTierMinimalEffort(decision.Model, routeRes.TurnType, routeRes.HardPinned, decision.Reason) {
+		// See the ProxyMessages dispatch site: scored easy-tier MainLoop
+		// turns run at minimal effort too.
 		applyPolicyEffortToEmit(&opts, catalog.EffortNone)
 	} else if effort := forcedReasoningEffort(decision.Model, routeRes.EscalateEffort); effort != "" && (s.ResolveEffortEscalation(ctx) || strings.HasPrefix(decision.Model, "grok-")) {
 		opts.ForceReasoningEffort = effort

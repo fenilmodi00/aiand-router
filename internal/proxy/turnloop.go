@@ -396,6 +396,15 @@ func isUserForcedReason(reason string) bool {
 	return strings.HasPrefix(reason, translate.ReasonUserForceModel)
 }
 
+// isPinnedDecisionReason reports whether a decision came from an immutable
+// sticky session pin (user /force-model, loop escalation, struggle
+// escalation) rather than a fresh routing pass.
+func isPinnedDecisionReason(reason string) bool {
+	return isUserForcedReason(reason) ||
+		reason == translate.ReasonLoopEscalation ||
+		reason == translate.ReasonStruggleEscalation
+}
+
 // pinServesImages reports whether a pinned model can carry an image-bearing
 // turn. Forced pins outrank every automatic gate, so without this check the
 // pasted-screenshot turn dispatches to a text-only model and the upstream
