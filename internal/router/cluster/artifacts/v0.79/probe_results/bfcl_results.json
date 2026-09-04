@@ -1,0 +1,90 @@
+{
+  "deepseek-ai/deepseek-v4-flash": {
+    "errors": 22,
+    "fail_kinds": {
+      "arg-mismatch": 8,
+      "call-count": 9,
+      "no-tool-calls": 5
+    },
+    "mean_output_tokens": 122.0,
+    "n": 100,
+    "passed": 78,
+    "rate": 0.78,
+    "skipped_ungradable": 0,
+    "total_output_tokens": 12200,
+    "truncated_count": 2
+  },
+  "moonshotai/kimi-k2.7-code": {
+    "errors": 16,
+    "fail_kinds": {
+      "arg-mismatch": 10,
+      "call-count": 3,
+      "no-tool-calls": 3
+    },
+    "mean_output_tokens": 139.7,
+    "n": 100,
+    "passed": 84,
+    "rate": 0.84,
+    "skipped_ungradable": 0,
+    "total_output_tokens": 13970,
+    "truncated_count": 3
+  },
+  "moonshotai/kimi-k3": {
+    "errors": 19,
+    "fail_kinds": {
+      "arg-mismatch": 10,
+      "call-count": 5,
+      "no-tool-calls": 4
+    },
+    "mean_output_tokens": 147.4,
+    "n": 100,
+    "passed": 81,
+    "rate": 0.81,
+    "skipped_ungradable": 0,
+    "total_output_tokens": 14738,
+    "truncated_count": 0
+  },
+  "motif-technologies/motif-3": {
+    "errors": 63,
+    "fail_kinds": {
+      "arg-mismatch": 6,
+      "call-count": 11,
+      "no-tool-calls": 46
+    },
+    "mean_output_tokens": 126.9,
+    "n": 100,
+    "passed": 37,
+    "rate": 0.37,
+    "skipped_ungradable": 0,
+    "total_output_tokens": 12690,
+    "truncated_count": 4
+  },
+  "qwen/qwen3.8-27b": {
+    "errors": 12,
+    "fail_kinds": {
+      "arg-mismatch": 8,
+      "call-count": 4
+    },
+    "mean_output_tokens": 77.2,
+    "n": 100,
+    "passed": 88,
+    "rate": 0.88,
+    "skipped_ungradable": 0,
+    "total_output_tokens": 7721,
+    "truncated_count": 0
+  },
+  "zai-org/glm-5.3": {
+    "errors": 12,
+    "fail_kinds": {
+      "arg-mismatch": 9,
+      "call-count": 3
+    },
+    "mean_output_tokens": 41.2,
+    "n": 100,
+    "passed": 88,
+    "rate": 0.88,
+    "skipped_ungradable": 0,
+    "total_output_tokens": 4125,
+    "truncated_count": 0
+  }
+}
