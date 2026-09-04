@@ -101,8 +101,8 @@
     },
     "2": {
       "zai-org/glm-5.3": 0.45460670535526704,
-      "deepseek-ai/deepseek-v4-flash": 0.3022130076623818,
-      "moonshotai/kimi-k2.7-code": 0.499344142476947,
+      "deepseek-ai/deepseek-v4-flash": 0.499344142476947,
+      "moonshotai/kimi-k2.7-code": 0.4686667065518217,
       "moonshotai/kimi-k3": 0.484800138327133,
       "motif-technologies/motif-3": 0.45489019740967324,
       "qwen/qwen3.8-27b": 0.45067737126556867
@@ -157,24 +157,24 @@
     },
     "9": {
       "zai-org/glm-5.3": 0.442948448266643,
-      "deepseek-ai/deepseek-v4-flash": 0.30902570578979166,
-      "moonshotai/kimi-k2.7-code": 0.510600709263067,
+      "deepseek-ai/deepseek-v4-flash": 0.510600709263067,
+      "moonshotai/kimi-k2.7-code": 0.4566478848109721,
       "moonshotai/kimi-k3": 0.4957288439447252,
       "motif-technologies/motif-3": 0.4651446521071761,
       "qwen/qwen3.8-27b": 0.46083685747377634
     },
     "10": {
       "zai-org/glm-5.3": 0.3835316478880736,
-      "deepseek-ai/deepseek-v4-flash": 0.2956673584254875,
-      "moonshotai/kimi-k2.7-code": 0.48852881844296864,
+      "deepseek-ai/deepseek-v4-flash": 0.48852881844296864,
+      "moonshotai/kimi-k2.7-code": 0.3953934514310037,
       "moonshotai/kimi-k3": 0.4742998237310375,
       "motif-technologies/motif-3": 0.4450377039760627,
       "qwen/qwen3.8-27b": 0.4409161236802047
     },
     "11": {
       "zai-org/glm-5.3": 0.45756700729314703,
-      "deepseek-ai/deepseek-v4-flash": 0.3067885565101625,
-      "moonshotai/kimi-k2.7-code": 0.5069042853491191,
+      "deepseek-ai/deepseek-v4-flash": 0.5069042853491191,
+      "moonshotai/kimi-k2.7-code": 0.4717185642197392,
       "moonshotai/kimi-k3": 0.4921400828632224,
       "motif-technologies/motif-3": 0.46177730109433585,
       "qwen/qwen3.8-27b": 0.4575006921502827
@@ -205,8 +205,8 @@
     },
     "15": {
       "zai-org/glm-5.3": 0.43923181960777063,
-      "deepseek-ai/deepseek-v4-flash": 0.2991703496682147,
-      "moonshotai/kimi-k2.7-code": 0.49431678293772663,
+      "deepseek-ai/deepseek-v4-flash": 0.49431678293772663,
+      "moonshotai/kimi-k2.7-code": 0.4528163088739903,
       "moonshotai/kimi-k3": 0.4799192067356569,
       "motif-technologies/motif-3": 0.4503103968699063,
       "qwen/qwen3.8-27b": 0.4461399851448386

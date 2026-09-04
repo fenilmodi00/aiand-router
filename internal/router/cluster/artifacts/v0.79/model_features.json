@@ -1,6 +1,6 @@
 {
   "meta": {
-    "comment": "v0.79: 6-model ai&-only bundle on frozen geometry; per-model quality factors re-measured on 2026-09-03 from the hard/medium/bfcl/routerarena probe matrices; win set derived from the runtime blend (alpha*quality + (1-alpha)*(1-cost)), not raw quality argmax. rankings.json intentionally absent.",
+    "comment": "v0.79: 6-model ai&-only bundle on frozen geometry; per-model quality factors re-measured on 2026-09-04 from the hard/medium/bfcl/routerarena probe matrices; win set derived from the runtime blend (alpha*quality + (1-alpha)*(1-cost)), not raw quality argmax. rankings.json intentionally absent.",
     "k": 16,
     "n_models": 6,
     "roster_version": "v0.79",
@@ -52,20 +52,20 @@
       "psi_probe": [
         0.30359760347910103,
         0.31409837258778606,
-        0.3022130076623818,
+        0.499344142476947,
         0.30902438957909273,
         0.3079208403862044,
         0.3356814919204442,
         0.30902438957909273,
         0.2982156338669305,
         0.32653424140435783,
-        0.30902570578979166,
-        0.2956673584254875,
-        0.3067885565101625,
+        0.510600709263067,
+        0.48852881844296864,
+        0.5069042853491191,
         0.3143382933195261,
         0.3239688700121154,
         0.3327620266584887,
-        0.2991703496682147
+        0.49431678293772663
       ]
     },
     "moonshotai/kimi-k2.7-code": {
@@ -79,20 +79,20 @@
       "psi_probe": [
         0.5135690161967982,
         0.5142827572632308,
-        0.499344142476947,
+        0.4686667065518217,
         0.5157212215080405,
         0.4669313748002728,
         0.5201664885149659,
         0.5157212215080405,
         0.5271201504622243,
         0.5570114901101982,
-        0.510600709263067,
-        0.48852881844296864,
-        0.5069042853491191,
+        0.4566478848109721,
+        0.3953934514310037,
+        0.4717185642197392,
         0.534384122483406,
         0.49109170235002453,
         0.5119610137254571,
-        0.49431678293772663
+        0.4528163088739903
       ]
     },
     "moonshotai/kimi-k3": {

@@ -1,14 +1,13 @@
 {
   "deepseek-ai/deepseek-v4-flash": {
-    "errors": 66,
+    "errors": 59,
     "fail_kinds": {
-      "answer-mismatch": 59,
-      "finish=length": 7
+      "answer-mismatch": 59
     },
     "mean_output_tokens": 512.6,
     "n": 100,
-    "passed": 34,
-    "rate": 0.34,
+    "passed": 41,
+    "rate": 0.41,
     "skipped_ungradable": 0,
     "total_output_tokens": 51263,
     "truncated_count": 38
@@ -40,29 +39,27 @@
     "truncated_count": 24
   },
   "motif-technologies/motif-3": {
-    "errors": 59,
+    "errors": 58,
     "fail_kinds": {
-      "answer-mismatch": 58,
-      "finish=length": 1
+      "answer-mismatch": 58
     },
     "mean_output_tokens": 341.7,
     "n": 100,
-    "passed": 41,
-    "rate": 0.41,
+    "passed": 42,
+    "rate": 0.42,
     "skipped_ungradable": 0,
     "total_output_tokens": 34170,
     "truncated_count": 26
   },
   "qwen/qwen3.8-27b": {
-    "errors": 59,
+    "errors": 56,
     "fail_kinds": {
-      "answer-mismatch": 56,
-      "finish=length": 3
+      "answer-mismatch": 56
     },
     "mean_output_tokens": 561.8,
     "n": 100,
-    "passed": 41,
-    "rate": 0.41,
+    "passed": 44,
+    "rate": 0.44,
     "skipped_ungradable": 0,
     "total_output_tokens": 56179,
     "truncated_count": 49
@@ -71,7 +68,7 @@
     "errors": 49,
     "fail_kinds": {
       "answer-mismatch": 48,
-      "finish=length": 1
+      "empty": 1
     },
     "mean_output_tokens": 370.2,
     "n": 100,

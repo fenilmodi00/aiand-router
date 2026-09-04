@@ -125,12 +125,12 @@ func TestCandidateV079_LoadsAndWins(t *testing.T) {
 	require.Len(t, s.models, 6, "v0.79 roster is the 6 aiand models")
 
 	want := map[int]string{
-		0: "moonshotai/kimi-k3", 1: "zai-org/glm-5.3", 2: "moonshotai/kimi-k2.7-code",
+		0: "moonshotai/kimi-k3", 1: "zai-org/glm-5.3", 2: "deepseek-ai/deepseek-v4-flash",
 		3: "zai-org/glm-5.3", 4: "zai-org/glm-5.3", 5: "zai-org/glm-5.3",
 		6: "zai-org/glm-5.3", 7: "zai-org/glm-5.3", 8: "zai-org/glm-5.3",
-		9: "moonshotai/kimi-k2.7-code", 10: "moonshotai/kimi-k2.7-code", 11: "moonshotai/kimi-k2.7-code",
+		9: "deepseek-ai/deepseek-v4-flash", 10: "deepseek-ai/deepseek-v4-flash", 11: "deepseek-ai/deepseek-v4-flash",
 		12: "zai-org/glm-5.3", 13: "moonshotai/kimi-k3", 14: "zai-org/glm-5.3",
-		15: "moonshotai/kimi-k2.7-code",
+		15: "deepseek-ai/deepseek-v4-flash",
 	}
 	wins := map[string]int{}
 	for c := 0; c < s.centroids.K; c++ {
@@ -140,6 +140,6 @@ func TestCandidateV079_LoadsAndWins(t *testing.T) {
 	}
 	assert.Equal(t, 2, wins["moonshotai/kimi-k3"], "kimi-k3 wins the hard set")
 	assert.Equal(t, 9, wins["zai-org/glm-5.3"], "glm-5.3 wins the mid/knowledge set")
-	assert.Equal(t, 5, wins["moonshotai/kimi-k2.7-code"], "kimi-k2.7-code wins the conversational set")
+	assert.Equal(t, 5, wins["deepseek-ai/deepseek-v4-flash"], "flash wins the conversational set (cheapest of the perfect scorers)")
 	assert.Zero(t, wins["motif-technologies/motif-3"], "motif-3 wins no cluster in v0.79")
 }

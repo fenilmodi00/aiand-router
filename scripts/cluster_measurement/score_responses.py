@@ -244,12 +244,17 @@ def grade_structural(scoring, text):
 # ---------------------------------------------------------------- probes
 
 def grade_probe(rec):
+    """Conversational probes: grade content presence, not brevity.
+
+    finish=length at a measurement cap is verbosity, not failure — open-ended
+    chat prompts ("what do you think about remote work?") legitimately draw
+    long answers. Treating truncation as failure conflates model chattiness
+    with quality and hands the tier to whichever model happens to answer
+    tersely. A non-empty, error-free response passes."""
     if rec.get("error"):
         return False, rec["error"]
-    if rec.get("finish_reason") != "stop":
-        return False, f"finish={rec.get('finish_reason')}"
-    if rec["usage"]["completion_tokens"] > rec["max_tokens"]:
-        return False, "over-cap"
+    if not (rec.get("response_text") or "").strip():
+        return False, "empty"
     return True, None
 
 

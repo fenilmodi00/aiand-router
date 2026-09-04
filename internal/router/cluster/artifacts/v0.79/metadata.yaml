@@ -147,14 +147,14 @@ changelog: |-
   [0.40,1.15] for v0.77 tier leaders
   ['deepseek-ai/deepseek-v4-flash', 'moonshotai/kimi-k3', 'motif-technologies/motif-3', 'zai-org/glm-5.3'], [0.40,1.12]
   otherwise):
-    deepseek-ai/deepseek-v4-flash: hard=0.4000, medium=0.3200, bfcl=0.7800, routerarena=0.3400, combined=0.4480, scaled x0.7832, blend win set [], raw-argmax win set [].
+    deepseek-ai/deepseek-v4-flash: hard=0.4000, medium=0.3200, bfcl=0.7800, routerarena=0.4100, combined=0.4620, scaled x0.8077, blend win set [2, 9, 10, 11, 15], raw-argmax win set [2, 9, 10, 11, 15].
     zai-org/glm-5.3: hard=0.3714, medium=0.3600, bfcl=0.8800, routerarena=0.5100, combined=0.4986, scaled x0.8716, blend win set [1, 3, 4, 5, 6, 7, 8, 12, 14], raw-argmax win set [1, 3, 4, 5, 6, 7, 8, 12, 14].
-    moonshotai/kimi-k2.7-code: hard=0.1143, medium=0.1600, bfcl=0.8400, routerarena=0.4200, combined=0.3297, scaled x0.5764, blend win set [2, 9, 10, 11, 15], raw-argmax win set [2, 9, 10, 11, 15].
+    moonshotai/kimi-k2.7-code: hard=0.1143, medium=0.1600, bfcl=0.8400, routerarena=0.4200, combined=0.3297, scaled x0.5764, blend win set [], raw-argmax win set [].
     moonshotai/kimi-k3: hard=0.6000, medium=0.3600, bfcl=0.8100, routerarena=0.4900, combined=0.5720, scaled x1.0000, blend win set [0, 13], raw-argmax win set [0, 13].
-    motif-technologies/motif-3: hard=0.1714, medium=0.1600, bfcl=0.3700, routerarena=0.4100, combined=0.2566, scaled x0.4485, blend win set [], raw-argmax win set [].
-    qwen/qwen3.8-27b: hard=0.3143, medium=0.3200, bfcl=0.8800, routerarena=0.4100, combined=0.4477, scaled x0.7827, blend win set [], raw-argmax win set [].
+    motif-technologies/motif-3: hard=0.1714, medium=0.1600, bfcl=0.3700, routerarena=0.4200, combined=0.2586, scaled x0.4520, blend win set [], raw-argmax win set [].
+    qwen/qwen3.8-27b: hard=0.3143, medium=0.3200, bfcl=0.8800, routerarena=0.4400, combined=0.4537, scaled x0.7932, blend win set [], raw-argmax win set [].
   Blend-derived map differs from raw-argmax map on 0 cluster(s): .
-  test_dates=2026-09-03. Costs pinned from live catalog (input/output per 1k USD) for all 6 models:
+  test_dates=2026-09-04. Costs pinned from live catalog (input/output per 1k USD) for all 6 models:
     deepseek-ai/deepseek-v4-flash: in=0.00015, out=0.00025.
     zai-org/glm-5.3: in=0.001, out=0.004.
     moonshotai/kimi-k2.7-code: in=0.00075, out=0.0035.
